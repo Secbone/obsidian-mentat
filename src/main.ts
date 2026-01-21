@@ -6,7 +6,6 @@ import { OpenCodeIntegration } from './ai/opencode-integration';
 import { IndexManager } from './indexing/index-manager';
 import { ChatView, CHAT_VIEW_TYPE } from './features/chat/chat-view';
 import { RAGOrchestrator } from './features/chat/rag-orchestrator';
-import './features/chat/styles.css';
 
 export default class PersonalAgentPlugin extends Plugin {
   settings: PersonalAgentSettings;

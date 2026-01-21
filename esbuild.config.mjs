@@ -1,29 +1,14 @@
 import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
-import fs from "fs";
-import path from "path";
 
 const prod = process.argv[2] === "production";
 
-// Custom plugin to rename main.css to styles.css
-const cssRenamePlugin = {
-  name: 'css-rename',
-  setup(build) {
-    build.onEnd(() => {
-      const mainCssPath = path.join(process.cwd(), 'main.css');
-      const stylesCssPath = path.join(process.cwd(), 'styles.css');
-
-      if (fs.existsSync(mainCssPath)) {
-        fs.renameSync(mainCssPath, stylesCssPath);
-        console.log('✅ Renamed main.css to styles.css');
-      }
-    });
-  }
-};
-
 const context = await esbuild.context({
-  entryPoints: ["src/main.ts"],
+  entryPoints: {
+    main: "src/main.ts",
+    styles: "src/styles/index.css"
+  },
   bundle: true,
   external: [
     "obsidian",
@@ -46,9 +31,9 @@ const context = await esbuild.context({
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,
-  outfile: "main.js",
+  outdir: ".",
+  entryNames: "[name]",
   minify: prod,
-  plugins: [cssRenamePlugin],
   loader: {
     '.css': 'css'
   }
