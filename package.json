@@ -35,6 +35,8 @@
     "date-fns": "^3.0.0",
     "fuse.js": "^7.0.0",
     "ollama": "^0.5.0",
-    "openai": "^4.20.0"
+    "openai": "^4.20.0",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.1"
   }
 }

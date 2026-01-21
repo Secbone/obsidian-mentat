@@ -1,7 +1,7 @@
 // OpenAI-compatible API Provider
 // Supports OpenAI, DeepSeek, and any OpenAI-compatible endpoints
 
-import { AIProvider, GenerateOptions } from '../types';
+import { AIProvider, GenerateOptions, GenerateResponse, ChatMessage, ToolCall } from '../types';
 import OpenAI from 'openai';
 
 export interface OpenAIProviderConfig {
@@ -144,5 +144,200 @@ export class OpenAIProvider implements AIProvider {
       console.error('OpenAIProvider availability check failed:', error);
       return false;
     }
+  }
+
+  supportsSkills(): boolean {
+    return true;
+  }
+
+  /**
+   * Generate with skills support (non-streaming)
+   */
+  async generateWithSkills(
+    messages: ChatMessage[],
+    options?: GenerateOptions
+  ): Promise<GenerateResponse> {
+    try {
+      const openaiMessages = this.convertMessages(messages);
+
+      const requestParams: any = {
+        model: this.config.model,
+        messages: openaiMessages,
+        temperature: options?.temperature ?? this.config.temperature ?? 0.7,
+        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 2048
+      };
+
+      // Add tools if provided
+      if (options?.skills && options.skills.length > 0) {
+        requestParams.tools = options.skills.map((skill: any) => ({
+          type: 'function',
+          function: skill
+        }));
+
+        if (options.toolChoice) {
+          requestParams.tool_choice = options.toolChoice;
+        }
+      }
+
+      const response = await this.client.chat.completions.create(requestParams);
+
+      const choice = response.choices[0];
+      const message = choice.message;
+
+      // Extract tool calls if present
+      const toolCalls: ToolCall[] = [];
+      if (message.tool_calls) {
+        for (const tc of message.tool_calls) {
+          toolCalls.push({
+            id: tc.id,
+            name: tc.function.name,
+            arguments: tc.function.arguments
+          });
+        }
+      }
+
+      return {
+        content: message.content || '',
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        finishReason: choice.finish_reason as any
+      };
+    } catch (error) {
+      console.error('OpenAIProvider generateWithSkills error:', error);
+      throw new Error(`OpenAI API error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate with skills support (streaming)
+   */
+  async generateStreamWithSkills(
+    messages: ChatMessage[],
+    onChunk: (chunk: string) => void,
+    onToolCall?: (toolCall: ToolCall) => void,
+    options?: GenerateOptions
+  ): Promise<GenerateResponse> {
+    try {
+      const openaiMessages = this.convertMessages(messages);
+
+      const requestParams: any = {
+        model: this.config.model,
+        messages: openaiMessages,
+        temperature: options?.temperature ?? this.config.temperature ?? 0.7,
+        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 2048,
+        stream: true
+      };
+
+      // Add tools if provided
+      if (options?.skills && options.skills.length > 0) {
+        requestParams.tools = options.skills.map((skill: any) => ({
+          type: 'function',
+          function: skill
+        }));
+
+        if (options.toolChoice) {
+          requestParams.tool_choice = options.toolChoice;
+        }
+      }
+
+      const stream = await this.client.chat.completions.create(requestParams);
+
+      let fullContent = '';
+      const toolCalls: ToolCall[] = [];
+      const toolCallsInProgress: Map<number, { id: string; name: string; arguments: string }> = new Map();
+      let finishReason: string | undefined;
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta;
+
+        // Handle content
+        if (delta?.content) {
+          fullContent += delta.content;
+          onChunk(delta.content);
+        }
+
+        // Handle tool calls
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const index = tc.index;
+
+            if (!toolCallsInProgress.has(index)) {
+              toolCallsInProgress.set(index, {
+                id: tc.id || '',
+                name: tc.function?.name || '',
+                arguments: ''
+              });
+            }
+
+            const inProgress = toolCallsInProgress.get(index)!;
+
+            if (tc.id) inProgress.id = tc.id;
+            if (tc.function?.name) inProgress.name = tc.function.name;
+            if (tc.function?.arguments) inProgress.arguments += tc.function.arguments;
+          }
+        }
+
+        // Handle finish reason
+        if (chunk.choices[0]?.finish_reason) {
+          finishReason = chunk.choices[0].finish_reason;
+        }
+      }
+
+      // Convert in-progress tool calls to final format
+      for (const tc of toolCallsInProgress.values()) {
+        const toolCall: ToolCall = {
+          id: tc.id,
+          name: tc.name,
+          arguments: tc.arguments
+        };
+        toolCalls.push(toolCall);
+
+        // Notify about tool call
+        if (onToolCall) {
+          onToolCall(toolCall);
+        }
+      }
+
+      return {
+        content: fullContent,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        finishReason: finishReason as any
+      };
+    } catch (error) {
+      console.error('OpenAIProvider generateStreamWithSkills error:', error);
+      throw new Error(`OpenAI API error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Convert ChatMessage[] to OpenAI format
+   */
+  private convertMessages(messages: ChatMessage[]): OpenAI.Chat.ChatCompletionMessageParam[] {
+    return messages.map(msg => {
+      if (msg.role === 'tool') {
+        return {
+          role: 'tool',
+          content: msg.content,
+          tool_call_id: msg.tool_call_id!
+        };
+      } else if (msg.role === 'assistant' && msg.tool_calls) {
+        return {
+          role: 'assistant',
+          content: msg.content || null,
+          tool_calls: msg.tool_calls.map(tc => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: {
+              name: tc.name,
+              arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments)
+            }
+          }))
+        };
+      } else {
+        return {
+          role: msg.role as 'system' | 'user' | 'assistant',
+          content: msg.content
+        };
+      }
+    });
   }
 }

@@ -224,6 +224,18 @@ export class SettingsTab extends PluginSettingTab {
           this.plugin.settings.reviewIntervalDays = value;
           await this.plugin.saveSettings();
         }));
+
+    new Setting(containerEl)
+      .setName('Agent Max Turns')
+      .setDesc('Maximum iterations for skill execution loop (1-20)')
+      .addSlider(slider => slider
+        .setLimits(1, 20, 1)
+        .setValue(this.plugin.settings.maxTurns)
+        .setDynamicTooltip()
+        .onChange(async (value) => {
+          this.plugin.settings.maxTurns = value;
+          await this.plugin.saveSettings();
+        }));
   }
 
   showProviderEditModal(provider: AIProviderConfig | null, index: number): void {

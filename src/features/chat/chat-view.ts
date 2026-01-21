@@ -37,7 +37,8 @@ export class ChatView extends ItemView {
     this.plugin = plugin;
     this.chatManager = new ChatManager(plugin);
     this.messageRenderer = new MessageRenderer();
-    this.ragOrchestrator = new RAGOrchestrator(plugin);
+    // Use shared RAGOrchestrator instance from plugin
+    this.ragOrchestrator = plugin.ragOrchestrator;
   }
 
   getViewType(): string {
@@ -270,78 +271,22 @@ export class ChatView extends ItemView {
 
       let fullResponse = '';
 
-      if (selectedFiles.length > 0) {
-        // Check if any documents are indexed
-        const stats = this.plugin.indexManager.getStats();
-        if (stats.totalChunks === 0) {
-          // Display friendly help message
-          const helpMessage = `⚠️ **尚未索引任何文档**
-
-您选择了 ${selectedFiles.length} 个文档，但系统中还没有索引数据。
-
-**快速开始**：
-1. 按 Ctrl/Cmd+P 打开命令面板
-2. 搜索并执行 "Index all documents for RAG"
-3. 等待索引完成（会显示进度）
-4. 重新发送您的问题
-
-**提示**：首次使用需要为所有文档建立索引，这可能需要几分钟时间。`;
-
+      // Always use RAG orchestrator for skill support
+      // If no files selected, RAG will handle it gracefully
+      await this.ragOrchestrator.query(
+        userMessage,
+        selectedFiles,
+        contextMessages,
+        (chunk: string) => {
+          fullResponse += chunk;
           this.currentStreamingElement!.innerHTML =
-            this.messageRenderer.render(helpMessage);
-
-          await this.chatManager.addMessage('assistant', helpMessage);
-
-          // Re-enable input
-          this.isStreaming = false;
-          this.sendButton.disabled = false;
-          this.inputArea.disabled = false;
-          this.currentStreamingElement?.removeClass('streaming');
-          this.currentStreamingElement = null;
-          this.inputArea.focus();
-          return;
+            this.messageRenderer.render(fullResponse);
+          this.scrollToBottom();
+        },
+        {
+          enableSkills: this.plugin.settings.skillsEnabled
         }
-
-        // RAG mode - use selected documents with conversation history
-        await this.ragOrchestrator.query(
-          userMessage,
-          selectedFiles,
-          contextMessages,
-          (chunk: string) => {
-            fullResponse += chunk;
-            this.currentStreamingElement!.innerHTML =
-              this.messageRenderer.render(fullResponse);
-            this.scrollToBottom();
-          }
-        );
-      } else {
-        // Normal chat mode with conversation history
-        const provider = await this.plugin.aiRouter.getProvider(TaskType.CHAT);
-
-        // Build system prompt with conversation history
-        let systemPrompt = 'You are a helpful AI assistant.';
-        if (contextMessages.length > 0) {
-          systemPrompt += '\n\nConversation History:\n';
-          for (const msg of contextMessages) {
-            systemPrompt += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n\n`;
-          }
-        }
-
-        await provider.generateStream(
-          userMessage,
-          (chunk: string) => {
-            fullResponse += chunk;
-            this.currentStreamingElement!.innerHTML =
-              this.messageRenderer.render(fullResponse);
-            this.scrollToBottom();
-          },
-          {
-            temperature: 0.7,
-            maxTokens: 2048,
-            systemPrompt
-          }
-        );
-      }
+      );
 
       // Save assistant response to history
       await this.chatManager.addMessage('assistant', fullResponse);

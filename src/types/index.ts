@@ -11,12 +11,35 @@ export enum TaskType {
   REVIEW = 'review'
 }
 
+// Skill/Tool Call types
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: string | Record<string, any>;
+}
+
+export interface SkillCallMessage {
+  role: 'tool' | 'function';
+  name: string;
+  content: string;
+  tool_call_id?: string;
+}
+
 // AI Provider interfaces
 export interface GenerateOptions {
   maxTokens?: number;
   temperature?: number;
   systemPrompt?: string;
   stopSequences?: string[];
+  // Skill support
+  skills?: any[]; // OpenAI functions or Anthropic tools
+  toolChoice?: 'auto' | 'none' | string;
+}
+
+export interface GenerateResponse {
+  content: string;
+  toolCalls?: ToolCall[];
+  finishReason?: 'stop' | 'tool_calls' | 'length';
 }
 
 export interface AIProvider {
@@ -32,15 +55,28 @@ export interface AIProvider {
     options?: GenerateOptions
   ): Promise<void>;
 
+  // Skill-enhanced methods
+  generateWithSkills?(
+    messages: ChatMessage[],
+    options?: GenerateOptions
+  ): Promise<GenerateResponse>;
+
+  generateStreamWithSkills?(
+    messages: ChatMessage[],
+    onChunk: (chunk: string) => void,
+    onToolCall?: (toolCall: ToolCall) => void,
+    options?: GenerateOptions
+  ): Promise<GenerateResponse>;
+
   // Embedding methods
-  generateEmbedding(text: string): Promise<{
-    embedding: number[];
-    tokens?: number;
-  }>;
+  generateEmbedding(text: string): Promise<{ embedding: number[]; tokens?: number }>;
   embed(text: string): Promise<number[]>;
 
   // Health check
   isAvailable(): Promise<boolean>;
+
+  // Capabilities
+  supportsSkills?(): boolean;
 }
 
 // Classification results
@@ -63,10 +99,13 @@ export interface LinkSuggestion {
 
 // Chat system
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'function';
   content: string;
   timestamp: number;
   sources?: TFile[];
+  name?: string; // For tool/function messages
+  tool_call_id?: string; // For tool response messages
+  tool_calls?: ToolCall[]; // For assistant messages with tool calls
 }
 
 export interface ChatContext {
@@ -116,7 +155,7 @@ export interface FileIndex {
     tags: string[];
     links: string[];
     headings: string[];
-    frontmatter: Record<string, unknown>;
+    frontmatter: Record<string, any>;
   };
   stats: {
     wordCount: number;

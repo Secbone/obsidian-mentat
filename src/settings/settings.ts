@@ -1,4 +1,6 @@
 // Personal Agent Settings Interface
+import { MCPServerConfig } from '../skills/mcp/mcp-types';
+
 export interface PersonalAgentSettings {
   // AI Providers Configuration
   aiProviders: AIProviderConfig[];
@@ -24,6 +26,17 @@ export interface PersonalAgentSettings {
   chatEnabled: boolean;
   graphEnabled: boolean;
   reviewEnabled: boolean;
+
+  // Skill System Configuration
+  skillsEnabled: boolean;
+  requireSkillConfirmation: boolean;
+  allowedSkills: string[]; // List of allowed skill names (empty = all allowed)
+  maxTurns: number; // Maximum agent loop iterations for skill execution
+
+  // MCP Configuration
+  mcpServers: MCPServerConfig[];
+  mcpTimeout: number;
+  mcpRetryAttempts: number;
 
   // Performance Configuration
   indexingBatchSize: number;  // Default 50
@@ -79,6 +92,15 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   chatEnabled: true,
   graphEnabled: true,
   reviewEnabled: true,
+
+  skillsEnabled: true,
+  requireSkillConfirmation: false,
+  allowedSkills: [],
+  maxTurns: 5,
+
+  mcpServers: [],
+  mcpTimeout: 30000,
+  mcpRetryAttempts: 3,
 
   indexingBatchSize: 50,
   cacheExpiryDays: 7,

@@ -1,6 +1,6 @@
 // Anthropic Provider - Native Claude API support
 
-import { AIProvider, GenerateOptions } from '../types';
+import { AIProvider, GenerateOptions, GenerateResponse, ChatMessage, ToolCall } from '../types';
 import Anthropic from '@anthropic-ai/sdk';
 
 export interface AnthropicProviderConfig {
@@ -113,5 +113,216 @@ export class AnthropicProvider implements AIProvider {
       console.error('AnthropicProvider availability check failed:', error);
       return false;
     }
+  }
+
+  supportsSkills(): boolean {
+    return true;
+  }
+
+  /**
+   * Generate with skills support (non-streaming)
+   */
+  async generateWithSkills(
+    messages: ChatMessage[],
+    options?: GenerateOptions
+  ): Promise<GenerateResponse> {
+    try {
+      const anthropicMessages = this.convertMessages(messages);
+
+      const requestParams: any = {
+        model: this.config.model,
+        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 4096,
+        temperature: options?.temperature ?? this.config.temperature ?? 1.0,
+        messages: anthropicMessages
+      };
+
+      if (options?.systemPrompt) {
+        requestParams.system = options.systemPrompt;
+      }
+
+      // Add tools if provided
+      if (options?.skills && options.skills.length > 0) {
+        requestParams.tools = options.skills;
+
+        if (options.toolChoice && options.toolChoice !== 'auto') {
+          requestParams.tool_choice = { type: options.toolChoice };
+        }
+      }
+
+      const response = await this.client.messages.create(requestParams);
+
+      // Extract content and tool calls
+      let content = '';
+      const toolCalls: ToolCall[] = [];
+
+      for (const block of response.content) {
+        if (block.type === 'text') {
+          content += block.text;
+        } else if (block.type === 'tool_use') {
+          toolCalls.push({
+            id: block.id,
+            name: block.name,
+            arguments: block.input
+          });
+        }
+      }
+
+      return {
+        content,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        finishReason: response.stop_reason as any
+      };
+    } catch (error) {
+      console.error('AnthropicProvider generateWithSkills error:', error);
+      throw new Error(`Anthropic API error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate with skills support (streaming)
+   */
+  async generateStreamWithSkills(
+    messages: ChatMessage[],
+    onChunk: (chunk: string) => void,
+    onToolCall?: (toolCall: ToolCall) => void,
+    options?: GenerateOptions
+  ): Promise<GenerateResponse> {
+    try {
+      const anthropicMessages = this.convertMessages(messages);
+
+      const requestParams: any = {
+        model: this.config.model,
+        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 4096,
+        temperature: options?.temperature ?? this.config.temperature ?? 1.0,
+        messages: anthropicMessages
+      };
+
+      if (options?.systemPrompt) {
+        requestParams.system = options.systemPrompt;
+      }
+
+      // Add tools if provided
+      if (options?.skills && options.skills.length > 0) {
+        requestParams.tools = options.skills;
+
+        if (options.toolChoice && options.toolChoice !== 'auto') {
+          requestParams.tool_choice = { type: options.toolChoice };
+        }
+      }
+
+      const stream = await this.client.messages.stream(requestParams);
+
+      let fullContent = '';
+      const toolCalls: ToolCall[] = [];
+      const toolCallsInProgress: Map<number, { id: string; name: string; input: string }> = new Map();
+      let finishReason: string | undefined;
+
+      for await (const event of stream) {
+        if (event.type === 'content_block_start') {
+          if (event.content_block.type === 'tool_use') {
+            toolCallsInProgress.set(event.index, {
+              id: event.content_block.id,
+              name: event.content_block.name,
+              input: ''
+            });
+          }
+        } else if (event.type === 'content_block_delta') {
+          if (event.delta.type === 'text_delta') {
+            fullContent += event.delta.text;
+            onChunk(event.delta.text);
+          } else if (event.delta.type === 'input_json_delta') {
+            const inProgress = toolCallsInProgress.get(event.index);
+            if (inProgress) {
+              inProgress.input += event.delta.partial_json;
+            }
+          }
+        } else if (event.type === 'message_stop') {
+          finishReason = 'stop';
+        }
+      }
+
+      // Convert in-progress tool calls to final format
+      for (const tc of toolCallsInProgress.values()) {
+        let parsedInput: any;
+        try {
+          parsedInput = JSON.parse(tc.input);
+        } catch {
+          parsedInput = tc.input;
+        }
+
+        const toolCall: ToolCall = {
+          id: tc.id,
+          name: tc.name,
+          arguments: parsedInput
+        };
+        toolCalls.push(toolCall);
+
+        // Notify about tool call
+        if (onToolCall) {
+          onToolCall(toolCall);
+        }
+      }
+
+      return {
+        content: fullContent,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        finishReason: finishReason as any
+      };
+    } catch (error) {
+      console.error('AnthropicProvider generateStreamWithSkills error:', error);
+      throw new Error(`Anthropic API error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Convert ChatMessage[] to Anthropic format
+   */
+  private convertMessages(messages: ChatMessage[]): Anthropic.MessageParam[] {
+    return messages
+      .filter(msg => msg.role !== 'system') // System messages handled separately
+      .map(msg => {
+        if (msg.role === 'tool') {
+          return {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result' as const,
+                tool_use_id: msg.tool_call_id!,
+                content: msg.content
+              }
+            ]
+          };
+        } else if (msg.role === 'assistant' && msg.tool_calls) {
+          const content: any[] = [];
+
+          // Add text content if present
+          if (msg.content) {
+            content.push({
+              type: 'text',
+              text: msg.content
+            });
+          }
+
+          // Add tool use blocks
+          for (const tc of msg.tool_calls) {
+            content.push({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.name,
+              input: typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments
+            });
+          }
+
+          return {
+            role: 'assistant' as const,
+            content
+          };
+        } else {
+          return {
+            role: msg.role as 'user' | 'assistant',
+            content: msg.content
+          };
+        }
+      });
   }
 }

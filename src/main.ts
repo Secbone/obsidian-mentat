@@ -5,6 +5,7 @@ import { AIRouter } from './ai/ai-router';
 import { OpenCodeIntegration } from './ai/opencode-integration';
 import { IndexManager } from './indexing/index-manager';
 import { ChatView, CHAT_VIEW_TYPE } from './features/chat/chat-view';
+import { RAGOrchestrator } from './features/chat/rag-orchestrator';
 import './features/chat/styles.css';
 
 export default class PersonalAgentPlugin extends Plugin {
@@ -12,6 +13,7 @@ export default class PersonalAgentPlugin extends Plugin {
   aiRouter: AIRouter;
   openCodeIntegration: OpenCodeIntegration;
   indexManager: IndexManager;
+  ragOrchestrator: RAGOrchestrator;
 
   async onload() {
     console.log('Loading Personal Agent plugin');
@@ -25,6 +27,10 @@ export default class PersonalAgentPlugin extends Plugin {
     // Initialize Index Manager
     this.indexManager = new IndexManager(this);
     await this.indexManager.initialize();
+
+    // Initialize RAG Orchestrator
+    this.ragOrchestrator = new RAGOrchestrator(this);
+    await this.ragOrchestrator.initialize();
 
     // Initialize integrations
     this.openCodeIntegration = new OpenCodeIntegration(this);
@@ -243,6 +249,25 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
         }
 
         new Notice(message);
+      }
+    });
+
+    // Reload skills command
+    this.addCommand({
+      id: 'reload-skills',
+      name: 'Reload all skills',
+      callback: async () => {
+        const notice = new Notice('Reloading all skills...', 0);
+
+        try {
+          await this.ragOrchestrator.reloadSkills();
+          notice.hide();
+          new Notice('✓ All skills reloaded');
+        } catch (error) {
+          notice.hide();
+          new Notice(`✗ Failed to reload skills: ${error.message}`);
+          console.error('Skill reload error:', error);
+        }
       }
     });
   }
