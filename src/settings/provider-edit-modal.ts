@@ -47,19 +47,15 @@ export class ProviderEditModal extends Modal {
 
     // Title
     const title = contentEl.createEl('h2', {
-      text: this.provider ? '编辑 AI Provider' : '添加 AI Provider'
+      text: this.provider ? '编辑 AI Provider' : '添加 AI Provider',
+      cls: 'modal-title'
     });
-    title.style.marginBottom = '20px';
 
     // Create all form fields
     this.createFormFields();
 
     // Button container
     const buttonContainer = contentEl.createDiv('modal-button-container');
-    buttonContainer.style.marginTop = '24px';
-    buttonContainer.style.display = 'flex';
-    buttonContainer.style.justifyContent = 'flex-end';
-    buttonContainer.style.gap = '8px';
 
     // Cancel button
     const cancelButton = buttonContainer.createEl('button', { text: '取消' });
@@ -122,7 +118,7 @@ export class ProviderEditModal extends Modal {
     contentEl.createEl('h3', {
       text: '连接设置',
       cls: 'setting-item-heading'
-    }).style.marginTop = '16px';
+    });
 
     // API Key (conditional)
     const apiKeyContainer = contentEl.createDiv();
@@ -157,7 +153,7 @@ export class ProviderEditModal extends Modal {
     contentEl.createEl('h3', {
       text: '模型配置',
       cls: 'setting-item-heading'
-    }).style.marginTop = '16px';
+    });
 
     // Model
     new Setting(contentEl)
@@ -187,7 +183,7 @@ export class ProviderEditModal extends Modal {
     contentEl.createEl('h3', {
       text: '高级选项',
       cls: 'setting-item-heading'
-    }).style.marginTop = '16px';
+    });
 
     // Temperature
     new Setting(contentEl)

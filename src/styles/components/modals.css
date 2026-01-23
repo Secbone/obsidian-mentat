@@ -1,0 +1,17 @@
+/* Modal Styles */
+
+/* ===== PROVIDER EDIT MODAL ===== */
+.provider-edit-modal .modal-title {
+  margin-bottom: 20px;
+}
+
+.provider-edit-modal .setting-item-heading {
+  margin-top: 16px;
+}
+
+.modal-button-container {
+  margin-top: 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
