@@ -6,13 +6,26 @@ import { TFile } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 /**
+ * Skill metadata
+ */
+export const metadata = {
+  name: 'update_frontmatter',
+  description: 'Update document frontmatter properties with merge or replace mode',
+  version: '1.0.0',
+  tags: ['metadata', 'frontmatter', 'update'],
+  requiresConfirmation: true,
+  performance: 'fast',
+  category: 'file-operations'
+};
+
+/**
  * Input schema for update frontmatter
  */
 export const schema = z.object({
   path: z.string().describe('File path to update'),
-  updates: z.record(z.any()).describe('Frontmatter fields to add or update'),
+  updates: z.record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string())])).describe('Frontmatter fields to add or update'),
   remove: z.array(z.string()).optional().describe('Frontmatter fields to remove'),
-  merge: z.boolean().default(true).describe('Merge with existing frontmatter (if false, replaces entirely)')
+  merge: z.boolean().default(true).describe('Merge with existing frontmatter (default: true); if false, replaces entirely')
 });
 
 export type Input = z.infer<typeof schema>;

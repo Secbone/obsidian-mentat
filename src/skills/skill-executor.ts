@@ -14,6 +14,7 @@ import {
   isDocumentationSkill,
   isExecutableSkill
 } from './skill-types';
+import { ConfirmationModal, ConfirmationModalOptions } from '../ui/components/confirmation-modal';
 
 /**
  * Skill execution options
@@ -100,6 +101,21 @@ export class SkillExecutor {
 
       // Validate input
       const validatedInput = this.validateInput(skill, parameters);
+
+      // Check if confirmation is required
+      if (skill.metadata?.requiresConfirmation && !options.skipConfirmation) {
+        const confirmed = await this.requestConfirmation(skill, validatedInput);
+        if (!confirmed) {
+          const result: SkillResult = {
+            success: false,
+            error: 'Operation cancelled by user',
+            metadata: { executionTime: Date.now() - startTime }
+          };
+          skillCall.result = result;
+          skillCall.status = 'error';
+          return result;
+        }
+      }
 
       // Check if dry run
       if (options.dryRun) {
@@ -355,5 +371,42 @@ export class SkillExecutor {
    */
   updateContext(updates: Partial): void {
     Object.assign(this.context, updates);
+  }
+
+  /**
+   * Request user confirmation for a skill execution
+   */
+  private async requestConfirmation(
+    skill: SkillDefinition,
+    parameters: Record<string, any>
+  ): Promise<boolean> {
+    // Determine operation type from skill name
+    const operationType = this.getOperationType(skill.name);
+
+    // Show confirmation modal
+    return new Promise<boolean>((resolve) => {
+      const modal = new ConfirmationModal(
+        this.context.plugin.app,
+        {
+          skillName: skill.name,
+          description: skill.description,
+          parameters,
+          operationType
+        },
+        (confirmed) => resolve(confirmed)
+      );
+      modal.open();
+    });
+  }
+
+  /**
+   * Determine operation type from skill name
+   */
+  private getOperationType(skillName: string): 'create' | 'update' | 'delete' | 'write' {
+    const lowerName = skillName.toLowerCase();
+    if (lowerName.includes('create')) return 'create';
+    if (lowerName.includes('update')) return 'update';
+    if (lowerName.includes('delete')) return 'delete';
+    return 'write';
   }
 }

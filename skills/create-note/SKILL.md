@@ -1,6 +1,6 @@
 ---
-name: create_document
-description: Create a new document. Supports templates and frontmatter.
+name: create_note
+description: Create new document with optional template and frontmatter
 metadata:
   version: "1.0.0"
   author: personal-agent
@@ -8,22 +8,25 @@ metadata:
   executable: true
   implementation: scripts/index.ts
   requiresConfirmation: true
+  performance: fast
+  category: file-operations
 ---
 
 # Create Document Skill
 
 ## Description
 
-Creates new documents in the Obsidian vault with:
-- Custom file paths and folder creation
-- Initial content
-- Frontmatter metadata
-- Optional template support
-- Automatic reindexing for semantic search
+Create new document with optional content, frontmatter metadata, and automatic folder creation.
 
-## Usage
+## When to use
+- Creating new notes, daily notes, or journal entries
+- Creating project files with structure and metadata
+- Creating documents from templates
 
-Use this skill to create new notes, daily notes, project files, or any other documents. The skill will automatically create parent folders if they don't exist.
+## When NOT to use
+- Modifying existing documents (use update-note instead)
+- Appending to existing documents (use update-note instead)
+- When file already exists (check with query-notes first)
 
 **IMPORTANT**: This skill requires user confirmation before execution.
 
@@ -31,41 +34,34 @@ Use this skill to create new notes, daily notes, project files, or any other doc
 
 ```typescript
 {
-  path: string;                    // File path for the new document (required)
-  content?: string;                // Initial content (optional)
-  template?: string;               // Template name to use (optional, not yet implemented)
-  variables?: Record<string, any>; // Variables for template (optional, not yet implemented)
-  frontmatter?: Record<string, any>;  // Frontmatter metadata (optional)
-  triggerReindex?: boolean;        // Trigger reindex after creation (default: true)
+  path: string;                    // File path (required)
+  content?: string;                // Initial content
+  template?: string;               // Template name (not yet implemented)
+  variables?: {                    // Template variables (not yet implemented)
+    [key: string]: string | number | boolean;
+  };
+  frontmatter?: {                  // Frontmatter metadata
+    [key: string]: string | number | boolean | string[];
+  };
+  triggerReindex?: boolean;        // Trigger reindex (default: true)
 }
 ```
 
 ## Output
 
-Returns creation result:
-
 ```typescript
 {
-  path: string;                    // Full file path
-  name: string;                    // File basename
-  created: boolean;                // Whether file was created
-  length: number;                  // Content length in characters
-  reindexed: boolean;              // Whether file was reindexed
+  path: string;
+  name: string;
+  created: boolean;
+  length: number;
+  reindexed: boolean;
 }
 ```
 
 ## Examples
 
-### 1. Create a simple note
-
-```json
-{
-  "path": "Notes/New Note.md",
-  "content": "# New Note\n\nContent here"
-}
-```
-
-### 2. Create with frontmatter
+### Create with frontmatter
 
 ```json
 {
@@ -80,12 +76,12 @@ Returns creation result:
 }
 ```
 
-### 3. Create daily note
+### Create daily note
 
 ```json
 {
   "path": "Daily/2025-01-20.md",
-  "content": "# Daily Note - 2025-01-20\n\n## Tasks\n- [ ] Task 1\n\n## Notes\n",
+  "content": "# Daily Note - 2025-01-20\n\n## Tasks\n- [ ] Task 1",
   "frontmatter": {
     "date": "2025-01-20",
     "tags": ["daily-note"]
@@ -93,11 +89,11 @@ Returns creation result:
 }
 ```
 
-### 4. Create empty file with frontmatter only
+### Create empty file with frontmatter only
 
 ```json
 {
-  "path": "Templates/Meeting Template.md",
+  "path": "Templates/Meeting.md",
   "frontmatter": {
     "title": "Meeting Template",
     "type": "template"
@@ -105,18 +101,30 @@ Returns creation result:
 }
 ```
 
+## Performance Characteristics
+
+- Fast (< 100ms)
+- Reindexing adds 100-500ms if enabled
+- Folder creation adds minimal overhead
+
+## Common Workflows
+
+### Template-Based Creation
+1. `read-note` - Get template content
+2. (Process template)
+3. `create-note` - Create with processed content
+
 ## Best Practices
 
-1. **Use descriptive paths**: Include folder structure in the path
-2. **Add frontmatter for metadata**: Tags, dates, and status fields help with organization
-3. **Follow Obsidian conventions**: Use `.md` extension and avoid special characters
-4. **Check if file exists first**: Use `query_documents` to avoid conflicts
-5. **Use proper Markdown syntax**: Follow Obsidian Flavored Markdown conventions
+1. Use descriptive paths with folder structure
+2. Add frontmatter for metadata (tags, dates, status)
+3. Check if file exists first with `query-notes`
+4. Use `.md` extension and follow Markdown conventions
 
 ## Notes
 
-- If the file already exists, the skill returns an error (no overwriting)
-- Parent folders are created automatically if they don't exist
-- Frontmatter is added at the top of the file in YAML format
-- Reindexing happens asynchronously and may take a moment
-- Template support is planned but not yet implemented
+- Returns error if file already exists (no overwriting)
+- Parent folders created automatically
+- Frontmatter added at top in YAML format
+- Reindexing happens asynchronously
+- Template support planned but not yet implemented

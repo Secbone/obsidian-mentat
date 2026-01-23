@@ -91,16 +91,16 @@ User-facing skills directory following Agent Skills specification:
 ```
 skills/                              # Unified skills directory
 ├── README.md                        # User guide (how to use/add skills)
-├── query-documents/
+├── query-notes/
 │   ├── SKILL.md                     # Metadata + documentation
 │   └── scripts/implementation.ts    # Executable implementation
-├── read-document/
+├── read-note/
 │   ├── SKILL.md
 │   └── scripts/implementation.ts
-├── create-document/
+├── create-note/
 │   ├── SKILL.md
 │   └── scripts/implementation.ts
-├── update-document/
+├── update-note/
 │   ├── SKILL.md
 │   └── scripts/implementation.ts
 ├── update-frontmatter/

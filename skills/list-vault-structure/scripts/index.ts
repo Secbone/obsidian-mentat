@@ -6,6 +6,18 @@ import { TFile } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 /**
+ * Skill metadata
+ */
+export const metadata = {
+  name: 'list_vault_structure',
+  description: 'List vault folders, tags, and recent files',
+  version: '1.0.0',
+  tags: ['vault', 'structure', 'overview'],
+  performance: 'variable',
+  category: 'vault-info'
+};
+
+/**
  * Input schema
  */
 export const schema = z.object({

@@ -6,6 +6,19 @@ import { TFile, Vault } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 /**
+ * Skill metadata
+ */
+export const metadata = {
+  name: 'create_note',
+  description: 'Create new document with optional template and frontmatter',
+  version: '1.0.0',
+  tags: ['create', 'write', 'new'],
+  requiresConfirmation: true,
+  performance: 'fast',
+  category: 'file-operations'
+};
+
+/**
  * Input schema for create document
  */
 export const schema = z.object({

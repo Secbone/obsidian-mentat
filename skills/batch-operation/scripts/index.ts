@@ -6,19 +6,36 @@ import { TFile, Vault, MetadataCache } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 /**
+ * Skill metadata
+ */
+export const metadata = {
+  name: 'batch_operation',
+  description: 'Perform bulk operations on multiple documents matching filter criteria',
+  version: '1.0.0',
+  tags: ['batch', 'bulk', 'update'],
+  requiresConfirmation: true,
+  performance: 'slow',
+  category: 'file-operations'
+};
+
+/**
  * Input schema for batch operations
  */
 export const schema = z.object({
   operation: z.enum(['add-tags', 'remove-tags', 'update-frontmatter', 'append-content']).describe('Operation to perform'),
   filter: z.object({
-    folders: z.array(z.string()).optional().describe('Filter by folder paths'),
-    tags: z.array(z.string()).optional().describe('Filter by tags'),
+    folders: z.array(z.string()).optional().describe('Filter by folder paths (OR logic)'),
+    tags: z.array(z.string()).optional().describe('Filter by tags (AND logic)'),
     frontmatter: z.record(z.any()).optional().describe('Filter by frontmatter fields'),
     paths: z.array(z.string()).optional().describe('Specific file paths to operate on')
   }).describe('Filter criteria for selecting files'),
-  params: z.record(z.any()).describe('Operation-specific parameters'),
-  dryRun: z.boolean().default(false).describe('Preview changes without applying'),
-  maxFiles: z.number().min(1).max(100).default(50).describe('Maximum number of files to process')
+  params: z.union([
+    z.object({ tags: z.array(z.string()) }),
+    z.object({ updates: z.record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string())])) }),
+    z.object({ content: z.string() })
+  ]).describe('Operation-specific parameters'),
+  dryRun: z.boolean().default(false).describe('Preview changes without applying (default: false)'),
+  maxFiles: z.number().min(1).max(100).default(50).describe('Maximum number of files to process (default: 50, max: 100)')
 });
 
 export type Input = z.infer<typeof schema>;

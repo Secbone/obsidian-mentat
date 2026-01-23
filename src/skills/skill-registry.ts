@@ -83,7 +83,7 @@ export class SkillRegistry {
       const fullName = this.getFullName(namespaceOrFullName as SkillNamespace, name);
       return this.skills.get(fullName);
     } else {
-      // Called with full name like "obsidian:query_documents"
+      // Called with full name like "obsidian:query_notes"
       return this.skills.get(namespaceOrFullName);
     }
   }

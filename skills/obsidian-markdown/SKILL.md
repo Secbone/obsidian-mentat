@@ -1,11 +1,12 @@
 ---
 name: obsidian-markdown
-description: Guide for creating and editing Obsidian Flavored Markdown files with proper syntax including wikilinks, callouts, and frontmatter.
+description: Guide for Obsidian Flavored Markdown syntax and best practices
 metadata:
   version: "1.0.0"
   author: personal-agent
   tags: [obsidian, markdown, syntax]
   executable: false
+  category: documentation
 ---
 
 # Obsidian Flavored Markdown

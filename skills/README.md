@@ -8,7 +8,7 @@ Each skill is organized as a separate directory with the following structure:
 
 ```
 skills/
-├── query-documents/          # Example executable skill
+├── query-notes/              # Example executable skill
 │   ├── SKILL.md              # Skill metadata and documentation
 │   └── scripts/
 │       └── index.ts          # TypeScript implementation
@@ -23,15 +23,15 @@ skills/
 
 Executable skills contain both metadata/documentation (SKILL.md) and implementation code (scripts/implementation.ts).
 
-**Example: query-documents/**
+**Example: query-notes/**
 - **SKILL.md**: Defines name, description, usage, examples
 - **scripts/index.ts**: Contains schema and execute function
 
 **Executable skills in this directory:**
-- `query-documents`: Search and filter documents with semantic search
-- `read-document`: Read document content with metadata
-- `create-document`: Create new documents with frontmatter
-- `update-document`: Update document content (append, prepend, replace)
+- `query-notes`: Search and filter documents with semantic search
+- `read-note`: Read document content with metadata
+- `create-note`: Create new documents with frontmatter
+- `update-note`: Update document content (append, prepend, replace)
 - `update-frontmatter`: Update document frontmatter metadata
 - `batch-operation`: Batch operations on multiple documents
 - `list-vault-structure`: Get vault structure overview
@@ -168,7 +168,7 @@ interface SkillContext {
 
 ## Best Practices
 
-1. **Clear naming**: Use descriptive, action-oriented names (e.g., `query_documents`, not `search`)
+1. **Clear naming**: Use descriptive, action-oriented names (e.g., `query_notes`, not `search`)
 2. **Complete documentation**: Include description, usage, examples, and best practices in SKILL.md
 3. **Type safety**: Use Zod schemas for input validation
 4. **Error handling**: Return proper SkillResult with success/error states
@@ -208,7 +208,7 @@ Use [skills-ref](https://github.com/agentskills/skills-ref) to validate SKILL.md
 
 ```bash
 npm install -g @agentskills/skills-ref
-skills-ref validate skills/query-documents
+skills-ref validate skills/query-notes
 ```
 
 ## References

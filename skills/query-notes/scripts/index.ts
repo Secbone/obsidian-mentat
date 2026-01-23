@@ -9,10 +9,12 @@ import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
  * Skill metadata
  */
 export const metadata = {
-  name: 'query_documents',
-  description: 'Search and filter documents in the vault. Supports semantic search, tag filtering, folder filtering, glob patterns, date ranges, and frontmatter filtering.',
+  name: 'query_notes',
+  description: 'Search documents by content, tags, folders, or glob patterns',
   version: '1.0.0',
-  tags: ['search', 'query', 'filter']
+  tags: ['search', 'query', 'filter'],
+  performance: 'variable',
+  category: 'search'
 };
 
 /**

@@ -1,67 +1,69 @@
 ---
-name: query_documents
-description: Search and filter documents in the vault. Supports semantic search, tag filtering, folder filtering, glob patterns, date ranges, and frontmatter filtering.
+name: query_notes
+description: Search documents by content, tags, folders, or glob patterns
 metadata:
   version: "1.0.0"
   author: personal-agent
   tags: [search, query, filter]
   executable: true
   implementation: scripts/index.ts
+  performance: variable
+  category: search
 ---
 
 # Query Documents Skill
 
 ## Description
 
-Searches and filters documents in the Obsidian vault with various criteria:
-- **Semantic search** using embeddings for natural language queries
-- **Tag filtering** with AND logic (all tags must match)
-- **Folder filtering** to search within specific directories
-- **Glob pattern matching** for flexible file path patterns
-- **Date range filtering** by modification time
-- **Frontmatter filtering** to match specific metadata fields
-- **Flexible sorting** by relevance, modification time, creation time, or name
+Search documents by semantic search, tags, folders, or glob patterns. At least one of `query`, `tags`, `folders`, or `pattern` should be provided.
 
-## Usage
+## When to use
+- Finding documents by semantic search (natural language queries)
+- Filtering by tags, folders, or frontmatter fields
+- Pattern matching with glob syntax (e.g., daily notes)
+- Discovering files before reading them
 
-**IMPORTANT**: Always use this skill BEFORE trying to read documents. Don't guess file paths - query first to find the exact paths.
+## When NOT to use
+- Reading a specific known file path (use read-note instead)
+- Listing all vault structure (use list-vault-structure instead)
+- Searching within a single document (use read-note then process content)
+
+**IMPORTANT**: Always use this skill BEFORE trying to read documents. Don't guess file paths - query first to find exact paths.
 
 ## Input Schema
 
 ```typescript
 {
   query?: string;              // Semantic search query (natural language)
-  tags?: string[];             // Filter by tags (AND logic - all must match)
+  tags?: string[];             // Filter by tags (AND logic)
   folders?: string[];          // Filter by folder paths (OR logic)
-  pattern?: string;            // Glob pattern (e.g., "Daily/2025-*.md", "**/*.md")
-  dateFrom?: string;           // Filter files modified after this date (ISO format)
-  dateTo?: string;             // Filter files modified before this date (ISO format)
+  pattern?: string;            // Glob pattern (e.g., "Daily/2025-*.md")
+  dateFrom?: string;           // Modified after (ISO format)
+  dateTo?: string;             // Modified before (ISO format)
   frontmatter?: Record<string, any>;  // Filter by frontmatter fields
-  limit?: number;              // Maximum number of results (default: 10, max: 100)
-  sortBy?: 'modified' | 'created' | 'name' | 'relevance';  // Sort order (default: 'relevance')
+  limit?: number;              // Max results (default: 10, max: 100)
+  sortBy?: 'modified' | 'created' | 'name' | 'relevance';  // Default: 'relevance'
 }
 ```
 
 ## Output
 
-Returns a list of matching documents with metadata:
-
 ```typescript
 {
   results: Array<{
-    path: string;              // Full file path
-    name: string;              // File basename
-    score?: number;            // Relevance score (if sortBy is 'relevance')
+    path: string;
+    name: string;
+    score?: number;            // If sortBy is 'relevance'
     metadata: {
-      tags: string[];          // All tags (from content and frontmatter)
-      frontmatter: Record<string, any>;  // Frontmatter metadata
-      modified: number;        // Last modified timestamp
-      created: number;         // Creation timestamp
+      tags: string[];
+      frontmatter: Record<string, any>;
+      modified: number;
+      created: number;
     }
   }>;
-  total: number;               // Number of results returned
-  query?: string;              // The search query used
-  filters: {                   // Applied filters
+  total: number;
+  query?: string;
+  filters: {
     pattern?: string;
     tags?: string[];
     folders?: string[];
@@ -73,7 +75,7 @@ Returns a list of matching documents with metadata:
 
 ## Examples
 
-### 1. Find all project notes
+### Find all project notes
 
 ```json
 {
@@ -82,7 +84,7 @@ Returns a list of matching documents with metadata:
 }
 ```
 
-### 2. Semantic search for machine learning content
+### Semantic search
 
 ```json
 {
@@ -91,18 +93,7 @@ Returns a list of matching documents with metadata:
 }
 ```
 
-### 3. Find recent documents in Projects folder
-
-```json
-{
-  "folders": ["Projects"],
-  "dateFrom": "2025-01-01T00:00:00Z",
-  "sortBy": "modified",
-  "limit": 10
-}
-```
-
-### 4. Pattern matching for daily notes
+### Pattern matching for daily notes
 
 ```json
 {
@@ -111,7 +102,7 @@ Returns a list of matching documents with metadata:
 }
 ```
 
-### 5. Complex query with multiple filters
+### Complex query with multiple filters
 
 ```json
 {
@@ -123,19 +114,31 @@ Returns a list of matching documents with metadata:
 }
 ```
 
+## Performance Characteristics
+
+- Variable (50ms - 2s depending on vault size and complexity)
+- Semantic search slower than metadata filtering
+- Tag/folder/pattern filtering is fastest
+- Degrades with large vaults (1000+ documents)
+
+## Common Workflows
+
+### Discover → Read → Update
+1. `query-notes` - Find files
+2. `read-note` - Read content
+3. `update-note` - Modify files
+
 ## Best Practices
 
-1. **Start broad, then narrow**: Begin with a simple query, then add filters if needed
-2. **Use semantic search for concepts**: Natural language queries work well for finding related content
-3. **Use tags for categorization**: Tags are efficient for filtering by topic or status
-4. **Use patterns for structured files**: Glob patterns are perfect for daily notes or dated files
-5. **Check the total**: If you get the max limit, there may be more results - refine your query
-6. **Combine filters**: Multiple filters work together (AND logic) for precise results
+1. Start broad, then add filters if needed
+2. Use semantic search for concepts, tags for categorization
+3. Use patterns for structured files (daily notes, dated files)
+4. Check total - if you hit limit, refine your query
 
 ## Notes
 
-- Semantic search requires the index manager to be available and initialized
-- If semantic search fails, the skill falls back to metadata-only filtering
-- Glob patterns support `*` (any chars), `**` (any path), and `?` (single char)
-- Date filtering uses file modification time, not frontmatter dates
-- Tag filtering checks both inline tags (`#tag`) and frontmatter tags
+- Semantic search requires index manager (falls back to metadata if unavailable)
+- Glob patterns support `*`, `**`, `?`
+- Date filtering uses file modification time
+- Tag filtering checks both inline tags and frontmatter
+- Returns empty array if no matches (not an error)

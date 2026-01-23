@@ -315,9 +315,28 @@ export class RAGOrchestrator {
           timestamp: Date.now()
         };
 
+        // Special handling for ask_user skill
+        const isAskUser = toolCall.name === 'obsidian:ask_user';
+
+        // Check if skill requires confirmation
+        const skill = this.skillRegistry.get(toolCall.name);
+        const requiresConfirmation = skill?.metadata?.requiresConfirmation;
+
         // Notify about skill call
         if (onStream) {
-          onStream(`\n\n🔧 Executing: ${toolCall.name}...\n`);
+          // Get skill name without namespace prefix
+          const shortName = toolCall.name.split(':').pop() || toolCall.name;
+          const displayParam = this.getSkillDisplayParam(toolCall.name, skillCall.parameters);
+
+          if (isAskUser) {
+            onStream(`\n\n${shortName}()\n`);
+          } else if (requiresConfirmation) {
+            const paramStr = displayParam ? `(${displayParam})` : '()';
+            onStream(`\n\n⚠️ ${shortName}${paramStr}\n`);
+          } else {
+            const paramStr = displayParam ? `(${displayParam})` : '()';
+            onStream(`\n\n${shortName}${paramStr}\n`);
+          }
         }
 
         // Execute the skill
@@ -345,7 +364,13 @@ export class RAGOrchestrator {
         messages.push(toolResultMessage);
 
         if (onStream) {
-          onStream(`✓ Completed\n\n`);
+          if (result.success) {
+            onStream(`✓ success\n\n`);
+          } else if (result.error && result.error.includes('cancelled')) {
+            onStream(`✗ cancelled\n\n`);
+          } else {
+            onStream(`✗ failed\n\n`);
+          }
         }
       }
 
@@ -357,6 +382,33 @@ export class RAGOrchestrator {
     }
 
     return fullResponse;
+  }
+
+  /**
+   * Extract the most relevant parameter for display in skill execution messages
+   */
+  private getSkillDisplayParam(skillName: string, parameters: Record<string, any>): string {
+    // File operations - show filename only (not full path)
+    if (parameters.path) {
+      const filename = parameters.path.split('/').pop() || parameters.path;
+      return filename;
+    }
+
+    // Query operations - show query or pattern
+    if (parameters.query) {
+      return `"${parameters.query.substring(0, 30)}"`;
+    }
+
+    if (parameters.pattern) {
+      return parameters.pattern;
+    }
+
+    if (parameters.tags && Array.isArray(parameters.tags)) {
+      return `tags: [${parameters.tags.slice(0, 2).join(', ')}]`;
+    }
+
+    // Fallback - no params shown
+    return '';
   }
 
   /**
@@ -422,22 +474,28 @@ VAULT OVERVIEW:
 IMPORTANT: You have access to tools to manage documents. Follow this workflow:
 
 1. DISCOVER FILES FIRST
-   - Use query_documents to find files before reading them
+   - Use query_notes to find files before reading them
    - Don't guess file paths - always query first
 
-2. QUERY EXAMPLES
-   - Browse all files: query_documents({limit: 50})
-   - Find by tag: query_documents({tags: ['project']})
-   - Search content: query_documents({query: 'machine learning'})
-   - Filter by folder: query_documents({folders: ['Projects']})
-   - Match pattern: query_documents({pattern: 'Daily/2025-*.md'})
-   - Match any subfolder: query_documents({pattern: '**/meetings/*.md'})
+2. ASK FOR GUIDANCE WHEN UNCERTAIN
+   - If you encounter ambiguity or multiple valid options, use ask_user
+   - Examples: Multiple files match, unclear user intent, need confirmation
+   - Provide clear context and specific options when asking
+   - Don't make assumptions - ask the user instead
 
-3. READ FILES
-   - After query_documents returns results, use read_document with the exact path
-   - Example: read_document({path: 'Projects/My Project.md'})
+3. QUERY EXAMPLES
+   - Browse all files: query_notes({limit: 50})
+   - Find by tag: query_notes({tags: ['project']})
+   - Search content: query_notes({query: 'machine learning'})
+   - Filter by folder: query_notes({folders: ['Projects']})
+   - Match pattern: query_notes({pattern: 'Daily/2025-*.md'})
+   - Match any subfolder: query_notes({pattern: '**/meetings/*.md'})
 
-4. GET DETAILED VAULT INFO
+4. READ FILES
+   - After query_notes returns results, use read_note with the exact path
+   - Example: read_note({path: 'Projects/My Project.md'})
+
+5. GET DETAILED VAULT INFO
    - Use list_vault_structure to see complete folder/tag structure
 
 GLOB PATTERNS:

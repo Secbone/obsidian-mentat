@@ -1,32 +1,31 @@
 ---
 name: list_vault_structure
-description: Get an overview of the vault structure including folders, tags, and recent files. Use this to understand what content exists in the vault.
+description: List vault folders, tags, and recent files
 metadata:
   version: "1.0.0"
   author: personal-agent
   tags: [vault, structure, overview]
   executable: true
   implementation: scripts/index.ts
+  performance: variable
+  category: vault-info
 ---
 
 # List Vault Structure Skill
 
 ## Description
 
-Provides an overview of the Obsidian vault structure:
-- **Folders**: List folders with file counts
-- **Tags**: List tags with usage counts
-- **Recent files**: List recently modified files
+List vault folders, tags, and recent files to provide overview of vault organization.
 
-Use this skill to understand the vault organization before querying or creating documents.
+## When to use
+- Understanding vault organization before queries
+- Finding which folders contain most files
+- Discovering commonly used tags
+- Seeing recently modified files
 
-## Usage
-
-Use this skill when you need to:
-- Understand the vault organization
-- Find which folders contain the most files
-- Discover commonly used tags
-- See recently modified files
+## When NOT to use
+- Searching for specific documents (use query-notes instead)
+- Reading file content (use read-note instead)
 
 ## Input Schema
 
@@ -41,30 +40,28 @@ Use this skill when you need to:
 
 ## Output
 
-Returns vault structure overview:
-
 ```typescript
 {
-  totalFiles: number;              // Total number of markdown files
-  folders?: Array<{                // Folders sorted by file count (if included)
-    path: string;                  // Folder path
-    fileCount: number;             // Number of files in folder
+  totalFiles: number;
+  folders?: Array<{                // Sorted by file count (descending)
+    path: string;
+    fileCount: number;
   }>;
-  tags?: Array<{                   // Tags sorted by usage count (if included)
-    tag: string;                   // Tag name
-    count: number;                 // Number of files with this tag
+  tags?: Array<{                   // Sorted by usage count (descending)
+    tag: string;
+    count: number;
   }>;
-  recentFiles?: Array<{            // Recent files sorted by modification time (if included)
-    path: string;                  // File path
-    name: string;                  // File basename
-    modified: number;              // Last modified timestamp
+  recentFiles?: Array<{            // Sorted by modification time (descending)
+    path: string;
+    name: string;
+    modified: number;
   }>;
 }
 ```
 
 ## Examples
 
-### 1. Get complete vault overview
+### Get complete vault overview
 
 ```json
 {
@@ -75,7 +72,7 @@ Returns vault structure overview:
 }
 ```
 
-### 2. Get only folder structure
+### Get only folder structure
 
 ```json
 {
@@ -86,18 +83,7 @@ Returns vault structure overview:
 }
 ```
 
-### 3. Get only tag statistics
-
-```json
-{
-  "includeFolders": false,
-  "includeTags": true,
-  "includeRecent": false,
-  "limit": 30
-}
-```
-
-### 4. Get recent files only
+### Get recent files only
 
 ```json
 {
@@ -108,19 +94,30 @@ Returns vault structure overview:
 }
 ```
 
+## Performance Characteristics
+
+- Variable (100ms - 1s depending on vault size)
+- Degrades with large vaults (1000+ files)
+- Folder list faster than tag computation
+
+## Common Workflows
+
+### Initial Exploration
+1. `list-vault-structure` - Get overview
+2. `query-notes` - Search within discovered folders/tags
+
 ## Best Practices
 
-1. **Use before querying**: Understand the vault structure before searching
-2. **Check folder organization**: See which folders contain the most content
-3. **Discover tags**: Find commonly used tags for filtering
-4. **Find recent work**: See what's been modified recently
-5. **Adjust limit as needed**: Use higher limits for comprehensive overviews
+1. Use before querying to understand vault structure
+2. Check folder organization to see where content lives
+3. Discover tags for filtering
+4. Adjust limit as needed for comprehensive overviews
 
 ## Notes
 
-- Folders are sorted by file count (descending)
-- Tags are sorted by usage count (descending)
-- Recent files are sorted by modification time (descending)
-- Tag counts include both inline tags and frontmatter tags
-- Root folder is represented as "/"
+- Folders sorted by file count (descending)
+- Tags sorted by usage count (descending)
+- Recent files sorted by modification time (descending)
+- Tag counts include both inline and frontmatter tags
+- Root folder represented as "/"
 - Limit applies to each list independently

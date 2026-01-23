@@ -5,13 +5,14 @@ import { App, TFile, FileSystemAdapter } from 'obsidian';
 import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDefinition } from './skill-types';
 
 // Import all skill implementations (compile-time imports for TypeScript)
-import * as QueryDocumentsImpl from '../../skills/query-documents/scripts';
-import * as ReadDocumentImpl from '../../skills/read-document/scripts';
-import * as CreateDocumentImpl from '../../skills/create-document/scripts';
-import * as UpdateDocumentImpl from '../../skills/update-document/scripts';
+import * as QueryNotesImpl from '../../skills/query-notes/scripts';
+import * as ReadNoteImpl from '../../skills/read-note/scripts';
+import * as CreateNoteImpl from '../../skills/create-note/scripts';
+import * as UpdateNoteImpl from '../../skills/update-note/scripts';
 import * as UpdateFrontmatterImpl from '../../skills/update-frontmatter/scripts';
 import * as BatchOperationImpl from '../../skills/batch-operation/scripts';
 import * as ListVaultStructureImpl from '../../skills/list-vault-structure/scripts';
+import * as AskUserImpl from '../../skills/ask-user/scripts';
 
 /**
  * Skill metadata from SKILL.md frontmatter
@@ -51,13 +52,14 @@ export class SkillLoader {
 
     // Map skill names to their implementations (compile-time mapping)
     this.implementationMap = new Map([
-      ['query_documents', QueryDocumentsImpl],
-      ['read_document', ReadDocumentImpl],
-      ['create_document', CreateDocumentImpl],
-      ['update_document', UpdateDocumentImpl],
+      ['query_notes', QueryNotesImpl],
+      ['read_note', ReadNoteImpl],
+      ['create_note', CreateNoteImpl],
+      ['update_note', UpdateNoteImpl],
       ['update_frontmatter', UpdateFrontmatterImpl],
       ['batch_operation', BatchOperationImpl],
-      ['list_vault_structure', ListVaultStructureImpl]
+      ['list_vault_structure', ListVaultStructureImpl],
+      ['ask_user', AskUserImpl]
     ]);
   }
 

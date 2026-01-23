@@ -1,6 +1,6 @@
 ---
 name: batch_operation
-description: Perform batch operations on multiple documents. Supports adding/removing tags, updating frontmatter, and appending content.
+description: Perform bulk operations on multiple documents matching filter criteria
 metadata:
   version: "1.0.0"
   author: personal-agent
@@ -8,98 +8,89 @@ metadata:
   executable: true
   implementation: scripts/index.ts
   requiresConfirmation: true
+  performance: slow
+  category: file-operations
 ---
 
 # Batch Operation Skill
 
 ## Description
 
-Performs batch operations on multiple documents simultaneously:
-- **Add tags**: Add tags to multiple documents
-- **Remove tags**: Remove tags from multiple documents
-- **Update frontmatter**: Update frontmatter fields across documents
-- **Append content**: Append content to multiple documents
+Perform bulk operations on multiple documents: add/remove tags, update frontmatter, or append content.
 
-Supports flexible filtering to select target documents:
-- Filter by folders
-- Filter by tags
-- Filter by frontmatter fields
-- Filter by specific file paths
+## When to use
+- Applying same change across many documents
+- Bulk tagging or metadata updates
+- Adding consistent content to multiple files
 
-## Usage
+## When NOT to use
+- Single file updates (use update-note or update-frontmatter instead)
+- Complex per-file logic (process files individually instead)
+- When you need file-specific content changes
 
-Use this skill for bulk updates across multiple documents. Always use dry-run mode first to preview changes.
-
-**IMPORTANT**: This skill requires user confirmation before execution.
+**IMPORTANT**: This skill requires user confirmation before execution. Always use dry-run first.
 
 ## Input Schema
 
 ```typescript
 {
-  operation: 'add-tags' | 'remove-tags' | 'update-frontmatter' | 'append-content';  // Operation to perform (required)
-  filter: {                            // Filter criteria for selecting files (required)
-    folders?: string[];                // Filter by folder paths (OR logic)
-    tags?: string[];                   // Filter by tags (AND logic)
-    frontmatter?: Record<string, any>; // Filter by frontmatter fields
-    paths?: string[];                  // Specific file paths to operate on
+  operation: 'add-tags' | 'remove-tags' | 'update-frontmatter' | 'append-content';
+  filter: {
+    folders?: string[];                // OR logic
+    tags?: string[];                   // AND logic
+    frontmatter?: Record<string, any>;
+    paths?: string[];                  // Specific file paths
   };
-  params: Record<string, any>;         // Operation-specific parameters (required)
-  dryRun?: boolean;                    // Preview changes without applying (default: false)
-  maxFiles?: number;                   // Maximum number of files to process (default: 50, max: 100)
+  params: Record<string, any>;         // Operation-specific (see below)
+  dryRun?: boolean;                    // Preview without applying (default: false)
+  maxFiles?: number;                   // Max files to process (default: 50, max: 100)
 }
 ```
 
-### Operation-Specific Parameters
+### Operation Parameters
 
-#### add-tags
+**add-tags / remove-tags**:
 ```typescript
 params: {
-  tags: string[];  // Tags to add
+  tags: string[];  // Tag names without # prefix
 }
 ```
 
-#### remove-tags
+**update-frontmatter**:
 ```typescript
 params: {
-  tags: string[];  // Tags to remove
+  updates: {
+    [key: string]: string | number | boolean | string[];
+  };
 }
 ```
 
-#### update-frontmatter
+**append-content**:
 ```typescript
 params: {
-  updates: Record<string, any>;  // Frontmatter fields to update
-}
-```
-
-#### append-content
-```typescript
-params: {
-  content: string;  // Content to append
+  content: string;  // Markdown content to append
 }
 ```
 
 ## Output
 
-Returns batch operation result:
-
 ```typescript
 {
-  operation: string;               // Operation performed
-  filesProcessed: number;          // Number of files processed
-  filesModified: string[];         // Paths of modified files
-  filesSkipped: string[];          // Paths of skipped files (no changes needed)
-  errors: Array<{                  // Errors encountered
+  operation: string;
+  filesProcessed: number;
+  filesModified: string[];
+  filesSkipped: string[];
+  errors: Array<{
     path: string;
     error: string;
   }>;
-  dryRun: boolean;                 // Whether this was a dry run
+  dryRun: boolean;
 }
 ```
 
 ## Examples
 
-### 1. Add tags to all files in a folder (dry run first)
+### Add tags to folder (dry run first)
 
 ```json
 {
@@ -114,21 +105,7 @@ Returns batch operation result:
 }
 ```
 
-### 2. Remove tags from completed files
-
-```json
-{
-  "operation": "remove-tags",
-  "filter": {
-    "frontmatter": { "status": "completed" }
-  },
-  "params": {
-    "tags": ["todo", "in-progress"]
-  }
-}
-```
-
-### 3. Update frontmatter for files with specific tag
+### Update frontmatter for tagged files
 
 ```json
 {
@@ -145,17 +122,13 @@ Returns batch operation result:
 }
 ```
 
-### 4. Append content to specific files
+### Append content to specific files
 
 ```json
 {
   "operation": "append-content",
   "filter": {
-    "paths": [
-      "Notes/Note1.md",
-      "Notes/Note2.md",
-      "Notes/Note3.md"
-    ]
+    "paths": ["Notes/Note1.md", "Notes/Note2.md"]
   },
   "params": {
     "content": "\n## Follow-up\n\nAdded on 2025-01-20"
@@ -163,37 +136,32 @@ Returns batch operation result:
 }
 ```
 
-### 5. Add tags to recent files in multiple folders
+## Performance Characteristics
 
-```json
-{
-  "operation": "add-tags",
-  "filter": {
-    "folders": ["Projects", "Notes"],
-    "tags": ["important"]
-  },
-  "params": {
-    "tags": ["reviewed"]
-  },
-  "maxFiles": 20
-}
-```
+- Slow (1s+ for batches of 10+ files)
+- Scales linearly with file count (~100-200ms per file)
+- Dry-run mode is faster (read-only)
+
+## Common Workflows
+
+### Query → Preview → Apply
+1. `query-notes` - Find files
+2. `batch-operation` (dryRun: true) - Preview
+3. `batch-operation` (dryRun: false) - Apply
 
 ## Best Practices
 
-1. **Always use dry-run first**: Preview changes before applying them
-2. **Start with small batches**: Test with a few files before processing many
-3. **Use specific filters**: Narrow down the target files to avoid unintended changes
-4. **Check the results**: Review filesModified and errors arrays
-5. **Use maxFiles limit**: Prevent accidentally processing too many files
-6. **Backup important data**: Batch operations can affect many files
+1. Always use dry-run first to preview changes
+2. Start with small batches to test
+3. Use specific filters to avoid unintended changes
+4. Use maxFiles limit to prevent processing too many files
 
 ## Notes
 
-- Filters work together with AND logic (all conditions must match)
-- If `paths` is specified, other filters are ignored
-- Tag filtering checks both inline tags and frontmatter tags
-- Files are skipped if the operation would make no changes
-- Errors are collected but don't stop the batch operation
-- Dry-run mode shows what would be changed without actually modifying files
-- Maximum 100 files can be processed in a single batch
+- Filters work with AND logic (all must match)
+- If `paths` specified, other filters ignored
+- Tag filtering checks both inline and frontmatter tags
+- Files skipped if operation makes no changes
+- Errors collected but don't stop batch
+- Dry-run shows changes without modifying files
+- Max 100 files per batch
