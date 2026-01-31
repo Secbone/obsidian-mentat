@@ -18,6 +18,8 @@ metadata:
 
 Create new document with optional content, frontmatter metadata, and automatic folder creation.
 
+**IMPORTANT**: Before creating note content, reference the `obsidian-markdown` skill to ensure proper Obsidian Flavored Markdown syntax (Wikilinks, callouts, tags, frontmatter, etc.).
+
 ## When to use
 - Creating new notes, daily notes, or journal entries
 - Creating project files with structure and metadata

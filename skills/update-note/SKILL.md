@@ -20,6 +20,8 @@ Update document content with multiple update modes including line-based, section
 
 Supports: replace, append, prepend, insert after heading, insert at line, replace lines, delete lines, replace section, delete section, search-replace, exact-replace, and dry-run mode.
 
+**IMPORTANT**: Before updating note content, reference the `obsidian-markdown` skill to ensure proper Obsidian Flavored Markdown syntax (Wikilinks, callouts, tags, frontmatter, etc.).
+
 ## When to use
 - Modifying existing document content
 - Adding new sections or content at specific locations
