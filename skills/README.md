@@ -34,7 +34,7 @@ Executable skills contain both metadata/documentation (SKILL.md) and implementat
 - `update-note`: Update document content (append, prepend, replace)
 - `update-frontmatter`: Update document frontmatter metadata
 - `batch-operation`: Batch operations on multiple documents
-- `list-vault-structure`: Get vault structure overview
+- `list-notes`: Get vault structure overview
 
 ### Documentation-Only Skills
 

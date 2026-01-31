@@ -1,11 +1,11 @@
 import { Plugin, Notice } from 'obsidian';
 import { PersonalAgentSettings, DEFAULT_SETTINGS } from './settings/settings';
 import { SettingsTab } from './settings/settings-tab';
-import { AIRouter } from './ai/ai-router';
-import { OpenCodeIntegration } from './ai/opencode-integration';
+import { AIRouter } from './providers/ai-router';
+import { OpenCodeIntegration } from './providers/opencode-integration';
 import { IndexManager } from './indexing/index-manager';
-import { ChatView, CHAT_VIEW_TYPE } from './features/chat/chat-view';
-import { RAGOrchestrator } from './features/chat/rag-orchestrator';
+import { ChatView, CHAT_VIEW_TYPE } from './chat/chat-view';
+import { RAGOrchestrator } from './chat/rag-orchestrator';
 
 export default class PersonalAgentPlugin extends Plugin {
   settings: PersonalAgentSettings;

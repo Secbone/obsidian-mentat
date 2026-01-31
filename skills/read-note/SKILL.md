@@ -26,7 +26,7 @@ Read document content with optional metadata, supporting full reads, specific se
 ## When NOT to use
 - Searching for documents (use query-notes instead)
 - Modifying documents (use update-note or update-frontmatter instead)
-- Listing multiple files (use query-notes or list-vault-structure instead)
+- Listing multiple files (use query-notes or list-notes instead)
 
 ## Input Schema
 

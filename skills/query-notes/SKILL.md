@@ -25,7 +25,7 @@ Search documents by semantic search, tags, folders, or glob patterns. At least o
 
 ## When NOT to use
 - Reading a specific known file path (use read-note instead)
-- Listing all vault structure (use list-vault-structure instead)
+- Listing all vault structure (use list-notes instead)
 - Searching within a single document (use read-note then process content)
 
 **IMPORTANT**: Always use this skill BEFORE trying to read documents. Don't guess file paths - query first to find exact paths.

@@ -171,3 +171,29 @@ export interface SimilarityResult {
   score: number;
   index: FileIndex;
 }
+
+// Skill Invocation Configuration
+export type SkillInvocationMode = 'progressive' | 'native' | 'auto';
+export type SkillDetailFormat = 'markdown' | 'xml' | 'json';
+
+export interface SkillInvocationConfig {
+  mode: SkillInvocationMode;
+  detailFormat?: SkillDetailFormat;
+  enableCache?: boolean;
+  enableDynamicDiscovery?: boolean;
+  cacheConfig?: {
+    ttl?: number; // Time to live in milliseconds
+    maxSize?: number; // Maximum cache entries
+  };
+}
+
+// Spec Parameters
+export interface SpecParams {
+  skill_name: string;
+}
+
+// Invoke Parameters
+export interface InvokeParams {
+  skill_name: string;
+  params: Record<string, any>;
+}

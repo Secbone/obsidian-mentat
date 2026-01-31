@@ -109,7 +109,7 @@ skills/                              # Unified skills directory
 ├── batch-operation/
 │   ├── SKILL.md
 │   └── scripts/implementation.ts
-├── list-vault-structure/
+├── list-notes/
 │   ├── SKILL.md
 │   └── scripts/implementation.ts
 └── obsidian-markdown/               # Documentation-only skill

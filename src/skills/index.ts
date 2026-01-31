@@ -2,11 +2,11 @@
 
 // Core types and classes
 export * from './skill-types';
-export * from './skill-registry';
-export * from './skill-executor';
+export * from './core/skill-registry';
+export * from './core/skill-executor';
 
 // Skill loader
-export * from './skill-loader';
+export * from './core/skill-loader';
 
 // MCP integration
 export * from './mcp';

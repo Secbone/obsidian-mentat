@@ -1,5 +1,6 @@
 // Personal Agent Settings Interface
 import { MCPServerConfig } from '../skills/mcp/mcp-types';
+import { SkillInvocationConfig } from '../types';
 
 export interface PersonalAgentSettings {
   // AI Providers Configuration
@@ -20,6 +21,9 @@ export interface PersonalAgentSettings {
   opencodeApiUrl: string;
   opencodeApiKey: string;
 
+  // Web Fetch Configuration
+  browserlessApiKey: string;
+
   // Feature Toggles
   autoClassificationEnabled: boolean;
   linkSuggestionEnabled: boolean;
@@ -32,6 +36,10 @@ export interface PersonalAgentSettings {
   requireSkillConfirmation: boolean;
   allowedSkills: string[]; // List of allowed skill names (empty = all allowed)
   maxTurns: number; // Maximum agent loop iterations for skill execution
+
+  // Skill Invocation Configuration (Progressive Disclosure)
+  skillInvocationMode: 'progressive' | 'native' | 'auto';
+  skillInvocationConfig?: SkillInvocationConfig;
 
   // MCP Configuration
   mcpServers: MCPServerConfig[];
@@ -87,6 +95,8 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   opencodeApiUrl: '',
   opencodeApiKey: '',
 
+  browserlessApiKey: '',
+
   autoClassificationEnabled: true,
   linkSuggestionEnabled: true,
   chatEnabled: true,
@@ -97,6 +107,19 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   requireSkillConfirmation: false,
   allowedSkills: [],
   maxTurns: 5,
+
+  // Skill Invocation Configuration
+  skillInvocationMode: 'progressive', // Use progressive disclosure by default
+  skillInvocationConfig: {
+    mode: 'progressive',
+    detailFormat: 'markdown',
+    enableCache: true,
+    enableDynamicDiscovery: true,
+    cacheConfig: {
+      ttl: 3600000,  // 1 hour
+      maxSize: 100   // Max 100 cached skills
+    }
+  },
 
   mcpServers: [],
   mcpTimeout: 30000,
