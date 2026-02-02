@@ -150,6 +150,18 @@ export class SettingsTab extends PluginSettingTab {
           }));
     }
 
+    // Browserless API Key
+    new Setting(containerEl)
+      .setName('Browserless API Key')
+      .setDesc('API key for Browserless service (used by web-fetch skill for JavaScript-heavy pages). Get your key at https://browserless.io')
+      .addText(text => text
+        .setPlaceholder('Enter your Browserless API key')
+        .setValue(this.plugin.settings.browserlessApiKey)
+        .onChange(async (value) => {
+          this.plugin.settings.browserlessApiKey = value;
+          await this.plugin.saveSettings();
+        }));
+
     // Obsidian Skills Integration
     new Setting(containerEl)
       .setName('Enable Obsidian Skills Integration')

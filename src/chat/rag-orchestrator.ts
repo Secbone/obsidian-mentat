@@ -358,7 +358,15 @@ export class RAGOrchestrator {
           skillName: toolCall.name,
           namespace: toolCall.name.startsWith('mcp:') ? 'mcp' : 'obsidian',
           parameters: typeof toolCall.arguments === 'string'
-            ? JSON.parse(toolCall.arguments)
+            ? (() => {
+                try {
+                  return JSON.parse(toolCall.arguments as string);
+                } catch (error: any) {
+                  console.error('Failed to parse tool call arguments:', error);
+                  console.error('Raw arguments:', toolCall.arguments);
+                  throw new Error(`Invalid JSON in tool call arguments: ${error.message}`);
+                }
+              })()
             : toolCall.arguments,
           status: 'executing',
           timestamp: Date.now()
@@ -695,7 +703,15 @@ Use your skills proactively to help the user manage their knowledge base.${ragCo
     onStream?: (chunk: string) => void
   ): Promise<{ content: string; success: boolean }> {
     const params = typeof toolCall.arguments === 'string'
-      ? JSON.parse(toolCall.arguments)
+      ? (() => {
+          try {
+            return JSON.parse(toolCall.arguments as string);
+          } catch (error: any) {
+            console.error('Failed to parse tool call arguments:', error);
+            console.error('Raw arguments:', toolCall.arguments);
+            throw new Error(`Invalid JSON in tool call arguments: ${error.message}`);
+          }
+        })()
       : toolCall.arguments;
 
     if (toolCall.name === 'spec') {

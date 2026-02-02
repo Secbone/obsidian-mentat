@@ -58,8 +58,17 @@ function convertHtmlToMarkdown(html: string): string {
   return turndownService.turndown(html);
 }
 
+// FetchResult type with timeout flag
+type FetchResult = {
+  success: boolean;
+  content?: string;
+  error?: string;
+  metadata?: any;
+  isTimeout?: boolean;
+};
+
 // Strategy 1: Jina AI Reader
-async function fetchWithJina(url: string, timeout: number): Promise<{ success: boolean; content?: string; error?: string; metadata?: any }> {
+async function fetchWithJina(url: string, timeout: number): Promise<FetchResult> {
   try {
     const jinaUrl = `https://r.jina.ai/${url}`;
     const response = await requestUrl({
@@ -73,6 +82,21 @@ async function fetchWithJina(url: string, timeout: number): Promise<{ success: b
     });
 
     if (response.status >= 200 && response.status < 300) {
+      // Check if Jina returned a warning/error page
+      const content = response.text;
+      const hasWarning = content.includes('Warning:') &&
+        (content.includes('Target URL returned error') ||
+          content.includes('not yet fully loaded'));
+
+      // If content is very short and contains warnings, treat as failure
+      if (hasWarning && content.length < 500) {
+        return {
+          success: false,
+          error: `Jina AI returned warning: ${content.split('\n')[0]}`,
+          isTimeout: false
+        };
+      }
+
       return {
         success: true,
         content: response.text,
@@ -84,24 +108,33 @@ async function fetchWithJina(url: string, timeout: number): Promise<{ success: b
       };
     }
 
+    // HTTP errors (403, 404, 500, etc.) - NOT timeouts, WILL trigger fallback
     return {
       success: false,
-      error: `Jina AI returned status ${response.status}`
+      error: `Jina AI returned status ${response.status}`,
+      isTimeout: false
     };
   } catch (error: any) {
+    // Detect timeout errors - these will NOT trigger fallback
+    const isTimeout = error.message?.toLowerCase().includes('timeout') ||
+                     error.name === 'TimeoutError' ||
+                     error.code === 'ETIMEDOUT';
+
     return {
       success: false,
-      error: `Jina AI error: ${error.message}`
+      error: `Jina AI error: ${error.message}`,
+      isTimeout: isTimeout
     };
   }
 }
 
 // Strategy 2: Browserless API
-async function fetchWithBrowserless(url: string, apiKey: string, timeout: number): Promise<{ success: boolean; content?: string; error?: string; metadata?: any }> {
+async function fetchWithBrowserless(url: string, apiKey: string, timeout: number): Promise<FetchResult> {
   if (!apiKey) {
     return {
       success: false,
-      error: 'Browserless API key not configured'
+      error: 'Browserless API key not configured',
+      isTimeout: false
     };
   }
 
@@ -114,8 +147,7 @@ async function fetchWithBrowserless(url: string, apiKey: string, timeout: number
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        url: url,
-        waitFor: 2000
+        url: url
       }),
       throw: false
     });
@@ -134,23 +166,32 @@ async function fetchWithBrowserless(url: string, apiKey: string, timeout: number
 
     return {
       success: false,
-      error: `Browserless returned status ${response.status}`
+      error: `Browserless returned status ${response.status}`,
+      isTimeout: false
     };
   } catch (error: any) {
+    const isTimeout = error.message?.toLowerCase().includes('timeout') ||
+                     error.name === 'TimeoutError' ||
+                     error.code === 'ETIMEDOUT';
+
     return {
       success: false,
-      error: `Browserless error: ${error.message}`
+      error: `Browserless error: ${error.message}`,
+      isTimeout: isTimeout
     };
   }
 }
 
 // Strategy 3: Direct HTTP Request
-async function fetchDirect(input: Input): Promise<{ success: boolean; content?: string; error?: string; metadata?: any }> {
+async function fetchDirect(input: Input): Promise<FetchResult> {
   try {
     const requestHeaders: Record<string, string> = {
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      'Accept-Language': 'en-US,en;q=0.9,zh-CN,zh;q=0.8',
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
       ...input.headers
     };
 
@@ -183,12 +224,18 @@ async function fetchDirect(input: Input): Promise<{ success: boolean; content?: 
         status: response.status,
         headers: response.headers,
         body: response.text.slice(0, 500)
-      }
+      },
+      isTimeout: false
     };
   } catch (error: any) {
+    const isTimeout = error.message?.toLowerCase().includes('timeout') ||
+                     error.name === 'TimeoutError' ||
+                     error.code === 'ETIMEDOUT';
+
     return {
       success: false,
-      error: `Direct fetch error: ${error.message}`
+      error: `Direct fetch error: ${error.message}`,
+      isTimeout: isTimeout
     };
   }
 }
@@ -215,6 +262,7 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
     }
 
     // 2. Determine strategy
+    const originalStrategy = input.strategy; // Preserve original for fallback logic
     let strategy = input.strategy;
     if (strategy === 'auto') {
       // If JavaScript is needed, prefer browserless
@@ -226,7 +274,7 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
     }
 
     // 3. Try fetching with selected strategy
-    let result: { success: boolean; content?: string; error?: string; metadata?: any } | null = null;
+    let result: FetchResult | null = null;
     const errors: string[] = [];
 
     // Get browserless API key from settings
@@ -239,16 +287,20 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
       }
     }
 
-    // Fallback to browserless if jina failed and we're in auto mode
-    if (!result?.success && (strategy === 'browserless' || strategy === 'auto')) {
+    // Fallback to browserless ONLY if jina failed with non-timeout error
+    if (!result?.success &&
+        !result?.isTimeout &&
+        (strategy === 'browserless' || originalStrategy === 'auto')) {
       result = await fetchWithBrowserless(input.url, browserlessApiKey, input.timeout);
       if (!result.success) {
         errors.push(`Browserless: ${result.error}`);
       }
     }
 
-    // Fallback to direct if previous strategies failed
-    if (!result?.success && (strategy === 'direct' || strategy === 'auto')) {
+    // Fallback to direct if previous strategies failed (also skip on timeout)
+    if (!result?.success &&
+        !result?.isTimeout &&
+        (strategy === 'direct' || originalStrategy === 'auto')) {
       result = await fetchDirect(input);
       if (!result.success) {
         errors.push(`Direct: ${result.error}`);
