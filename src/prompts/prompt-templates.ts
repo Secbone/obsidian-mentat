@@ -30,7 +30,7 @@ HOW TO USE SKILLS:
 WORKFLOW EXAMPLES:
 - Query notes (unknown parameters): spec("obsidian:query_notes") → review schema → invoke("obsidian:query_notes", {"query": "machine learning", "limit": 5})
 - Read note (known parameters): invoke("obsidian:read_note", {"path": "Projects/MyNote.md"})
-- Create note: spec("obsidian:create_note") → invoke("obsidian:create_note", {"path": "Daily/2025-01-26.md", "content": "# Today's Notes\\n\\n..."})
+- Create or edit note: spec("obsidian:edit_note") → invoke("obsidian:edit_note", {"path": "Daily/2025-01-26.md", "content": "# Today's Notes\\n\\n..."})
 
 Note: The skill list is dynamic. Use spec to discover additional skills or get updated information.`
   ],

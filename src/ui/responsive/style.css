@@ -1,0 +1,16 @@
+/* Responsive - Media queries and responsive adjustments */
+
+/* ===== RESPONSIVE ADJUSTMENTS ===== */
+@media (max-width: 600px) {
+  .message-wrapper {
+    max-width: 90%;
+  }
+
+  .chat-header {
+    padding: 8px 12px;
+  }
+
+  .chat-messages {
+    padding: 8px;
+  }
+}

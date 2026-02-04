@@ -24,7 +24,7 @@ Perform bulk operations on multiple documents: add/remove tags, update frontmatt
 - Adding consistent content to multiple files
 
 ## When NOT to use
-- Single file updates (use update-note or update-frontmatter instead)
+- Single file updates (use edit-note instead)
 - Complex per-file logic (process files individually instead)
 - When you need file-specific content changes
 

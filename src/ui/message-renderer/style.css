@@ -1,0 +1,325 @@
+/* Message Renderer - Message display, markdown content, and sources styles */
+
+/* ===== MESSAGES CONTAINER ===== */
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  /* Allow text selection in messages area */
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+}
+
+/* Thinner scrollbar */
+.chat-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+}
+
+.chat-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ===== INDIVIDUAL MESSAGE ===== */
+.chat-message {
+  display: flex;
+  gap: 10px;
+  animation: fadeIn 0.2s ease-out;
+  align-items: flex-start;
+}
+
+/* Avatar */
+.message-avatar {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.message-avatar svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* User message - avatar on right */
+.chat-message-user {
+  flex-direction: row-reverse;
+}
+
+.chat-message-user .message-avatar {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* Assistant message - avatar on left */
+.chat-message-assistant .message-avatar {
+  background-color: var(--background-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* Message wrapper (contains role + content) */
+.message-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 85%;
+  min-width: 0;
+}
+
+/* Role label */
+.message-role {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 0 4px;
+}
+
+.chat-message-user .message-role {
+  text-align: right;
+}
+
+/* Message content */
+.message-content {
+  padding: 10px 12px;
+  border-radius: 12px;
+  word-wrap: break-word;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.6;
+  position: relative;
+
+  /* Enable text selection */
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  cursor: text;
+}
+
+/* Message copy button */
+.message-copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background-color: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.message-content:hover .message-copy-button {
+  opacity: 1;
+}
+
+.message-copy-button:hover {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.message-copy-button:active {
+  transform: scale(0.95);
+}
+
+.message-copy-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* User message content */
+.chat-message-user .message-content {
+  background-color: rgba(88, 86, 214, 0.08);
+  border: 1px solid rgba(88, 86, 214, 0.15);
+  color: var(--text-normal);
+}
+
+/* Assistant message content */
+.chat-message-assistant .message-content {
+  background-color: transparent;
+  border-left: 2px solid var(--background-modifier-border);
+  border-radius: 0 12px 12px 0;
+  padding-left: 14px;
+  color: var(--text-normal);
+  transition: background-color 0.15s ease;
+}
+
+.chat-message-assistant .message-content:hover {
+  background-color: var(--background-secondary-alt);
+}
+
+/* Streaming indicator */
+.message-content.streaming::after {
+  content: '▊';
+  animation: blink 1s infinite;
+  margin-left: 2px;
+}
+
+/* ===== MARKDOWN CONTENT IN MESSAGES ===== */
+.message-content h1,
+.message-content h2,
+.message-content h3 {
+  margin: 12px 0 8px 0;
+  font-weight: 600;
+}
+
+.message-content h1 { font-size: 18px; }
+.message-content h2 { font-size: 16px; }
+.message-content h3 { font-size: 14px; }
+
+.message-content p {
+  margin: 8px 0;
+}
+
+.message-content p:first-child {
+  margin-top: 0;
+}
+
+.message-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* Inline code */
+.message-content code {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background-color: var(--code-background);
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+}
+
+/* Code blocks */
+.message-content pre {
+  margin: 8px 0;
+  padding: 0;
+  background-color: transparent;
+  overflow: visible;
+}
+
+.message-content pre code {
+  padding: 0;
+  background-color: transparent;
+  display: block;
+}
+
+/* Lists */
+.message-content ul,
+.message-content ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.message-content li {
+  margin: 4px 0;
+}
+
+/* Links */
+.message-content a {
+  color: var(--link-color);
+  text-decoration: none;
+}
+
+.message-content a:hover {
+  text-decoration: underline;
+}
+
+/* Blockquotes */
+.message-content blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+/* ===== MESSAGE SOURCES ===== */
+.message-sources {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.sources-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.sources-icon {
+  font-size: 14px;
+}
+
+.sources-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sources-list {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sources-list ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.sources-list li {
+  margin: 4px 0;
+}
+
+.sources-list a {
+  color: var(--link-color);
+  text-decoration: none;
+}
+
+.sources-list a:hover {
+  text-decoration: underline;
+}
+
+/* Animation for fade in */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Animation for blinking cursor */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}

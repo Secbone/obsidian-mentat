@@ -1,0 +1,104 @@
+/* Skill Call Renderer - Skill execution display styles */
+
+/* ===== SKILL CALL STYLES ===== */
+.skill-call {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: 13px;
+}
+
+.skill-call-pending {
+  border-color: var(--text-muted);
+}
+
+.skill-call-executing {
+  border-color: var(--interactive-accent);
+  background: var(--background-secondary-alt);
+}
+
+.skill-call-success {
+  border-color: var(--text-success);
+}
+
+.skill-call-error {
+  border-color: var(--text-error);
+  background: var(--background-modifier-error);
+}
+
+.skill-call-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.skill-call-icon {
+  font-size: 16px;
+}
+
+.skill-call-title {
+  flex: 1;
+  font-family: var(--font-monospace);
+  color: var(--text-normal);
+}
+
+.skill-call-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.skill-call-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.skill-call-section-header {
+  font-weight: 500;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.skill-call-section-content {
+  font-size: 12px;
+}
+
+.skill-call-section-content pre {
+  margin: 0;
+  padding: 8px;
+  background: var(--background-primary);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.skill-call-error {
+  color: var(--text-error);
+  padding: 8px;
+  background: var(--background-primary);
+  border-radius: 4px;
+  font-family: var(--font-monospace);
+}
+
+.skill-call-metadata {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.skill-call-metadata span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

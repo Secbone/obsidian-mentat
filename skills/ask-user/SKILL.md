@@ -105,7 +105,7 @@ Ask user a question to get clarification or guidance.
 ### Ambiguous Query Resolution
 1. `query-notes` - Find matching files
 2. `ask-user` - Let user select
-3. `read-note` or `update-note` - Process selected file
+3. `read-note` or `edit-note` - Process selected file
 
 ## Best Practices
 

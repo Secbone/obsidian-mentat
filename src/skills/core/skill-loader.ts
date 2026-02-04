@@ -7,9 +7,7 @@ import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDe
 // Import all skill implementations (compile-time imports for TypeScript)
 import * as QueryNotesImpl from '../../../skills/query-notes/scripts';
 import * as ReadNoteImpl from '../../../skills/read-note/scripts';
-import * as CreateNoteImpl from '../../../skills/create-note/scripts';
-import * as UpdateNoteImpl from '../../../skills/update-note/scripts';
-import * as UpdateFrontmatterImpl from '../../../skills/update-frontmatter/scripts';
+import * as EditNoteImpl from '../../../skills/edit-note/scripts';
 import * as BatchOperationImpl from '../../../skills/batch-operation/scripts';
 import * as ListNotesImpl from '../../../skills/list-notes/scripts';
 import * as AskUserImpl from '../../../skills/ask-user/scripts';
@@ -55,9 +53,7 @@ export class SkillLoader {
     this.implementationMap = new Map([
       ['query_notes', QueryNotesImpl],
       ['read_note', ReadNoteImpl],
-      ['create_note', CreateNoteImpl],
-      ['update_note', UpdateNoteImpl],
-      ['update_frontmatter', UpdateFrontmatterImpl],
+      ['edit_note', EditNoteImpl],
       ['batch_operation', BatchOperationImpl],
       ['list_notes', ListNotesImpl],
       ['ask_user', AskUserImpl],

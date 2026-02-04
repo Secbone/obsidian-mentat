@@ -26,7 +26,6 @@ Fetch content from web URLs using multiple intelligent strategies. Automatically
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `url` | string | Yes | - | URL to fetch (HTTP/HTTPS only) |
-| `strategy` | string | No | `"auto"` | `"auto"`, `"jina"`, `"browserless"`, or `"direct"` |
 | `method` | string | No | `"GET"` | HTTP method (GET, POST, PUT, PATCH, DELETE, HEAD) |
 | `headers` | object | No | `{}` | Custom HTTP headers |
 | `body` | string | No | - | Request body (for POST/PUT/PATCH) |
@@ -45,7 +44,7 @@ Blocks local/private IPs (127.0.0.1, 192.168.x.x, 10.x.x.x, localhost, 169.254.x
 
 ## Examples
 
-### Basic fetch (auto strategy)
+### Basic fetch
 ```json
 {
   "url": "https://example.com/article",
@@ -68,15 +67,6 @@ Blocks local/private IPs (127.0.0.1, 192.168.x.x, 10.x.x.x, localhost, 169.254.x
   "method": "POST",
   "headers": {"Content-Type": "application/json", "Authorization": "Bearer TOKEN"},
   "body": "{\"key\": \"value\"}"
-}
-```
-
-### Direct HTTP with custom headers
-```json
-{
-  "url": "https://api.example.com/data",
-  "strategy": "direct",
-  "headers": {"User-Agent": "MyApp/1.0"}
 }
 ```
 
@@ -104,10 +94,8 @@ Common errors: network failures, timeouts, HTTP errors (non-2xx), response too l
 
 ## Best Practices
 
-1. **Use auto strategy** - Let the skill choose the best method automatically
-2. **Enable useJavaScript for SPAs** - Set `useJavaScript: true` for React/Vue/Angular apps
-3. **Use direct strategy for APIs** - Fastest option for API calls
-4. **Handle errors gracefully** - Always check the success field before processing data
+1. **Enable useJavaScript for SPAs** - Set `useJavaScript: true` for React/Vue/Angular apps
+2. **Handle errors gracefully** - Always check the success field before processing data
 
 ## Limitations
 

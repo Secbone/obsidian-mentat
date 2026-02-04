@@ -4,15 +4,17 @@ import { SettingsTab } from './settings/settings-tab';
 import { AIRouter } from './providers/ai-router';
 import { OpenCodeIntegration } from './providers/opencode-integration';
 import { IndexManager } from './indexing/index-manager';
-import { ChatView, CHAT_VIEW_TYPE } from './chat/chat-view';
-import { RAGOrchestrator } from './chat/rag-orchestrator';
+import { ChatView, CHAT_VIEW_TYPE } from './ui/chat-view';
+import { ChatOrchestrator } from './chat/chat-orchestrator';
+import { AgentManager } from './agents/agent-manager';
 
 export default class PersonalAgentPlugin extends Plugin {
   settings: PersonalAgentSettings;
   aiRouter: AIRouter;
   openCodeIntegration: OpenCodeIntegration;
   indexManager: IndexManager;
-  ragOrchestrator: RAGOrchestrator;
+  chatOrchestrator: ChatOrchestrator;
+  agentManager: AgentManager;
 
   async onload() {
     console.log('Loading Personal Agent plugin');
@@ -27,9 +29,12 @@ export default class PersonalAgentPlugin extends Plugin {
     this.indexManager = new IndexManager(this);
     await this.indexManager.initialize();
 
-    // Initialize RAG Orchestrator
-    this.ragOrchestrator = new RAGOrchestrator(this);
-    await this.ragOrchestrator.initialize();
+    // Initialize Chat Orchestrator
+    this.chatOrchestrator = new ChatOrchestrator(this);
+    await this.chatOrchestrator.initialize();
+
+    // Get AgentManager reference (for advanced usage)
+    this.agentManager = this.chatOrchestrator.getAgentManager();
 
     // Initialize integrations
     this.openCodeIntegration = new OpenCodeIntegration(this);
@@ -259,7 +264,7 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
         const notice = new Notice('Reloading all skills...', 0);
 
         try {
-          await this.ragOrchestrator.reloadSkills();
+          await this.chatOrchestrator.reloadSkills();
           notice.hide();
           new Notice('✓ All skills reloaded');
         } catch (error) {

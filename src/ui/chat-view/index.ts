@@ -1,12 +1,13 @@
 // Chat View - Main sidebar UI component
 
-import { ItemView, WorkspaceLeaf, Modal, App, setIcon, TFile } from 'obsidian';
-import PersonalAgentPlugin from '../main';
-import { ChatManager } from './chat-manager';
-import { MessageRenderer } from './message-renderer';
-import { RAGOrchestrator } from './rag-orchestrator';
-import { FileSelectorModal } from '../ui/components/file-selector-modal';
-import { TaskType } from '../types';
+import { ItemView, WorkspaceLeaf, setIcon, TFile } from 'obsidian';
+import PersonalAgentPlugin from '../../main';
+import { ChatManager } from '../../chat/chat-manager';
+import { MessageRenderer } from '../message-renderer';
+import { ChatOrchestrator } from '../../chat/chat-orchestrator';
+import { FileSelectorModal } from '../file-selector-modal';
+import { ConfirmationModal } from '../confirmation-modal';
+import { TaskType } from '../../types';
 
 export const CHAT_VIEW_TYPE = 'personal-agent-chat';
 
@@ -14,7 +15,7 @@ export class ChatView extends ItemView {
   plugin: PersonalAgentPlugin;
   chatManager: ChatManager;
   messageRenderer: MessageRenderer;
-  ragOrchestrator: RAGOrchestrator;
+  chatOrchestrator: ChatOrchestrator;
 
   // UI elements
   private chatContainer: HTMLElement;
@@ -35,10 +36,10 @@ export class ChatView extends ItemView {
   constructor(leaf: WorkspaceLeaf, plugin: PersonalAgentPlugin) {
     super(leaf);
     this.plugin = plugin;
-    this.chatManager = new ChatManager(plugin);
+    this.chatManager = new ChatManager(plugin, plugin.settings.contextManager);
     this.messageRenderer = new MessageRenderer();
-    // Use shared RAGOrchestrator instance from plugin
-    this.ragOrchestrator = plugin.ragOrchestrator;
+    // Use shared ChatOrchestrator instance from plugin
+    this.chatOrchestrator = plugin.chatOrchestrator;
   }
 
   getViewType(): string {
@@ -269,16 +270,17 @@ export class ChatView extends ItemView {
         .filter((f): f is TFile => f instanceof TFile);
 
       // Get conversation history (does NOT include current message)
-      const contextMessages = this.chatManager.getContextMessages();
+      // Using ContextManager for optimized LLM context
+      const contextWindow = await this.chatManager
+        .getContextManager()
+        .getContextForLLM({ maxMessages: 50 });
+      const contextMessages = contextWindow.messages;
 
       let fullResponse = '';
 
-      // Always use RAG orchestrator for skill support
-      // If no files selected, RAG will handle it gracefully
-      const result = await this.ragOrchestrator.query(
+      // Use ChatOrchestrator for skill support
+      const result = await this.chatOrchestrator.query(
         userMessage,
-        selectedFiles,
-        contextMessages,
         (chunk: string) => {
           fullResponse += chunk;
           this.currentStreamingElement!.innerHTML =
@@ -286,7 +288,9 @@ export class ChatView extends ItemView {
           this.scrollToBottom();
         },
         {
-          enableSkills: this.plugin.settings.skillsEnabled
+          enableSkills: this.plugin.settings.skillsEnabled,
+          contextMessages: contextMessages,
+          maxTurns: this.plugin.settings.maxTurns || 20
         }
       );
 
@@ -438,10 +442,14 @@ export class ChatView extends ItemView {
 
   private async confirmClear(): Promise<boolean> {
     return new Promise((resolve) => {
-      const modal = new ConfirmModal(
+      const modal = new ConfirmationModal(
         this.app,
-        'Clear Chat History',
-        'Are you sure you want to clear all chat messages? This cannot be undone.',
+        {
+          skillName: 'Clear Chat',
+          description: 'Clear all chat messages. This cannot be undone.',
+          parameters: {},
+          operationType: 'delete'
+        },
         resolve
       );
       modal.open();
@@ -468,45 +476,5 @@ export class ChatView extends ItemView {
 
   async onClose(): Promise<void> {
     // Cleanup if needed
-  }
-}
-
-// Simple confirmation modal
-class ConfirmModal extends Modal {
-  constructor(
-    app: App,
-    private title: string,
-    private message: string,
-    private callback: (result: boolean) => void
-  ) {
-    super(app);
-  }
-
-  onOpen(): void {
-    const { contentEl } = this;
-    contentEl.createEl('h3', { text: this.title });
-    contentEl.createEl('p', { text: this.message });
-
-    const buttonContainer = contentEl.createDiv('modal-button-container');
-
-    const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
-    cancelButton.addEventListener('click', () => {
-      this.callback(false);
-      this.close();
-    });
-
-    const confirmButton = buttonContainer.createEl('button', {
-      text: 'Clear',
-      cls: 'mod-warning'
-    });
-    confirmButton.addEventListener('click', () => {
-      this.callback(true);
-      this.close();
-    });
-  }
-
-  onClose(): void {
-    const { contentEl } = this;
-    contentEl.empty();
   }
 }

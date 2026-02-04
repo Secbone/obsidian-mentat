@@ -152,9 +152,9 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
     content += '→ invoke("obsidian:query_notes", {"query": "machine learning", "limit": 5})\n\n';
     content += '*Read a note (if you already know parameters):*\n';
     content += '→ invoke("obsidian:read_note", {"path": "Projects/MyNote.md"})\n\n';
-    content += '*Create a new note:*\n';
-    content += '→ spec("obsidian:create_note")\n';
-    content += '→ invoke("obsidian:create_note", {"path": "Daily/2025-01-26.md", "content": "# Today\'s Notes\\n\\n..."})\n\n';
+    content += '*Create or edit a note:*\n';
+    content += '→ spec("obsidian:edit_note")\n';
+    content += '→ invoke("obsidian:edit_note", {"path": "Daily/2025-01-26.md", "content": "# Today\'s Notes\\n\\n..."})\n\n';
     content += '**Note:** The skill list may be dynamic. Use `spec` to discover additional skills or get updated information.\n';
 
     return content;

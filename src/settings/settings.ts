@@ -1,6 +1,7 @@
 // Personal Agent Settings Interface
 import { MCPServerConfig } from '../skills/mcp/mcp-types';
 import { SkillInvocationConfig } from '../types';
+import { ContextOptions } from '../context/context-types';
 
 export interface PersonalAgentSettings {
   // AI Providers Configuration
@@ -45,6 +46,15 @@ export interface PersonalAgentSettings {
   mcpServers: MCPServerConfig[];
   mcpTimeout: number;
   mcpRetryAttempts: number;
+
+  // Context Manager Configuration
+  contextManager?: {
+    defaultStrategy: 'sliding-window' | 'token-limit' | 'relevance';
+    llmDefaults?: ContextOptions;
+    displayDefaults?: ContextOptions;
+    enableCache?: boolean;
+    cacheTTL?: number; // Cache time-to-live in milliseconds
+  };
 
   // Performance Configuration
   indexingBatchSize: number;  // Default 50
@@ -106,7 +116,7 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   skillsEnabled: true,
   requireSkillConfirmation: false,
   allowedSkills: [],
-  maxTurns: 5,
+  maxTurns: 20,
 
   // Skill Invocation Configuration
   skillInvocationMode: 'progressive', // Use progressive disclosure by default
@@ -124,6 +134,23 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   mcpServers: [],
   mcpTimeout: 30000,
   mcpRetryAttempts: 3,
+
+  // Context Manager Configuration
+  contextManager: {
+    defaultStrategy: 'sliding-window',
+    llmDefaults: {
+      maxMessages: 50,
+      includeSystemMessages: true,
+      includeToolCalls: true,
+      transformToolCalls: true
+    },
+    displayDefaults: {
+      includeSystemMessages: true,
+      includeToolCalls: true
+    },
+    enableCache: true,
+    cacheTTL: 300000 // 5 minutes
+  },
 
   indexingBatchSize: 50,
   cacheExpiryDays: 7,

@@ -237,17 +237,46 @@ export class SettingsTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    new Setting(containerEl)
+    const maxTurnsSetting = new Setting(containerEl)
       .setName('Agent Max Turns')
-      .setDesc('Maximum iterations for skill execution loop (1-20)')
-      .addSlider(slider => slider
-        .setLimits(1, 20, 1)
-        .setValue(this.plugin.settings.maxTurns)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.maxTurns = value;
+      .setDesc('Maximum number of iterations the AI agent can perform when executing tasks (1-99). Default: 20. Higher values allow for more complex multi-step operations.');
+
+    // Add text input for precise control
+    maxTurnsSetting.addText(text => text
+      .setPlaceholder('20')
+      .setValue(String(this.plugin.settings.maxTurns))
+      .onChange(async (value) => {
+        const numValue = parseInt(value);
+        if (!isNaN(numValue) && numValue >= 1 && numValue <= 99) {
+          this.plugin.settings.maxTurns = numValue;
           await this.plugin.saveSettings();
-        }));
+        }
+      }));
+
+    // Add slider for quick adjustment
+    maxTurnsSetting.addSlider(slider => slider
+      .setLimits(1, 99, 1)
+      .setValue(this.plugin.settings.maxTurns)
+      .setDynamicTooltip()
+      .onChange(async (value) => {
+        this.plugin.settings.maxTurns = value;
+        await this.plugin.saveSettings();
+        // Update text input
+        const textInput = containerEl.querySelector('.setting-item:last-child input[type="text"]') as HTMLInputElement;
+        if (textInput) {
+          textInput.value = String(value);
+        }
+      }));
+
+    // Add reset button
+    maxTurnsSetting.addExtraButton(button => button
+      .setIcon('reset')
+      .setTooltip('Reset to default (20)')
+      .onClick(async () => {
+        this.plugin.settings.maxTurns = 20;
+        await this.plugin.saveSettings();
+        this.display();
+      }));
   }
 
   showProviderEditModal(provider: AIProviderConfig | null, index: number): void {

@@ -213,60 +213,51 @@ export class AnthropicProvider implements AIProvider {
       const stream = await this.client.messages.stream(requestParams);
 
       let fullContent = '';
-      const toolCalls: ToolCall[] = [];
-      const toolCallsInProgress: Map<number, { id: string; name: string; input: string }> = new Map();
-      let finishReason: string | undefined;
 
+      // Stream text content
       for await (const event of stream) {
-        if (event.type === 'content_block_start') {
-          if (event.content_block.type === 'tool_use') {
-            toolCallsInProgress.set(event.index, {
-              id: event.content_block.id,
-              name: event.content_block.name,
-              input: ''
-            });
-          }
-        } else if (event.type === 'content_block_delta') {
-          if (event.delta.type === 'text_delta') {
-            fullContent += event.delta.text;
-            onChunk(event.delta.text);
-          } else if (event.delta.type === 'input_json_delta') {
-            const inProgress = toolCallsInProgress.get(event.index);
-            if (inProgress) {
-              inProgress.input += event.delta.partial_json;
-            }
-          }
-        } else if (event.type === 'message_stop') {
-          finishReason = 'stop';
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          fullContent += event.delta.text;
+          onChunk(event.delta.text);
         }
       }
 
-      // Convert in-progress tool calls to final format
-      for (const tc of toolCallsInProgress.values()) {
-        let parsedInput: any;
-        try {
-          parsedInput = JSON.parse(tc.input);
-        } catch {
-          parsedInput = tc.input;
-        }
+      // Get final message with properly parsed tool calls
+      const finalMessage = await stream.finalMessage();
 
-        const toolCall: ToolCall = {
-          id: tc.id,
-          name: tc.name,
-          arguments: parsedInput
-        };
-        toolCalls.push(toolCall);
+      const toolCalls: ToolCall[] = [];
+      for (const block of finalMessage.content) {
+        if (block.type === 'tool_use') {
+          // Log what we're receiving from the SDK
+          console.log('[AnthropicProvider] Tool use block:', {
+            id: block.id,
+            name: block.name,
+            inputType: typeof block.input,
+            inputIsString: typeof block.input === 'string',
+            inputLength: typeof block.input === 'string' ? (block.input as string).length : 'N/A',
+            inputPreview: typeof block.input === 'string'
+              ? (block.input as string).substring(0, 200)
+              : JSON.stringify(block.input).substring(0, 200)
+          });
 
-        // Notify about tool call
-        if (onToolCall) {
-          onToolCall(toolCall);
+          const toolCall: ToolCall = {
+            id: block.id,
+            name: block.name,
+            // Arguments can be either string or object - both are handled by downstream parsers
+            arguments: block.input
+          };
+          toolCalls.push(toolCall);
+
+          if (onToolCall) {
+            onToolCall(toolCall);
+          }
         }
       }
 
       return {
         content: fullContent,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: finishReason as any
+        finishReason: finalMessage.stop_reason as any
       };
     } catch (error) {
       console.error('AnthropicProvider generateStreamWithSkills error:', error);
@@ -305,11 +296,27 @@ export class AnthropicProvider implements AIProvider {
 
           // Add tool use blocks
           for (const tc of msg.tool_calls) {
+            let input;
+            if (typeof tc.arguments === 'string') {
+              try {
+                input = JSON.parse(tc.arguments);
+              } catch (error: any) {
+                console.error('[AnthropicProvider convertMessages] Failed to parse tool arguments:', error);
+                console.error('[AnthropicProvider convertMessages] Tool name:', tc.name);
+                console.error('[AnthropicProvider convertMessages] Arguments length:', tc.arguments.length);
+                console.error('[AnthropicProvider convertMessages] Arguments preview:', tc.arguments.substring(0, 500));
+                // Try to recover or throw a more informative error
+                throw new Error(`Failed to parse tool arguments for ${tc.name}: ${error.message}`);
+              }
+            } else {
+              input = tc.arguments;
+            }
+
             content.push({
               type: 'tool_use',
               id: tc.id,
               name: tc.name,
-              input: typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments
+              input: input
             });
           }
 

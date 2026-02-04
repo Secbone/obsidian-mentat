@@ -2,6 +2,24 @@
 
 import { TFile } from 'obsidian';
 
+// Re-export context types
+export {
+  ContextOptions,
+  ContextWindow,
+  ContextMetadata,
+  LLMContext,
+  DisplayContext,
+  DisplayMessage,
+  MessageGroup,
+  RawContext,
+  ContextStrategy,
+  ContextManagerConfig,
+  ExportData,
+  TokenEstimate,
+  CodeBlock,
+  FormattedContent
+} from '../context/context-types';
+
 // Task types for AI routing
 export enum TaskType {
   EMBEDDING = 'embedding',

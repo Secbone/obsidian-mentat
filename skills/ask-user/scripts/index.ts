@@ -3,7 +3,7 @@
 
 import { z } from 'zod';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
-import { UserInputModal } from '../../../src/ui/components/user-input-modal';
+import { UserInputModal } from '../../../src/ui/user-input-modal';
 
 /**
  * Skill metadata

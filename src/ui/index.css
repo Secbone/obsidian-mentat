@@ -1,0 +1,12 @@
+/* Personal Agent - Component Styles Index */
+
+/* Chat UI components */
+@import './chat-view/style.css';
+@import './message-renderer/style.css';
+@import './skill-call-renderer/style.css';
+
+/* Reusable UI components */
+@import './code-block/style.css';
+
+/* Global responsive adjustments (must be last) */
+@import './responsive/style.css';

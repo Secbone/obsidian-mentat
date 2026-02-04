@@ -8,7 +8,7 @@ This is a **hybrid architecture** skill system for AI Agent that combines:
 - **MCP Integration** - Support for external Model Context Protocol (MCP) servers (extensible, ecosystem)
 - **Unified Management** - SkillRegistry manages both types with consistent interface
 
-The system integrates with RAG chat infrastructure and leverages OpenAI/Anthropic Function Calling/Tool Use capabilities. All skills follow the [Agent Skills specification](https://agentskills.io/specification).
+The system integrates with the chat infrastructure and leverages OpenAI/Anthropic Function Calling/Tool Use capabilities. All skills follow the [Agent Skills specification](https://agentskills.io/specification).
 
 ### Design Philosophy
 
@@ -28,8 +28,8 @@ The system integrates with RAG chat infrastructure and leverages OpenAI/Anthropi
 └────────────────────┬────────────────────────────────────┘
                      │
 ┌────────────────────▼────────────────────────────────────┐
-│            RAGOrchestrator (Enhanced)                    │
-│  - Coordinates RAG + Skill execution                    │
+│            ChatOrchestrator (Enhanced)                   │
+│  - Coordinates Agent + Skill execution                  │
 │  - Manages multi-turn conversation flow                 │
 │  - Injects skill calls/results into message history     │
 └────────────────────┬────────────────────────────────────┘
@@ -97,13 +97,7 @@ skills/                              # Unified skills directory
 ├── read-note/
 │   ├── SKILL.md
 │   └── scripts/implementation.ts
-├── create-note/
-│   ├── SKILL.md
-│   └── scripts/implementation.ts
-├── update-note/
-│   ├── SKILL.md
-│   └── scripts/implementation.ts
-├── update-frontmatter/
+├── edit-note/
 │   ├── SKILL.md
 │   └── scripts/implementation.ts
 ├── batch-operation/
@@ -208,9 +202,9 @@ The `UnifiedSkillLoader` class (in `skill-loader.ts`):
 - `isExecutableSkill()` - Type guard for executable skills
 - `isDocumentationSkill()` - Type guard for doc skills
 
-### RAGOrchestrator Integration
+### ChatOrchestrator Integration
 
-In `src/features/chat/rag-orchestrator.ts`:
+In `src/chat/chat-orchestrator.ts`:
 
 ```typescript
 private async loadAllSkills(): Promise<void> {

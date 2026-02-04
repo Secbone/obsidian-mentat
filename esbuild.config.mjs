@@ -7,7 +7,7 @@ const prod = process.argv[2] === "production";
 const context = await esbuild.context({
   entryPoints: {
     main: "src/main.ts",
-    styles: "src/ui/styles/chat.css"
+    styles: "src/ui/index.css"
   },
   bundle: true,
   external: [

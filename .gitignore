@@ -6,6 +6,7 @@ main.css
 styles.css
 *.log
 .DS_Store
+**/.DS_Store
 .vscode
 .idea
 

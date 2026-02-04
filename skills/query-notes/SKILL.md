@@ -126,7 +126,7 @@ Search documents by semantic search, tags, folders, or glob patterns. At least o
 ### Discover → Read → Update
 1. `query-notes` - Find files
 2. `read-note` - Read content
-3. `update-note` - Modify files
+3. `edit-note` - Modify files
 
 ## Best Practices
 

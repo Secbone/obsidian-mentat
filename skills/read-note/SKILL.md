@@ -25,7 +25,7 @@ Read document content with optional metadata, supporting full reads, specific se
 
 ## When NOT to use
 - Searching for documents (use query-notes instead)
-- Modifying documents (use update-note or update-frontmatter instead)
+- Modifying documents (use edit-note instead)
 - Listing multiple files (use query-notes or list-notes instead)
 
 ## Input Schema
@@ -161,7 +161,7 @@ Read document content with optional metadata, supporting full reads, specific se
 ### Query → Read → Update
 1. `query-notes` - Find files
 2. `read-note` - Read content
-3. `update-note` - Make changes
+3. `edit-note` - Make changes
 
 ## Best Practices
 

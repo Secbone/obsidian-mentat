@@ -1,0 +1,64 @@
+/* Code Block - Syntax highlighted code block styles */
+
+/* ===== CODE BLOCK WRAPPER ===== */
+.code-block-wrapper {
+  margin: 8px 0;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  overflow: hidden;
+  background-color: var(--code-background);
+}
+
+.code-block-header {
+  padding: 6px 12px;
+  background-color: var(--background-secondary);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.code-block-language {
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.code-copy-button {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: none;
+  border-radius: 3px;
+  background-color: var(--background-modifier-hover);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.code-copy-button:hover {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.code-copy-button:active {
+  transform: scale(0.95);
+}
+
+.code-block-wrapper pre {
+  margin: 0;
+  padding: 12px;
+  background-color: var(--code-background);
+  overflow-x: auto;
+}
+
+.code-block-wrapper pre code {
+  background-color: transparent;
+  padding: 0;
+
+  /* Enable text selection in code blocks */
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+}

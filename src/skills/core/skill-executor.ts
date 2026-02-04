@@ -14,7 +14,7 @@ import {
   isDocumentationSkill,
   isExecutableSkill
 } from '../skill-types';
-import { ConfirmationModal, ConfirmationModalOptions } from '../../ui/components/confirmation-modal';
+import { ConfirmationModal, ConfirmationModalOptions } from '../../ui/confirmation-modal';
 
 /**
  * Skill execution options
@@ -163,25 +163,88 @@ export class SkillExecutor {
   }
 
   /**
+   * Helper: Truncate string at a valid UTF-8 boundary
+   */
+  private truncateAtValidUtf8(str: string, maxPos: number): string {
+    // Ensure we don't cut in the middle of a multi-byte UTF-8 sequence
+    // UTF-8 continuation bytes have the pattern 10xxxxxx (0x80-0xBF)
+    while (maxPos > 0 && (str.charCodeAt(maxPos) & 0xC0) === 0x80) {
+      maxPos--;
+    }
+    return str.substring(0, maxPos);
+  }
+
+  /**
+   * Safely parse tool call arguments with recovery strategies
+   */
+  private safeParseToolArguments(toolCall: ToolCall): Record<string, any> | null {
+    if (typeof toolCall.arguments !== 'string') {
+      return toolCall.arguments;
+    }
+
+    const argsString = toolCall.arguments as string;
+
+    // Try normal parsing first
+    try {
+      return JSON.parse(argsString);
+    } catch (error: any) {
+      console.error('[SkillExecutor] JSON parse failed, attempting recovery...');
+      console.error('[SkillExecutor] Tool:', toolCall.name, 'Error:', error.message);
+      console.error('[SkillExecutor] String length:', argsString.length);
+      console.error('[SkillExecutor] First 500 chars:', argsString.substring(0, 500));
+      console.error('[SkillExecutor] Last 500 chars:', argsString.substring(Math.max(0, argsString.length - 500)));
+
+      // Extract error position if available
+      const posMatch = error.message.match(/position (\d+)/);
+      if (posMatch) {
+        const pos = parseInt(posMatch[1]);
+        console.error('[SkillExecutor] Context around position:', pos,
+          argsString.substring(Math.max(0, pos - 100), Math.min(argsString.length, pos + 100)));
+      }
+
+      // Recovery Strategy 1: Try to fix unterminated strings
+      if (error.message.includes('Unterminated string')) {
+        try {
+          const fixed = argsString + '"}';
+          console.log('[SkillExecutor] Attempting to fix with closing quote and brace...');
+          return JSON.parse(fixed);
+        } catch {
+          // Failed, continue to next strategy
+        }
+      }
+
+      // Recovery Strategy 2: Try to extract valid JSON prefix with UTF-8 safe truncation
+      try {
+        let lastValidPos = argsString.lastIndexOf('}');
+        if (lastValidPos > 0) {
+          const truncated = this.truncateAtValidUtf8(argsString, lastValidPos + 1);
+          console.log('[SkillExecutor] Attempting to parse truncated JSON (', truncated.length, 'chars)...');
+          return JSON.parse(truncated);
+        }
+      } catch {
+        // Failed, continue
+      }
+
+      // All recovery strategies failed
+      return null;
+    }
+  }
+
+  /**
    * Execute a skill from a ToolCall (from AI provider)
    */
   async executeFromToolCall(
     toolCall: ToolCall,
     options: ExecutionOptions = {}
   ): Promise<SkillResult> {
-    // Parse parameters
-    let parameters: Record;
-    if (typeof toolCall.arguments === 'string') {
-      try {
-        parameters = JSON.parse(toolCall.arguments);
-      } catch (error) {
-        return {
-          success: false,
-          error: `Invalid JSON in tool arguments: ${error.message}`
-        };
-      }
-    } else {
-      parameters = toolCall.arguments;
+    // Parse parameters with recovery strategies
+    const parameters = this.safeParseToolArguments(toolCall);
+
+    if (parameters === null) {
+      return {
+        success: false,
+        error: `Failed to parse tool arguments for ${toolCall.name}. All recovery strategies failed.`
+      };
     }
 
     // Parse skill name

@@ -1,7 +1,7 @@
 // File Selector Modal - Fuzzy search interface for selecting documents
 
 import { SuggestModal, TFile } from 'obsidian';
-import PersonalAgentPlugin from '../../main';
+import PersonalAgentPlugin from '../../../main';
 import Fuse from 'fuse.js';
 
 export class FileSelectorModal extends SuggestModal<TFile> {

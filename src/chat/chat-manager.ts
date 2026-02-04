@@ -2,6 +2,8 @@
 
 import { ChatMessage } from '../types';
 import PersonalAgentPlugin from '../main';
+import { ContextManager } from '../context/context-manager';
+import { ContextManagerConfig } from '../context/context-types';
 
 interface ChatHistory {
   sessionId: string;
@@ -17,10 +19,14 @@ export class ChatManager {
   private sessionId: string;
   private readonly STORAGE_KEY = 'personal-agent-chat-history';
   private readonly MAX_HISTORY_SIZE = 100; // Keep last 100 messages
+  private contextManager: ContextManager;
 
-  constructor(plugin: PersonalAgentPlugin) {
+  constructor(plugin: PersonalAgentPlugin, contextConfig?: ContextManagerConfig) {
     this.plugin = plugin;
     this.sessionId = this.generateSessionId();
+
+    // Initialize context manager
+    this.contextManager = new ContextManager(this, contextConfig);
   }
 
   /**
@@ -77,13 +83,21 @@ export class ChatManager {
   }
 
   /**
-   * Get messages for AI context (all messages by default, or last N if limit specified)
+   * Get the context manager instance
    */
-  getContextMessages(limit?: number): ChatMessage[] {
-    if (limit !== undefined && limit > 0) {
-      return this.history.slice(-limit);
-    }
-    return this.history;
+  getContextManager(): ContextManager {
+    return this.contextManager;
+  }
+
+  /**
+   * Get session information (for ContextManager)
+   */
+  getSessionInfo(): { sessionId: string; startTime?: number; lastUpdated?: number } {
+    return {
+      sessionId: this.sessionId,
+      startTime: this.history[0]?.timestamp,
+      lastUpdated: this.history[this.history.length - 1]?.timestamp
+    };
   }
 
   /**

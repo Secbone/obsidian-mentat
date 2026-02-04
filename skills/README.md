@@ -30,9 +30,7 @@ Executable skills contain both metadata/documentation (SKILL.md) and implementat
 **Executable skills in this directory:**
 - `query-notes`: Search and filter documents with semantic search
 - `read-note`: Read document content with metadata
-- `create-note`: Create new documents with frontmatter
-- `update-note`: Update document content (append, prepend, replace)
-- `update-frontmatter`: Update document frontmatter metadata
+- `edit-note`: Create or update documents with intelligent operation detection
 - `batch-operation`: Batch operations on multiple documents
 - `list-notes`: Get vault structure overview
 
