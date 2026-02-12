@@ -5,15 +5,7 @@ import { TFile } from 'obsidian';
 // Re-export context types
 export {
   ContextOptions,
-  ContextWindow,
   ContextMetadata,
-  LLMContext,
-  DisplayContext,
-  DisplayMessage,
-  MessageGroup,
-  RawContext,
-  ContextStrategy,
-  ContextManagerConfig,
   ExportData,
   TokenEstimate,
   CodeBlock,

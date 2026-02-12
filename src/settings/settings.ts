@@ -25,6 +25,9 @@ export interface PersonalAgentSettings {
   // Web Fetch Configuration
   browserlessApiKey: string;
 
+  // Web Search Configuration
+  braveSearchApiKey: string;
+
   // Feature Toggles
   autoClassificationEnabled: boolean;
   linkSuggestionEnabled: boolean;
@@ -106,6 +109,7 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   opencodeApiKey: '',
 
   browserlessApiKey: '',
+  braveSearchApiKey: '',
 
   autoClassificationEnabled: true,
   linkSuggestionEnabled: true,

@@ -2,8 +2,7 @@
 
 import { ChatMessage } from '../types';
 import PersonalAgentPlugin from '../main';
-import { ContextManager } from '../context/context-manager';
-import { ContextManagerConfig } from '../context/context-types';
+import { Context, Message, ContextOptions } from '../context';
 
 interface ChatHistory {
   sessionId: string;
@@ -19,14 +18,10 @@ export class ChatManager {
   private sessionId: string;
   private readonly STORAGE_KEY = 'personal-agent-chat-history';
   private readonly MAX_HISTORY_SIZE = 100; // Keep last 100 messages
-  private contextManager: ContextManager;
 
-  constructor(plugin: PersonalAgentPlugin, contextConfig?: ContextManagerConfig) {
+  constructor(plugin: PersonalAgentPlugin) {
     this.plugin = plugin;
     this.sessionId = this.generateSessionId();
-
-    // Initialize context manager
-    this.contextManager = new ContextManager(this, contextConfig);
   }
 
   /**
@@ -83,14 +78,7 @@ export class ChatManager {
   }
 
   /**
-   * Get the context manager instance
-   */
-  getContextManager(): ContextManager {
-    return this.contextManager;
-  }
-
-  /**
-   * Get session information (for ContextManager)
+   * Get session information
    */
   getSessionInfo(): { sessionId: string; startTime?: number; lastUpdated?: number } {
     return {
@@ -98,6 +86,54 @@ export class ChatManager {
       startTime: this.history[0]?.timestamp,
       lastUpdated: this.history[this.history.length - 1]?.timestamp
     };
+  }
+
+  /**
+   * Create a Context object from current chat history
+   */
+  async createContext(): Promise<Context> {
+    await this.loadHistory();
+
+    // Convert ChatMessage[] to Message[]
+    const messages = this.history.map(chatMsg => new Message({
+      role: chatMsg.role,
+      content: chatMsg.content,
+      timestamp: chatMsg.timestamp,
+      sources: chatMsg.sources,
+      name: chatMsg.name,
+      tool_call_id: chatMsg.tool_call_id,
+      tool_calls: chatMsg.tool_calls
+    }));
+
+    return new Context(messages, {
+      sessionId: this.sessionId,
+      sessionStartTime: this.history[0]?.timestamp,
+      lastUpdated: this.history[this.history.length - 1]?.timestamp
+    });
+  }
+
+  /**
+   * Get context optimized for LLM (convenience method)
+   */
+  async getContextForLLM(options?: ContextOptions): Promise<any[]> {
+    const context = await this.createContext();
+    return context.getContext('llm', options);
+  }
+
+  /**
+   * Get context enhanced for display (convenience method)
+   */
+  async getContextForDisplay(options?: ContextOptions): Promise<any[]> {
+    const context = await this.createContext();
+    return context.getContext('display', options);
+  }
+
+  /**
+   * Get raw context (convenience method)
+   */
+  async getRawContext(): Promise<any[]> {
+    const context = await this.createContext();
+    return context.getContext('raw');
   }
 
   /**

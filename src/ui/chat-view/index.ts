@@ -270,11 +270,9 @@ export class ChatView extends ItemView {
         .filter((f): f is TFile => f instanceof TFile);
 
       // Get conversation history (does NOT include current message)
-      // Using ContextManager for optimized LLM context
-      const contextWindow = await this.chatManager
-        .getContextManager()
+      // Using Context.getContext() for optimized LLM context
+      const contextMessages = await this.chatManager
         .getContextForLLM({ maxMessages: 50 });
-      const contextMessages = contextWindow.messages;
 
       let fullResponse = '';
 

@@ -162,6 +162,18 @@ export class SettingsTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
+    // Brave Search API Key
+    new Setting(containerEl)
+      .setName('Brave Search API Key')
+      .setDesc('API key for Brave Search (used by web-search skill). Get your free key at https://brave.com/search/api/')
+      .addText(text => text
+        .setPlaceholder('Enter your Brave Search API key')
+        .setValue(this.plugin.settings.braveSearchApiKey)
+        .onChange(async (value) => {
+          this.plugin.settings.braveSearchApiKey = value;
+          await this.plugin.saveSettings();
+        }));
+
     // Obsidian Skills Integration
     new Setting(containerEl)
       .setName('Enable Obsidian Skills Integration')
