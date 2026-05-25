@@ -679,7 +679,21 @@ export class ChatView extends ItemView {
       for (let index = 0; index < toolCalls.length; index++) {
         const tc = toolCalls[index];
         const { isSuccess, responseMsg } = responses[index];
-        const shortName = tc.name.split(':').pop() || tc.name;
+        
+        // Resolve display name for meta-tools (spec/invoke) to match execution style
+        let displayName = tc.name;
+        if (tc.name === 'spec' || tc.name === 'invoke') {
+          try {
+            const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+            const skillName = args.skill_name;
+            if (skillName) {
+              displayName = `${tc.name}:${skillName}`;
+            }
+          } catch (e) {
+            // Keep original if parsing fails
+          }
+        }
+        const shortName = displayName.split(':').pop() || displayName;
 
         // Create collapsible details block
         const details = consoleBody.createEl('details', { cls: 'tui-line-item' });
