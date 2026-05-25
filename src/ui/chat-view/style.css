@@ -320,3 +320,185 @@
   width: 16px;
   height: 16px;
 }
+
+/* ===== TUI TERMINAL CONSOLE ===== */
+.tui-console {
+  background-color: var(--background-secondary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin: 10px 0 14px;
+  font-family: var(--font-monospace);
+  box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.08);
+  display: block;
+  overflow: hidden;
+}
+
+.tui-console-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  list-style: none;
+}
+
+.tui-console-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tui-console-summary::after {
+  content: "[展开审计]";
+  font-size: 11px;
+  color: var(--interactive-accent);
+  font-weight: normal;
+}
+
+.tui-console[open] .tui-console-summary {
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tui-console[open] .tui-console-summary::after {
+  content: "[折叠审计]";
+  color: var(--text-muted);
+}
+
+.tui-console-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.tui-status-line {
+  font-size: 11px;
+  color: var(--interactive-accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tui-spinner {
+  display: inline-block;
+  animation: tui-spin 1s linear infinite;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+@keyframes tui-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.tui-line-item {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.tui-line-item[open] {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.tui-line-summary {
+  font-size: 11.5px;
+  color: var(--text-normal);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  padding: 4px 6px;
+}
+
+.tui-line-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tui-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.tui-icon.pending, .tui-icon.executing {
+  color: var(--text-accent);
+  animation: tui-blink 1.5s infinite;
+}
+
+.tui-icon.success {
+  color: var(--text-success);
+}
+
+.tui-icon.error {
+  color: var(--text-error);
+}
+
+.tui-icon.warning {
+  color: var(--text-warning);
+}
+
+@keyframes tui-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.tui-tool-name {
+  font-weight: 600;
+  font-family: var(--font-monospace);
+}
+
+.tui-line-details {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.tui-line-details pre {
+  margin: 0;
+  padding: 6px;
+  background-color: var(--background-secondary-alt);
+  border-radius: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.tui-line-details code {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.status-indicator {
+  font-size: 11px;
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-indicator.warning {
+  color: var(--text-warning);
+}
+
+.final-answer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--background-modifier-border);
+}

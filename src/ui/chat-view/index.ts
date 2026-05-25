@@ -4,13 +4,21 @@ import { ItemView, WorkspaceLeaf, setIcon, TFile } from 'obsidian';
 import PersonalAgentPlugin from '../../main';
 import { ChatManager } from '../../chat/chat-manager';
 import { MessageRenderer } from '../message-renderer';
-import { ChatOrchestrator } from '../../chat/chat-orchestrator';
+import { ChatOrchestrator, ChatQueryResult } from '../../chat/chat-orchestrator';
 import { FileSelectorModal } from '../file-selector-modal';
 import { ConfirmationModal } from '../confirmation-modal';
-import { TaskType } from '../../types';
+import { TaskType, ChatMessage, ToolCall } from '../../types';
 import { AgentEvent } from '../../agents/agent-types';
 
 export const CHAT_VIEW_TYPE = 'personal-agent-chat';
+
+interface ActiveTask {
+  id: string;
+  name: string;
+  status: 'pending' | 'executing' | 'success' | 'error' | 'confirm';
+  params?: any;
+  result?: any;
+}
 
 export class ChatView extends ItemView {
   plugin: PersonalAgentPlugin;
@@ -33,6 +41,8 @@ export class ChatView extends ItemView {
   // State
   private isStreaming: boolean = false;
   private currentStreamingElement: HTMLElement | null = null;
+  private lastRenderedStatus: string = '';
+  private lastRenderedTasksJson: string = '';
 
   constructor(leaf: WorkspaceLeaf, plugin: PersonalAgentPlugin) {
     super(leaf);
@@ -253,6 +263,14 @@ export class ChatView extends ItemView {
     this.currentStreamingElement = wrapper.createDiv('message-content');
     this.currentStreamingElement.addClass('streaming');
 
+    // Initialize decoupled sub-containers for jitter-free double-container streaming
+    this.currentStreamingElement.createDiv('tui-console-container');
+    this.currentStreamingElement.createDiv('final-answer-container');
+
+    // Reset last rendered states
+    this.lastRenderedStatus = '';
+    this.lastRenderedTasksJson = '';
+
     // Add copy button immediately
     this.addCopyButtonToMessage(this.currentStreamingElement);
 
@@ -276,6 +294,8 @@ export class ChatView extends ItemView {
         .getContextForLLM({ maxMessages: 50 });
 
       let fullResponse = '';
+      const activeTasks: ActiveTask[] = [];
+      let currentStatus = '初始化智能体...';
 
       // Use ChatOrchestrator for skill support - RAGP event generator loop
       const stream = this.chatOrchestrator.query(
@@ -293,21 +313,48 @@ export class ChatView extends ItemView {
         const event = current.value as AgentEvent;
 
         if (event.type === 'status') {
-          this.currentStreamingElement!.innerHTML =
-            `<div class="status-indicator">🤖 ${event.message}</div>` +
-            (fullResponse ? this.messageRenderer.render(fullResponse) : '');
-          this.scrollToBottom();
+          currentStatus = event.message;
+          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
         } else if (event.type === 'chunk') {
           fullResponse += event.text;
-          this.currentStreamingElement!.innerHTML =
-            this.messageRenderer.render(fullResponse);
-          this.scrollToBottom();
+          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
+        } else if (event.type === 'skill_call') {
+          activeTasks.push({
+            id: event.name + Date.now(),
+            name: event.name,
+            status: 'executing',
+            params: event.params
+          });
+          currentStatus = `执行工具: ${event.name.split(':').pop() || event.name}`;
+          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
+        } else if (event.type === 'skill_success') {
+          const task = activeTasks.find(t => t.name === event.name && t.status === 'executing');
+          if (task) {
+            task.status = 'success';
+            task.result = event.result;
+          }
+          currentStatus = '';
+          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
+        } else if (event.type === 'skill_error') {
+          const task = activeTasks.find(t => t.name === event.name && t.status === 'executing');
+          if (task) {
+            task.status = 'error';
+            task.result = event.error;
+          }
+          currentStatus = '';
+          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
         } else if (event.type === 'confirm_request') {
           // Native user interactive confirmations (Human-in-the-loop)
-          this.currentStreamingElement!.innerHTML =
-            `<div class="status-indicator warning">⚠️ Waiting for approval: ${event.skillName}...</div>` +
-            (fullResponse ? this.messageRenderer.render(fullResponse) : '');
-          this.scrollToBottom();
+          const task: ActiveTask = {
+            id: event.skillName + Date.now(),
+            name: event.skillName,
+            status: 'confirm',
+            params: event.params
+          };
+          activeTasks.push(task);
+          
+          currentStatus = `等待授权: ${event.skillName.split(':').pop() || event.skillName}`;
+          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
 
           // Wait for Obsidian modal feedback asynchronously
           const approved = await new Promise<boolean>((resolve) => {
@@ -321,6 +368,13 @@ export class ChatView extends ItemView {
           });
 
           // Feed approved response back to generator
+          if (approved) {
+            task.status = 'executing';
+          } else {
+            task.status = 'error';
+            task.result = 'User cancelled execution';
+          }
+
           current = await stream.next({ approved });
           continue;
         }
@@ -333,10 +387,22 @@ export class ChatView extends ItemView {
       // Replace history with complete messages (includes context + new messages with tool calls)
       await this.chatManager.replaceMessages(result.messages);
 
-      // Setup code copy buttons
-      this.setupCodeCopyButtons(wrapper);
-      // Setup message copy button
-      this.setupMessageCopyButtons(wrapper);
+      // Render the final assistant bubble with collapsed logs for clean persistent UI
+      const index = this.messagesContainer.children.length - 1;
+      const lastBubble = this.messagesContainer.children[index] as HTMLElement;
+      
+      // If we rendered the streaming bubble, replace it with the clean rendered static message
+      if (lastBubble && lastBubble.hasClass('chat-message-assistant')) {
+        lastBubble.remove();
+      }
+      
+      // Find all messages belonging to the current assistant turn (everything after the last user message)
+      const lastUserIndex = result.messages.map(m => m.role).lastIndexOf('user');
+      const currentTurnMessages = lastUserIndex !== -1 ? result.messages.slice(lastUserIndex + 1) : result.messages;
+
+      // Consolidate and render the permanent message
+      const consolidatedMsg = this.consolidateAssistantMessages(currentTurnMessages);
+      this.renderAssistantMessage(consolidatedMsg, result.messages, this.messagesContainer);
 
     } catch (error) {
       console.error('Chat error:', error);
@@ -492,19 +558,280 @@ export class ChatView extends ItemView {
     });
   }
 
+  /**
+   * Consolidates a sequence of assistant and tool messages in a turn into a single unified assistant message representation.
+   */
+  private consolidateAssistantMessages(
+    turnMessages: ChatMessage[]
+  ): ChatMessage {
+    const assistantMsgs = turnMessages.filter(m => m.role === 'assistant');
+    const toolCalls = assistantMsgs.reduce<ToolCall[]>((acc, m) => {
+      if (m.tool_calls) {
+        acc.push(...m.tool_calls);
+      }
+      return acc;
+    }, []);
+
+    const contents = assistantMsgs
+      .map(m => m.content?.trim())
+      .filter(Boolean);
+    const consolidatedContent = contents.join('\n\n');
+
+    return {
+      role: 'assistant',
+      content: consolidatedContent,
+      timestamp: assistantMsgs[assistantMsgs.length - 1]?.timestamp || Date.now(),
+      tool_calls: toolCalls.length > 0 ? toolCalls : undefined
+    };
+  }
+
   private async loadHistory(): Promise<void> {
     const messages = await this.chatManager.getHistory();
 
-    for (const msg of messages) {
-      const wrapper = this.createMessageElement(msg.role);
-      const contentEl = wrapper.createDiv('message-content');
-      contentEl.innerHTML = this.messageRenderer.render(msg.content);
+    // Group consecutive assistant/tool turns after each user message
+    const renderedMessages: ChatMessage[] = [];
+    let i = 0;
+    while (i < messages.length) {
+      const msg = messages[i];
+      if (msg.role === 'user') {
+        renderedMessages.push(msg);
+        i++;
+      } else if (msg.role === 'assistant') {
+        // Collect all assistant and tool messages until the next user message
+        const group: ChatMessage[] = [];
+        while (i < messages.length && messages[i].role !== 'user') {
+          group.push(messages[i]);
+          i++;
+        }
+        renderedMessages.push(this.consolidateAssistantMessages(group));
+      } else {
+        // Skip system or other message types
+        i++;
+      }
+    }
 
-      // Add copy button to message
-      this.addCopyButtonToMessage(contentEl);
+    for (const msg of renderedMessages) {
+      if (msg.role === 'user') {
+        this.addUserMessage(msg.content);
+      } else if (msg.role === 'assistant') {
+        this.renderAssistantMessage(msg, messages, this.messagesContainer);
+      }
+    }
 
-      this.setupCodeCopyButtons(wrapper);
-      this.setupMessageCopyButtons(wrapper);
+    this.scrollToBottom();
+  }
+
+  /**
+   * Renders an assistant message bubble with its tool executions bundled in a collapsible TUI terminal console block
+   */
+  private renderAssistantMessage(
+    msg: ChatMessage,
+    allMessages: ChatMessage[],
+    container: HTMLElement
+  ): HTMLElement {
+    const wrapper = container.createDiv('chat-message chat-message-assistant');
+
+    // Avatar
+    const avatarEl = wrapper.createDiv('message-avatar');
+    setIcon(avatarEl, 'bot');
+
+    const msgWrapper = wrapper.createDiv('message-wrapper');
+    const roleEl = msgWrapper.createDiv('message-role');
+    roleEl.setText('Assistant');
+
+    const contentEl = msgWrapper.createDiv('message-content');
+
+    // 1. Build TUI Console for Tool Calls if any
+    const toolCalls = msg.tool_calls || [];
+    if (toolCalls.length > 0) {
+      const consoleEl = contentEl.createEl('details', { cls: 'tui-console' });
+      
+      // Render Summary Header
+      const consoleSummary = consoleEl.createEl('summary', { cls: 'tui-console-summary' });
+      const summaryTextEl = consoleSummary.createSpan({ cls: 'tui-console-status' });
+      
+      const totalTools = toolCalls.length;
+      
+      // Determine if any of the tool calls had an error
+      let hasError = false;
+      const responses: { isSuccess: boolean; responseMsg?: ChatMessage }[] = [];
+      for (const tc of toolCalls) {
+        const responseMsg = allMessages.find(
+          m => m.role === 'tool' && m.tool_call_id === tc.id
+        );
+        const isSuccess = responseMsg && !responseMsg.content.startsWith('Error:');
+        if (responseMsg && !isSuccess) {
+          hasError = true;
+        }
+        responses.push({ isSuccess: !!isSuccess, responseMsg });
+      }
+      
+      let summaryText = '';
+      if (hasError) {
+        summaryText = `✗ 任务完成，有工具调用错误 (共调用 ${totalTools} 个工具)`;
+      } else {
+        summaryText = `✔ 任务完成 (共调用 ${totalTools} 个工具)`;
+      }
+      summaryTextEl.setText(summaryText);
+      
+      const consoleBody = consoleEl.createDiv('tui-console-body');
+
+      for (let index = 0; index < toolCalls.length; index++) {
+        const tc = toolCalls[index];
+        const { isSuccess, responseMsg } = responses[index];
+        const shortName = tc.name.split(':').pop() || tc.name;
+
+        // Create collapsible details block
+        const details = consoleBody.createEl('details', { cls: 'tui-line-item' });
+        const summary = details.createEl('summary', { cls: 'tui-line-summary' });
+        
+        // Status indicator icon
+        const icon = isSuccess ? '✔' : (responseMsg ? '✗' : '⠋');
+        const statusClass = isSuccess ? 'success' : (responseMsg ? 'error' : 'pending');
+        
+        summary.innerHTML = `<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`;
+
+        // Content / Logs
+        const detailsBody = details.createDiv('tui-line-details');
+        const argsPre = detailsBody.createEl('pre');
+        argsPre.createEl('code', { 
+          text: `Parameters: ${typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments, null, 2)}` 
+        });
+
+        if (responseMsg) {
+          const resPre = detailsBody.createEl('pre');
+          resPre.createEl('code', { text: `Response: ${responseMsg.content}` });
+        }
+      }
+    }
+
+    // 2. Render Final Answer
+    if (msg.content) {
+      const answerEl = contentEl.createDiv('final-answer');
+      answerEl.innerHTML = this.messageRenderer.render(msg.content);
+    }
+
+    // Add copy buttons and setup
+    this.addCopyButtonToMessage(contentEl);
+    this.setupCodeCopyButtons(wrapper);
+    this.setupMessageCopyButtons(msgWrapper);
+
+    return wrapper;
+  }
+
+  /**
+   * Live-updates the streaming assistant bubble with the real-time TUI terminal status and Markdown text chunks
+   */
+  private updateStreamingUI(
+    statusMsg: string,
+    activeTasks: ActiveTask[],
+    fullResponse: string
+  ): void {
+    if (!this.currentStreamingElement) return;
+
+    const consoleContainer = this.currentStreamingElement.querySelector('.tui-console-container') as HTMLElement;
+    const answerContainer = this.currentStreamingElement.querySelector('.final-answer-container') as HTMLElement;
+    if (!consoleContainer || !answerContainer) return;
+
+    // Check if we need to update the console (only when statusMsg or activeTasks change)
+    const tasksJson = JSON.stringify(activeTasks);
+    const shouldUpdateConsole = statusMsg !== this.lastRenderedStatus || tasksJson !== this.lastRenderedTasksJson;
+
+    if (shouldUpdateConsole) {
+      this.lastRenderedStatus = statusMsg;
+      this.lastRenderedTasksJson = tasksJson;
+
+      // Check if details console was previously open
+      const existingConsole = consoleContainer.querySelector('.tui-console') as HTMLDetailsElement | null;
+      const wasConsoleOpen = existingConsole ? existingConsole.open : false;
+
+      consoleContainer.empty();
+
+      if (statusMsg || activeTasks.length > 0) {
+        const consoleEl = consoleContainer.createEl('details', { cls: 'tui-console' });
+        if (wasConsoleOpen) {
+          consoleEl.setAttribute('open', '');
+        }
+
+        // Render Summary Header
+        const consoleSummary = consoleEl.createEl('summary', { cls: 'tui-console-summary' });
+        const summaryTextEl = consoleSummary.createSpan({ cls: 'tui-console-status' });
+
+        const totalTools = activeTasks.length;
+        const runningTools = activeTasks.filter(t => t.status === 'executing' || t.status === 'pending').length;
+        const failedTools = activeTasks.filter(t => t.status === 'error').length;
+
+        let summaryText = '';
+        if (runningTools > 0 || statusMsg) {
+          summaryText = `⠋ 正在运行 (已执行 ${totalTools} 个工具)...`;
+        } else {
+          if (failedTools > 0) {
+            summaryText = `✗ 任务完成，有工具调用错误 (共调用 ${totalTools} 个工具)`;
+          } else {
+            summaryText = `✔ 任务完成 (共调用 ${totalTools} 个工具)`;
+          }
+        }
+        summaryTextEl.setText(summaryText);
+
+        const consoleBody = consoleEl.createDiv('tui-console-body');
+
+        // Render current active status line at top of console body
+        if (statusMsg) {
+          const statusLine = consoleBody.createDiv('tui-status-line');
+          statusLine.innerHTML = `<span class="tui-spinner">⠋</span> <span class="tui-status-text">${statusMsg}</span>`;
+        }
+
+        // Render all active/completed tasks
+        for (const task of activeTasks) {
+          const details = consoleBody.createEl('details', { cls: 'tui-line-item' });
+          const summary = details.createEl('summary', { cls: 'tui-line-summary' });
+
+          const shortName = task.name.split(':').pop() || task.name;
+
+          let icon = '⠋';
+          let statusClass = 'pending';
+          if (task.status === 'executing') {
+            icon = '⠋';
+            statusClass = 'executing';
+          } else if (task.status === 'success') {
+            icon = '✔';
+            statusClass = 'success';
+          } else if (task.status === 'error') {
+            icon = '✗';
+            statusClass = 'error';
+          } else if (task.status === 'confirm') {
+            icon = '⚠️';
+            statusClass = 'warning';
+          }
+
+          summary.innerHTML = `<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`;
+
+          const detailsBody = details.createDiv('tui-line-details');
+
+          if (task.params) {
+            const argsPre = detailsBody.createEl('pre');
+            argsPre.createEl('code', { 
+              text: `Parameters: ${typeof task.params === 'string' ? task.params : JSON.stringify(task.params, null, 2)}` 
+            });
+          }
+
+          if (task.result) {
+            const resPre = detailsBody.createEl('pre');
+            resPre.createEl('code', { 
+              text: `Response: ${typeof task.result === 'string' ? task.result : JSON.stringify(task.result, null, 2)}` 
+            });
+          }
+        }
+      }
+    }
+
+    // 2. Render Streaming Answer Content
+    if (fullResponse) {
+      answerContainer.empty();
+      const answerEl = answerContainer.createDiv('final-answer');
+      answerEl.innerHTML = this.messageRenderer.render(fullResponse);
+    } else {
+      answerContainer.empty();
     }
 
     this.scrollToBottom();
