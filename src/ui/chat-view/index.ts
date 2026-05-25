@@ -8,6 +8,7 @@ import { ChatOrchestrator } from '../../chat/chat-orchestrator';
 import { FileSelectorModal } from '../file-selector-modal';
 import { ConfirmationModal } from '../confirmation-modal';
 import { TaskType } from '../../types';
+import { AgentEvent } from '../../agents/agent-types';
 
 export const CHAT_VIEW_TYPE = 'personal-agent-chat';
 
@@ -276,21 +277,58 @@ export class ChatView extends ItemView {
 
       let fullResponse = '';
 
-      // Use ChatOrchestrator for skill support
-      const result = await this.chatOrchestrator.query(
+      // Use ChatOrchestrator for skill support - RAGP event generator loop
+      const stream = this.chatOrchestrator.query(
         userMessage,
-        (chunk: string) => {
-          fullResponse += chunk;
-          this.currentStreamingElement!.innerHTML =
-            this.messageRenderer.render(fullResponse);
-          this.scrollToBottom();
-        },
         {
           enableSkills: this.plugin.settings.skillsEnabled,
           contextMessages: contextMessages,
           maxTurns: this.plugin.settings.maxTurns || 20
         }
       );
+
+      let current = await stream.next();
+
+      while (!current.done) {
+        const event = current.value as AgentEvent;
+
+        if (event.type === 'status') {
+          this.currentStreamingElement!.innerHTML =
+            `<div class="status-indicator">🤖 ${event.message}</div>` +
+            (fullResponse ? this.messageRenderer.render(fullResponse) : '');
+          this.scrollToBottom();
+        } else if (event.type === 'chunk') {
+          fullResponse += event.text;
+          this.currentStreamingElement!.innerHTML =
+            this.messageRenderer.render(fullResponse);
+          this.scrollToBottom();
+        } else if (event.type === 'confirm_request') {
+          // Native user interactive confirmations (Human-in-the-loop)
+          this.currentStreamingElement!.innerHTML =
+            `<div class="status-indicator warning">⚠️ Waiting for approval: ${event.skillName}...</div>` +
+            (fullResponse ? this.messageRenderer.render(fullResponse) : '');
+          this.scrollToBottom();
+
+          // Wait for Obsidian modal feedback asynchronously
+          const approved = await new Promise<boolean>((resolve) => {
+            new ConfirmationModal(
+              this.app,
+              `Approve tool execution: ${event.skillName}`,
+              event.message,
+              () => resolve(true),
+              () => resolve(false)
+            ).open();
+          });
+
+          // Feed approved response back to generator
+          current = await stream.next({ approved });
+          continue;
+        }
+
+        current = await stream.next();
+      }
+
+      const result = current.value as ChatQueryResult;
 
       // Replace history with complete messages (includes context + new messages with tool calls)
       await this.chatManager.replaceMessages(result.messages);

@@ -13,13 +13,12 @@ import { PromptLoader } from '../prompts/prompt-loader';
 import { PROMPT_PATHS, FALLBACK_PROMPTS, TEMPLATE_VARS } from '../prompts/prompt-templates';
 import { BaseAgent, AgentDependencies } from '../agents/base-agent';
 import { AgentManager } from '../agents/agent-manager';
-import { AgentConfig, AgentContext } from '../agents/agent-types';
+import { AgentConfig, AgentContext, AgentEvent } from '../agents/agent-types';
 
 export interface ChatQueryOptions {
   enableSkills?: boolean;
   maxTurns?: number;
   contextMessages?: ChatMessage[];
-  onSkillCall?: (skillCall: SkillCall) => void;
 }
 
 export interface ChatQueryResult {
@@ -136,11 +135,10 @@ export class ChatOrchestrator {
   /**
    * Main query method - chat interface
    */
-  async query(
+  async *query(
     userQuery: string,
-    onStream?: (chunk: string) => void,
     options: ChatQueryOptions = {}
-  ): Promise<ChatQueryResult> {
+  ): AsyncGenerator<AgentEvent, ChatQueryResult, any> {
     if (!this.defaultAgent) {
       throw new Error('ChatOrchestrator not initialized');
     }
@@ -153,10 +151,9 @@ export class ChatOrchestrator {
       }
     };
 
-    const response = await this.agentManager.executeWithCurrentAgent(
+    const response = yield* this.agentManager.executeWithCurrentAgent(
       userQuery,
-      context,
-      onStream
+      context
     );
 
     return {

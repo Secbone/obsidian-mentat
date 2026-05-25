@@ -1,7 +1,7 @@
 // AgentManager - Manages agent instances and execution
 
 import { BaseAgent } from './base-agent';
-import { AgentContext, AgentResponse } from './agent-types';
+import { AgentContext, AgentResponse, AgentEvent } from './agent-types';
 
 /**
  * AgentManager - Manages multiple agent instances
@@ -62,14 +62,13 @@ export class AgentManager {
   /**
    * Execute with the current agent
    */
-  async executeWithCurrentAgent(
+  async *executeWithCurrentAgent(
     prompt: string,
-    context: AgentContext,
-    onStream?: (chunk: string) => void
-  ): Promise<AgentResponse> {
+    context: AgentContext
+  ): AsyncGenerator<AgentEvent, AgentResponse, any> {
     if (!this.currentAgent) {
       throw new Error('No current agent set');
     }
-    return await this.currentAgent.execute(prompt, context, onStream);
+    return yield* this.currentAgent.execute(prompt, context);
   }
 }

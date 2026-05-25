@@ -5,7 +5,7 @@ import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
 import { SkillInvocationContext } from '../skills/strategies/skill-invocation-strategy';
 import { SkillCall, isExecutableSkill } from '../skills/skill-types';
-import { AgentConfig, AgentContext, AgentResponse } from './agent-types';
+import { AgentConfig, AgentContext, AgentResponse, AgentEvent } from './agent-types';
 
 /**
  * Dependencies required by BaseAgent
@@ -14,6 +14,21 @@ export interface AgentDependencies {
   skillRegistry: SkillRegistry;
   skillExecutor: SkillExecutor;
   skillInvocationContext: SkillInvocationContext;
+}
+
+/**
+ * AgentState - State of the conversation execution loop
+ * Borrowed from LangGraph's state design pattern
+ */
+export interface AgentState {
+  messages: ChatMessage[];
+  systemPrompt: string;
+  maxTurns: number;
+  turnCount: number;
+  fullResponse: string;
+  skillCalls: SkillCall[];
+  onStream?: (chunk: string) => void;
+  skills: any[];
 }
 
 /**
@@ -39,166 +54,345 @@ export class BaseAgent {
   }
 
   /**
-   * Execute agent task
+   * Main entry point for RAGP event-driven execution.
+   * Returns an AsyncGenerator yielding AgentEvents and returning AgentResponse.
    */
-  async execute(
+  async *execute(
     prompt: string,
-    context: AgentContext,
-    onStream?: (chunk: string) => void
-  ): Promise<AgentResponse> {
+    context: AgentContext
+  ): AsyncGenerator<AgentEvent, AgentResponse, any> {
+    const startTime = Date.now();
     const systemPrompt = this.buildSystemPrompt();
 
-    // If skills are enabled and provider supports them
-    if (this.config.enableSkills && this.provider.supportsSkills?.()) {
-      return await this.executeWithSkills(
-        prompt,
-        systemPrompt,
-        context,
-        onStream
-      );
-    } else {
-      return await this.executeSimple(
-        prompt,
-        systemPrompt,
-        context,
-        onStream
-      );
-    }
-  }
+    yield { type: 'status', message: '初始化智能体...' };
 
-  /**
-   * Execute with skills (multi-turn agent loop)
-   */
-  private async executeWithSkills(
-    prompt: string,
-    systemPrompt: string,
-    context: AgentContext,
-    onStream?: (chunk: string) => void
-  ): Promise<AgentResponse> {
-    const messages: ChatMessage[] = [
-      ...context.messages,
-      { role: 'user', content: prompt, timestamp: Date.now() }
-    ];
+    // If skills are disabled or not supported, run simple single-turn generation
+    if (!this.config.enableSkills || !this.provider.supportsSkills?.()) {
+      yield { type: 'status', message: '正在思考...' };
 
-    // Get skills in provider format
-    const skills = this.skillInvocationContext.getToolDefinitions(
-      this.skillRegistry,
-      this.provider.type === 'openai' ? 'openai' : 'anthropic'
-    );
+      const messages: ChatMessage[] = [
+        ...context.messages,
+        { role: 'user', content: prompt, timestamp: Date.now() }
+      ];
 
-    let fullResponse = '';
-    let turnCount = 0;
-    // Prioritize context metadata, then config, then default (20)
-    // Clamp value between 1 and 99
-    const maxTurns = Math.max(1, Math.min(99, context.metadata?.maxTurns ?? this.config.maxTurns ?? 20));
-    const skillCalls: SkillCall[] = [];
+      let responseContent = '';
+      try {
+        responseContent = yield* this.streamModelSimple(prompt, {
+          systemPrompt,
+          temperature: this.config.temperature || 0.7,
+          maxTokens: 2048
+        });
+      } catch (err: any) {
+        yield { type: 'error', message: `大模型执行异常: ${err.message}` };
+        throw err;
+      }
 
-    // Agent loop
-    while (turnCount < maxTurns) {
-      turnCount++;
+      messages.push({
+        role: 'assistant',
+        content: responseContent,
+        timestamp: Date.now()
+      });
 
-      const result: GenerateResponse = await this.provider.generateStreamWithSkills!(
+      return {
+        content: responseContent,
         messages,
-        (chunk: string) => {
-          fullResponse += chunk;
-          if (onStream) {
-            onStream(chunk);
-          }
-        },
-        undefined,
-        {
+        metadata: {
+          turns: 1,
+          durationMs: Date.now() - startTime
+        }
+      };
+    }
+
+    // Otherwise, execute multi-turn loop with skills (RAGP)
+    let state: AgentState = {
+      messages: [
+        ...context.messages,
+        { role: 'user', content: prompt, timestamp: Date.now() }
+      ],
+      systemPrompt,
+      maxTurns: Math.max(1, Math.min(99, context.metadata?.maxTurns ?? this.config.maxTurns ?? 20)),
+      turnCount: 0,
+      fullResponse: '',
+      skillCalls: [],
+      onStream: undefined, // Handled natively by yielding events
+      skills: this.skillInvocationContext.getToolDefinitions(
+        this.skillRegistry,
+        this.provider.type === 'openai' ? 'openai' : 'anthropic'
+      )
+    };
+
+    while (state.turnCount < state.maxTurns) {
+      state.turnCount++;
+
+      yield { type: 'status', message: `正在思考 (第 ${state.turnCount} 轮)...` };
+
+      // Node A: Stream Model
+      let result: GenerateResponse;
+      try {
+        result = yield* this.streamModel(state.messages, {
           temperature: this.config.temperature || 0.7,
           maxTokens: 2048,
-          systemPrompt,
-          skills,
+          systemPrompt: state.systemPrompt,
+          skills: state.skills,
           toolChoice: 'auto'
-        }
-      );
+        });
+      } catch (err: any) {
+        yield { type: 'error', message: `大模型决策异常: ${err.message}` };
+        throw err;
+      }
 
-      // Add assistant message to history
-      messages.push({
+      // Update state with assistant response
+      const assistantMessage: ChatMessage = {
         role: 'assistant',
         content: result.content,
         timestamp: Date.now(),
         tool_calls: result.toolCalls
+      };
+      
+      state = this.mergeState(state, {
+        fullResponse: state.fullResponse + result.content,
+        messages: [assistantMessage]
       });
 
-      // Check if there are tool calls
+      // Check if there are tool calls (Edge)
       if (!result.toolCalls || result.toolCalls.length === 0) {
         break;
       }
 
-      // Execute tool calls
-      for (const toolCall of result.toolCalls) {
-        const skillCall = await this.executeToolCall(toolCall, onStream);
-        skillCalls.push(skillCall);
+      // Node B: Execute Tools
+      const newMessages: ChatMessage[] = [];
+      const newSkillCalls: SkillCall[] = [];
 
-        messages.push({
-          role: 'tool',
-          content: skillCall.result?.success
-            ? JSON.stringify(skillCall.result.data, null, 2)
-            : `Error: ${skillCall.result?.error || 'Unknown error'}`,
-          timestamp: Date.now(),
-          tool_call_id: toolCall.id,
-          name: toolCall.name
-        });
+      for (const toolCall of result.toolCalls) {
+        const skill = this.skillRegistry.get(toolCall.name);
+        const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
+        let executeApproved = true;
+
+        if (requiresConfirmation) {
+          yield { type: 'status', message: `等待授权: ${toolCall.name}` };
+
+          // Interactive prompt yielding (Human-in-the-loop)
+          const userFeedback: { approved: boolean; modifiedParams?: any } = yield {
+            type: 'confirm_request',
+            skillName: toolCall.name,
+            params: toolCall.arguments,
+            message: `智能体申请执行操作: 【${skill.metadata?.description || toolCall.name}】。是否批准？`
+          };
+
+          executeApproved = userFeedback?.approved ?? true;
+          if (userFeedback?.modifiedParams) {
+            toolCall.arguments = userFeedback.modifiedParams;
+          }
+        }
+
+        if (!executeApproved) {
+          yield { type: 'status', message: `用户已拒绝: ${toolCall.name}` };
+          newMessages.push({
+            role: 'tool',
+            content: 'Error: Execution cancelled by user.',
+            timestamp: Date.now(),
+            tool_call_id: toolCall.id,
+            name: toolCall.name
+          });
+          continue;
+        }
+
+        yield { type: 'skill_call', name: toolCall.name, params: toolCall.arguments };
+
+        try {
+          const runResult = await this.skillExecutor.executeFromToolCall(toolCall);
+          
+          if (runResult.success) {
+            yield { type: 'skill_success', name: toolCall.name, result: runResult.data };
+            newMessages.push({
+              role: 'tool',
+              content: JSON.stringify(runResult.data, null, 2),
+              timestamp: Date.now(),
+              tool_call_id: toolCall.id,
+              name: toolCall.name
+            });
+          } else {
+            yield { type: 'skill_error', name: toolCall.name, error: runResult.error || '执行失败' };
+            newMessages.push({
+              role: 'tool',
+              content: `Error: ${runResult.error || 'Unknown error'}`,
+              timestamp: Date.now(),
+              tool_call_id: toolCall.id,
+              name: toolCall.name
+            });
+          }
+          
+          newSkillCalls.push({
+            id: toolCall.id,
+            skillName: toolCall.name,
+            namespace: toolCall.name.startsWith('mcp:') ? 'mcp' : 'obsidian',
+            parameters: typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : toolCall.arguments,
+            status: runResult.success ? 'success' : 'error',
+            timestamp: Date.now(),
+            result: runResult
+          });
+        } catch (execErr: any) {
+          yield { type: 'skill_error', name: toolCall.name, error: execErr.message };
+          newMessages.push({
+            role: 'tool',
+            content: `Error: Exception during execution: ${execErr.message}`,
+            timestamp: Date.now(),
+            tool_call_id: toolCall.id,
+            name: toolCall.name
+          });
+        }
       }
+
+      state = this.mergeState(state, {
+        messages: newMessages,
+        skillCalls: newSkillCalls
+      });
     }
 
-    if (turnCount >= maxTurns) {
+    if (state.turnCount >= state.maxTurns) {
       console.warn('[BaseAgent] Reached maximum turns limit');
     }
 
+    yield { type: 'status', message: '任务完成！' };
+
     return {
-      content: fullResponse,
-      messages,
-      skillCalls,
+      content: state.fullResponse,
+      messages: state.messages,
+      skillCalls: state.skillCalls,
       metadata: {
-        turns: turnCount
+        turns: state.turnCount,
+        durationMs: Date.now() - startTime
       }
     };
   }
 
   /**
-   * Execute without skills (simple generation)
+   * Helper: Bridges callback-based LLM stream with skills into an async generator of AgentEvents.
+   * Utilizes a highly robust asynchronous queue bridge.
    */
-  private async executeSimple(
-    prompt: string,
-    systemPrompt: string,
-    context: AgentContext,
-    onStream?: (chunk: string) => void
-  ): Promise<AgentResponse> {
-    const messages: ChatMessage[] = [
-      ...context.messages,
-      { role: 'user', content: prompt, timestamp: Date.now() }
-    ];
+  private async *streamModel(
+    messages: ChatMessage[],
+    options: any
+  ): AsyncGenerator<AgentEvent, GenerateResponse, any> {
+    const queue: AgentEvent[] = [];
+    let resolveNext: (() => void) | null = null;
+    let completed = false;
+    let finalResult: GenerateResponse | null = null;
+    let error: any = null;
 
+    this.provider.generateStreamWithSkills!(
+      messages,
+      (chunk: string) => {
+        queue.push({ type: 'chunk', text: chunk });
+        if (resolveNext) {
+          resolveNext();
+          resolveNext = null;
+        }
+      },
+      undefined,
+      options
+    ).then((result) => {
+      finalResult = result;
+      completed = true;
+      if (resolveNext) {
+        resolveNext();
+        resolveNext = null;
+      }
+    }).catch((err) => {
+      error = err;
+      completed = true;
+      if (resolveNext) {
+        resolveNext();
+        resolveNext = null;
+      }
+    });
+
+    while (!completed || queue.length > 0) {
+      if (queue.length === 0) {
+        await new Promise<void>((resolve) => {
+          resolveNext = resolve;
+        });
+      }
+      while (queue.length > 0) {
+        yield queue.shift()!;
+      }
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    return finalResult!;
+  }
+
+  /**
+   * Helper: Bridges callback-based LLM simple stream into an async generator of AgentEvents.
+   * Utilizes a highly robust asynchronous queue bridge.
+   */
+  private async *streamModelSimple(
+    prompt: string,
+    options: any
+  ): AsyncGenerator<AgentEvent, string, any> {
+    const queue: AgentEvent[] = [];
+    let resolveNext: (() => void) | null = null;
+    let completed = false;
+    let error: any = null;
     let fullResponse = '';
 
-    await this.provider.generateStream(
+    this.provider.generateStream(
       prompt,
       (chunk: string) => {
         fullResponse += chunk;
-        if (onStream) {
-          onStream(chunk);
+        queue.push({ type: 'chunk', text: chunk });
+        if (resolveNext) {
+          resolveNext();
+          resolveNext = null;
         }
       },
-      {
-        systemPrompt,
-        temperature: this.config.temperature || 0.7,
-        maxTokens: 2048
+      options
+    ).then(() => {
+      completed = true;
+      if (resolveNext) {
+        resolveNext();
+        resolveNext = null;
       }
-    );
-
-    messages.push({
-      role: 'assistant',
-      content: fullResponse,
-      timestamp: Date.now()
+    }).catch((err) => {
+      error = err;
+      completed = true;
+      if (resolveNext) {
+        resolveNext();
+        resolveNext = null;
+      }
     });
 
+    while (!completed || queue.length > 0) {
+      if (queue.length === 0) {
+        await new Promise<void>((resolve) => {
+          resolveNext = resolve;
+        });
+      }
+      while (queue.length > 0) {
+        yield queue.shift()!;
+      }
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    return fullResponse;
+  }
+
+  /**
+   * Reducer to cleanly merge state updates.
+   * Appends messages and skill calls to preserve history.
+   */
+  private mergeState(current: AgentState, update: Partial<AgentState>): AgentState {
     return {
-      content: fullResponse,
-      messages
+      ...current,
+      ...update,
+      messages: update.messages ? [...current.messages, ...update.messages] : current.messages,
+      skillCalls: update.skillCalls ? [...current.skillCalls, ...update.skillCalls] : current.skillCalls
     };
   }
 

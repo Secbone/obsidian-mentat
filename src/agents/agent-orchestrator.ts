@@ -1,7 +1,7 @@
 // AgentOrchestrator - Orchestrates multi-agent workflows
 
 import { AgentManager } from './agent-manager';
-import { AgentTask, AgentOrchestrationResult, AgentContext, AgentResponse } from './agent-types';
+import { AgentTask, AgentOrchestrationResult, AgentContext, AgentResponse, AgentEvent } from './agent-types';
 
 /**
  * AgentOrchestrator - Handles complex multi-agent workflows
@@ -16,9 +16,8 @@ export class AgentOrchestrator {
   /**
    * Execute multiple agent tasks with dependency management
    */
-  async executeTasks(tasks: AgentTask[]): Promise<AgentOrchestrationResult> {
+  async *executeTasks(tasks: AgentTask[]): AsyncGenerator<AgentEvent & { taskId?: string }, AgentOrchestrationResult, any> {
     const results = new Map<string, AgentResponse>();
-    const taskMap = new Map(tasks.map(t => [t.id, t]));
     const completed = new Set<string>();
 
     // Topological sort execution
@@ -32,8 +31,8 @@ export class AgentOrchestrator {
         throw new Error('Circular dependency detected or no tasks ready');
       }
 
-      // Execute ready tasks in parallel
-      await Promise.all(readyTasks.map(async task => {
+      // Execute ready tasks sequentially in this tier and yield events
+      for (const task of readyTasks) {
         const agent = this.agentManager.getAgent(task.agentId);
         if (!agent) {
           throw new Error(`Agent not found: ${task.agentId}`);
@@ -46,11 +45,20 @@ export class AgentOrchestrator {
           results
         );
 
-        const result = await agent.execute(task.prompt, enrichedContext);
+        const stream = agent.execute(task.prompt, enrichedContext);
+        let current = await stream.next();
+
+        while (!current.done) {
+          const event = current.value as AgentEvent;
+          yield { ...event, taskId: task.id };
+          current = await stream.next();
+        }
+
+        const result = current.value as AgentResponse;
 
         results.set(task.id, result);
         completed.add(task.id);
-      }));
+      }
     }
 
     // Generate final response from last task
@@ -66,11 +74,11 @@ export class AgentOrchestrator {
   /**
    * Execute agents in pipeline (sequential) mode
    */
-  async executePipeline(
+  async *executePipeline(
     agentIds: string[],
     initialPrompt: string,
     initialContext: AgentContext
-  ): Promise<AgentResponse> {
+  ): AsyncGenerator<AgentEvent & { activeAgentId?: string }, AgentResponse, any> {
     let currentContext = initialContext;
     let currentPrompt = initialPrompt;
     let finalResponse: AgentResponse | null = null;
@@ -81,7 +89,16 @@ export class AgentOrchestrator {
         throw new Error(`Agent not found: ${agentId}`);
       }
 
-      const response = await agent.execute(currentPrompt, currentContext);
+      const stream = agent.execute(currentPrompt, currentContext);
+      let current = await stream.next();
+
+      while (!current.done) {
+        const event = current.value as AgentEvent;
+        yield { ...event, activeAgentId: agentId };
+        current = await stream.next();
+      }
+
+      const response = current.value as AgentResponse;
 
       currentContext = {
         ...currentContext,

@@ -29,3 +29,14 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# OpenList editor state files
+.openlist
+*.openlist
+**/*.openlist
+
+# AI Agent Tool directories
+.antigravitycli/
+.claude/
+
+
