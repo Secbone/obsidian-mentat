@@ -164,82 +164,222 @@ export class BaseAgent {
       const newSkillCalls: SkillCall[] = [];
 
       for (const toolCall of result.toolCalls) {
-        const skill = this.skillRegistry.get(toolCall.name);
-        const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
-        let executeApproved = true;
-
-        if (requiresConfirmation) {
-          yield { type: 'status', message: `等待授权: ${toolCall.name}` };
-
-          // Interactive prompt yielding (Human-in-the-loop)
-          const userFeedback: { approved: boolean; modifiedParams?: any } = yield {
-            type: 'confirm_request',
-            skillName: toolCall.name,
-            params: toolCall.arguments,
-            message: `智能体申请执行操作: 【${skill.metadata?.description || toolCall.name}】。是否批准？`
-          };
-
-          executeApproved = userFeedback?.approved ?? true;
-          if (userFeedback?.modifiedParams) {
-            toolCall.arguments = userFeedback.modifiedParams;
-          }
-        }
-
-        if (!executeApproved) {
-          yield { type: 'status', message: `用户已拒绝: ${toolCall.name}` };
-          newMessages.push({
-            role: 'tool',
-            content: 'Error: Execution cancelled by user.',
-            timestamp: Date.now(),
-            tool_call_id: toolCall.id,
-            name: toolCall.name
-          });
-          continue;
-        }
-
-        yield { type: 'skill_call', name: toolCall.name, params: toolCall.arguments };
-
-        try {
-          const runResult = await this.skillExecutor.executeFromToolCall(toolCall);
+        if (this.skillInvocationContext.isMetaToolCall(toolCall.name)) {
+          // Handle meta-tool call (spec/invoke)
+          const args = this.safeParseToolArguments(toolCall);
           
-          if (runResult.success) {
-            yield { type: 'skill_success', name: toolCall.name, result: runResult.data };
+          if (toolCall.name === 'spec') {
+            const skillName = args.skill_name;
+            yield { type: 'skill_call', name: `spec:${skillName}`, params: toolCall.arguments };
+
+            try {
+              const details = this.skillRegistry.getSkillDetails(skillName, 'markdown');
+              const isSuccess = !details.startsWith('Error:');
+
+              if (isSuccess) {
+                yield { type: 'skill_success', name: `spec:${skillName}`, result: details };
+                newMessages.push({
+                  role: 'tool',
+                  content: details,
+                  timestamp: Date.now(),
+                  tool_call_id: toolCall.id,
+                  name: toolCall.name
+                });
+              } else {
+                yield { type: 'skill_error', name: `spec:${skillName}`, error: details };
+                newMessages.push({
+                  role: 'tool',
+                  content: details,
+                  timestamp: Date.now(),
+                  tool_call_id: toolCall.id,
+                  name: toolCall.name
+                });
+              }
+
+              newSkillCalls.push({
+                id: toolCall.id,
+                skillName: toolCall.name,
+                namespace: 'meta',
+                parameters: args,
+                status: isSuccess ? 'success' : 'error',
+                timestamp: Date.now(),
+                result: { success: isSuccess, data: isSuccess ? details : undefined, error: isSuccess ? undefined : details }
+              });
+            } catch (err: any) {
+              yield { type: 'skill_error', name: `spec:${skillName}`, error: err.message };
+              newMessages.push({
+                role: 'tool',
+                content: `Error: Exception during execution: ${err.message}`,
+                timestamp: Date.now(),
+                tool_call_id: toolCall.id,
+                name: toolCall.name
+              });
+            }
+          } else if (toolCall.name === 'invoke') {
+            const skillName = args.skill_name;
+            const skillParams = args.params || {};
+
+            const skill = this.skillRegistry.get(skillName);
+            const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
+            let executeApproved = true;
+
+            if (requiresConfirmation) {
+              yield { type: 'status', message: `等待授权: ${skillName}` };
+
+              // Interactive prompt yielding (Human-in-the-loop)
+              const userFeedback: { approved: boolean; modifiedParams?: any } = yield {
+                type: 'confirm_request',
+                skillName: skillName,
+                params: skillParams,
+                message: `智能体申请执行操作: 【${skill.metadata?.description || skillName}】。是否批准？`
+              };
+
+              executeApproved = userFeedback?.approved ?? true;
+              if (userFeedback?.modifiedParams) {
+                args.params = userFeedback.modifiedParams;
+              }
+            }
+
+            if (!executeApproved) {
+              yield { type: 'status', message: `用户已拒绝: ${skillName}` };
+              newMessages.push({
+                role: 'tool',
+                content: 'Error: Execution cancelled by user.',
+                timestamp: Date.now(),
+                tool_call_id: toolCall.id,
+                name: toolCall.name
+              });
+              continue;
+            }
+
+            yield { type: 'skill_call', name: `invoke:${skillName}`, params: args.params };
+
+            try {
+              // Parse skill name to get namespace and name
+              const { namespace, name } = this.skillRegistry.parseName(skillName);
+
+              // Execute the skill
+              const runResult = await this.skillExecutor.execute(namespace, name, args.params);
+
+              if (runResult.success) {
+                yield { type: 'skill_success', name: `invoke:${skillName}`, result: runResult.data };
+                newMessages.push({
+                  role: 'tool',
+                  content: JSON.stringify(runResult.data, null, 2),
+                  timestamp: Date.now(),
+                  tool_call_id: toolCall.id,
+                  name: toolCall.name
+                });
+              } else {
+                yield { type: 'skill_error', name: `invoke:${skillName}`, error: runResult.error || '执行失败' };
+                newMessages.push({
+                  role: 'tool',
+                  content: `Error: ${runResult.error || 'Unknown error'}`,
+                  timestamp: Date.now(),
+                  tool_call_id: toolCall.id,
+                  name: toolCall.name
+                });
+              }
+
+              newSkillCalls.push({
+                id: toolCall.id,
+                skillName: toolCall.name,
+                namespace: 'meta',
+                parameters: args,
+                status: runResult.success ? 'success' : 'error',
+                timestamp: Date.now(),
+                result: runResult
+              });
+            } catch (err: any) {
+              yield { type: 'skill_error', name: `invoke:${skillName}`, error: err.message };
+              newMessages.push({
+                role: 'tool',
+                content: `Error: Exception during execution: ${err.message}`,
+                timestamp: Date.now(),
+                tool_call_id: toolCall.id,
+                name: toolCall.name
+              });
+            }
+          }
+        } else {
+          // Direct skill call
+          const skill = this.skillRegistry.get(toolCall.name);
+          const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
+          let executeApproved = true;
+
+          if (requiresConfirmation) {
+            yield { type: 'status', message: `等待授权: ${toolCall.name}` };
+
+            // Interactive prompt yielding (Human-in-the-loop)
+            const userFeedback: { approved: boolean; modifiedParams?: any } = yield {
+              type: 'confirm_request',
+              skillName: toolCall.name,
+              params: toolCall.arguments,
+              message: `智能体申请执行操作: 【${skill.metadata?.description || toolCall.name}】。是否批准？`
+            };
+
+            executeApproved = userFeedback?.approved ?? true;
+            if (userFeedback?.modifiedParams) {
+              toolCall.arguments = userFeedback.modifiedParams;
+            }
+          }
+
+          if (!executeApproved) {
+            yield { type: 'status', message: `用户已拒绝: ${toolCall.name}` };
             newMessages.push({
               role: 'tool',
-              content: JSON.stringify(runResult.data, null, 2),
+              content: 'Error: Execution cancelled by user.',
               timestamp: Date.now(),
               tool_call_id: toolCall.id,
               name: toolCall.name
             });
-          } else {
-            yield { type: 'skill_error', name: toolCall.name, error: runResult.error || '执行失败' };
+            continue;
+          }
+
+          yield { type: 'skill_call', name: toolCall.name, params: toolCall.arguments };
+
+          try {
+            const runResult = await this.skillExecutor.executeFromToolCall(toolCall);
+            
+            if (runResult.success) {
+              yield { type: 'skill_success', name: toolCall.name, result: runResult.data };
+              newMessages.push({
+                role: 'tool',
+                content: JSON.stringify(runResult.data, null, 2),
+                timestamp: Date.now(),
+                tool_call_id: toolCall.id,
+                name: toolCall.name
+              });
+            } else {
+              yield { type: 'skill_error', name: toolCall.name, error: runResult.error || '执行失败' };
+              newMessages.push({
+                role: 'tool',
+                content: `Error: ${runResult.error || 'Unknown error'}`,
+                timestamp: Date.now(),
+                tool_call_id: toolCall.id,
+                name: toolCall.name
+              });
+            }
+            
+            newSkillCalls.push({
+              id: toolCall.id,
+              skillName: toolCall.name,
+              namespace: toolCall.name.startsWith('mcp:') ? 'mcp' : 'obsidian',
+              parameters: typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : toolCall.arguments,
+              status: runResult.success ? 'success' : 'error',
+              timestamp: Date.now(),
+              result: runResult
+            });
+          } catch (execErr: any) {
+            yield { type: 'skill_error', name: toolCall.name, error: execErr.message };
             newMessages.push({
               role: 'tool',
-              content: `Error: ${runResult.error || 'Unknown error'}`,
+              content: `Error: Exception during execution: ${execErr.message}`,
               timestamp: Date.now(),
               tool_call_id: toolCall.id,
               name: toolCall.name
             });
           }
-          
-          newSkillCalls.push({
-            id: toolCall.id,
-            skillName: toolCall.name,
-            namespace: toolCall.name.startsWith('mcp:') ? 'mcp' : 'obsidian',
-            parameters: typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : toolCall.arguments,
-            status: runResult.success ? 'success' : 'error',
-            timestamp: Date.now(),
-            result: runResult
-          });
-        } catch (execErr: any) {
-          yield { type: 'skill_error', name: toolCall.name, error: execErr.message };
-          newMessages.push({
-            role: 'tool',
-            content: `Error: Exception during execution: ${execErr.message}`,
-            timestamp: Date.now(),
-            tool_call_id: toolCall.id,
-            name: toolCall.name
-          });
         }
       }
 
