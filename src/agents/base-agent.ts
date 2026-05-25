@@ -271,6 +271,7 @@ export class BaseAgent {
                   name: toolCall.name
                 });
               } else {
+                yield { type: 'status', message: `⚠️ 工具 [${skillName}] 运行失败，正在自动引导纠错...` };
                 yield { type: 'skill_error', name: `invoke:${skillName}`, error: runResult.error || '执行失败' };
                 newMessages.push({
                   role: 'tool',
@@ -291,6 +292,7 @@ export class BaseAgent {
                 result: runResult
               });
             } catch (err: any) {
+              yield { type: 'status', message: `⚠️ 工具 [${skillName}] 解析或调用异常，正在自动纠错...` };
               yield { type: 'skill_error', name: `invoke:${skillName}`, error: err.message };
               newMessages.push({
                 role: 'tool',
@@ -351,6 +353,7 @@ export class BaseAgent {
                 name: toolCall.name
               });
             } else {
+              yield { type: 'status', message: `⚠️ 工具 [${toolCall.name}] 运行失败，正在自动引导纠错...` };
               yield { type: 'skill_error', name: toolCall.name, error: runResult.error || '执行失败' };
               newMessages.push({
                 role: 'tool',
@@ -371,6 +374,7 @@ export class BaseAgent {
               result: runResult
             });
           } catch (execErr: any) {
+            yield { type: 'status', message: `⚠️ 工具 [${toolCall.name}] 参数解析或运行异常，正在自动纠错...` };
             yield { type: 'skill_error', name: toolCall.name, error: execErr.message };
             newMessages.push({
               role: 'tool',
@@ -732,7 +736,9 @@ export class BaseAgent {
       // Strategy 0: Repair unescaped quotes and raw control newlines/returns inside strings
       try {
         const repaired = this.repairJsonString(argsString);
-        return JSON.parse(repaired);
+        const parsed = JSON.parse(repaired);
+        this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Strategy 0 (Scanner Repair)', repaired);
+        return parsed;
       } catch (repairError) {
         // Repair failed or still malformed, continue to other strategies
       }
@@ -741,7 +747,9 @@ export class BaseAgent {
       if (error.message.includes('Unterminated string')) {
         try {
           const fixed = argsString + '"}';
-          return JSON.parse(fixed);
+          const parsed = JSON.parse(fixed);
+          this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Strategy 1 (Unterminated String)', fixed);
+          return parsed;
         } catch {
           // Continue to next strategy
         }
@@ -752,15 +760,59 @@ export class BaseAgent {
         const lastValidPos = argsString.lastIndexOf('}');
         if (lastValidPos > 0) {
           const truncated = argsString.substring(0, lastValidPos + 1);
-          return JSON.parse(truncated);
+          const parsed = JSON.parse(truncated);
+          this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Strategy 2 (JSON Prefix)', truncated);
+          return parsed;
         }
       } catch {
         // Failed
       }
 
+      this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Failed (All Strategies Failed)');
       throw new Error(
         `Failed to parse tool call arguments for ${toolCall.name}: ${error.message}`
       );
+    }
+  }
+
+  /**
+   * Appends a tool execution or parsing failure incident to the diagnostic log file
+   */
+  private async logDiagnosticIncident(
+    toolName: string,
+    originalArgs: string,
+    errorMessage: string,
+    strategy: string,
+    repairedArgs?: string
+  ): Promise<void> {
+    try {
+      const vault = this.skillExecutor.getContext().vault;
+      if (!vault) return;
+
+      const logDir = '.personal-agent';
+      const logPath = `${logDir}/diagnostics.jsonl`;
+
+      // Check if folder exists, if not, create it
+      if (!(await vault.adapter.exists(logDir))) {
+        await vault.adapter.mkdir(logDir);
+      }
+
+      const logEntry = {
+        timestamp: Date.now(),
+        time: new Date().toISOString(),
+        agentId: this.config.id,
+        agentName: this.config.name,
+        toolName,
+        originalArgs,
+        errorMessage,
+        strategy,
+        repairedArgs,
+        success: !!repairedArgs
+      };
+
+      await vault.adapter.append(logPath, JSON.stringify(logEntry) + '\n');
+    } catch (err) {
+      console.error('[BaseAgent] Failed to write diagnostic log:', err);
     }
   }
 
