@@ -729,6 +729,14 @@ export class BaseAgent {
       console.error(`[BaseAgent] JSON parse failed for ${toolCall.name}:`, error.message);
 
       // Try recovery strategies
+      // Strategy 0: Repair unescaped quotes and raw control newlines/returns inside strings
+      try {
+        const repaired = this.repairJsonString(argsString);
+        return JSON.parse(repaired);
+      } catch (repairError) {
+        // Repair failed or still malformed, continue to other strategies
+      }
+
       // Strategy 1: Fix unterminated strings
       if (error.message.includes('Unterminated string')) {
         try {
@@ -754,6 +762,81 @@ export class BaseAgent {
         `Failed to parse tool call arguments for ${toolCall.name}: ${error.message}`
       );
     }
+  }
+
+  /**
+   * Scans a JSON string to escape raw control characters and repair unescaped quotes inside string literals
+   */
+  private repairJsonString(json: string): string {
+    let output = '';
+    let inString = false;
+    let i = 0;
+
+    while (i < json.length) {
+      const char = json[i];
+
+      if (inString) {
+        if (char === '\\') {
+          // Skip escape sequence
+          output += char;
+          if (i + 1 < json.length) {
+            output += json[i + 1];
+            i += 2;
+          } else {
+            i++;
+          }
+          continue;
+        }
+
+        if (char === '\n') {
+          output += '\\n';
+          i++;
+          continue;
+        }
+
+        if (char === '\r') {
+          output += '\\r';
+          i++;
+          continue;
+        }
+
+        if (char === '"') {
+          // Look ahead to check if this is the actual closing quote of the string.
+          // In standard JSON, a closing quote must be followed by optional whitespace and then one of: , } ] or : (for keys) or end of string.
+          let j = i + 1;
+          while (j < json.length && /\s/.test(json[j])) {
+            j++;
+          }
+
+          const nextChar = json[j];
+          const isValidClosing =
+            j === json.length ||
+            nextChar === ',' ||
+            nextChar === '}' ||
+            nextChar === ']' ||
+            nextChar === ':';
+
+          if (isValidClosing) {
+            inString = false;
+            output += char;
+          } else {
+            // Unescaped quote! Escape it
+            output += '\\"';
+          }
+        } else {
+          output += char;
+        }
+        i++;
+      } else {
+        if (char === '"') {
+          inString = true;
+        }
+        output += char;
+        i++;
+      }
+    }
+
+    return output;
   }
 
   /**
