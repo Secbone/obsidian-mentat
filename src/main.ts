@@ -274,6 +274,66 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
         }
       }
     });
+
+    // View diagnostics command
+    this.addCommand({
+      id: 'view-diagnostics',
+      name: 'Open Diagnostics and Debug Log',
+      callback: async () => {
+        const adapter = this.app.vault.adapter;
+        const logPath = '.personal-agent/diagnostics.jsonl';
+        
+        if (!(await adapter.exists(logPath))) {
+          new Notice('No diagnostics logs found. Everything is running smoothly!');
+          return;
+        }
+        
+        try {
+          const content = await adapter.read(logPath);
+          const debugNotePath = 'Personal Agent Debug Log.md';
+          
+          const lines = content.trim().split('\n').reverse().slice(0, 50); // Get latest 50 incidents
+          let markdownContent = `# Personal Agent Diagnostics & Debug Log\n\n`;
+          markdownContent += `Showing the latest ${lines.length} incidents (newest first). The complete log is saved at \`${logPath}\`.\n\n`;
+          
+          if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
+            markdownContent += `✓ No incident records found. All processes parsed cleanly!\n`;
+          } else {
+            lines.forEach((line, index) => {
+              try {
+                const entry = JSON.parse(line);
+                const timeStr = new Date(entry.timestamp).toLocaleString();
+                markdownContent += `## Incident #${lines.length - index} [${timeStr}]\n`;
+                markdownContent += `- **Tool / Skill**: \`${entry.toolName}\`\n`;
+                markdownContent += `- **Error Message**: *${entry.errorMessage}*\n`;
+                markdownContent += `- **Recovery Strategy**: *${entry.strategy}*\n`;
+                markdownContent += `\n### Original Arguments (Unparsed)\n\`\`\`json\n${entry.originalArgs}\n\`\`\`\n`;
+                if (entry.repairedArgs) {
+                  markdownContent += `\n### Repaired & Recovered Arguments\n\`\`\`json\n${entry.repairedArgs}\n\`\`\`\n`;
+                }
+                markdownContent += `\n---\n\n`;
+              } catch {
+                // Ignore malformed lines
+              }
+            });
+          }
+
+          // Write to a temporary markdown file
+          await adapter.write(debugNotePath, markdownContent);
+          
+          // Open the note in workspace
+          const tFile = this.app.vault.getAbstractFileByPath(debugNotePath);
+          if (tFile) {
+            await this.app.workspace.getLeaf().openFile(tFile as any);
+            new Notice('Diagnostics Log opened successfully');
+          } else {
+            new Notice('Log compiled. Please open "Personal Agent Debug Log.md" in your vault root.');
+          }
+        } catch (err) {
+          new Notice(`Failed to load diagnostics: ${err.message}`);
+        }
+      }
+    });
   }
 
   async loadSettings() {

@@ -743,12 +743,16 @@ export class BaseAgent {
         // Repair failed or still malformed, continue to other strategies
       }
 
-      // Strategy 1: Fix unterminated strings
-      if (error.message.includes('Unterminated string')) {
+      // Strategy 1: Fix unterminated strings / truncated JSON objects
+      if (
+        error.message.includes('Unterminated string') || 
+        error.message.includes('Unexpected end of JSON input') || 
+        error.message.includes('Expected \',\' or \'}\'')
+      ) {
         try {
-          const fixed = argsString + '"}';
+          const fixed = this.repairTruncatedJson(argsString);
           const parsed = JSON.parse(fixed);
-          this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Strategy 1 (Unterminated String)', fixed);
+          this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Strategy 1 (Truncation & Bracket Repair)', fixed);
           return parsed;
         } catch {
           // Continue to next strategy
@@ -889,6 +893,69 @@ export class BaseAgent {
     }
 
     return output;
+  }
+
+  /**
+   * Scans a truncated or unterminated JSON string, closes any open string literals,
+   * and balances all open curly braces and square brackets in reverse nesting order.
+   */
+  private repairTruncatedJson(json: string): string {
+    let inString = false;
+    let escaped = false;
+    const stack: ('{' | '[')[] = [];
+    let i = 0;
+
+    while (i < json.length) {
+      const char = json[i];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === '\\') {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+      } else {
+        if (char === '"') {
+          inString = true;
+        } else if (char === '{') {
+          stack.push('{');
+        } else if (char === '[') {
+          stack.push('[');
+        } else if (char === '}') {
+          if (stack[stack.length - 1] === '{') {
+            stack.pop();
+          }
+        } else if (char === ']') {
+          if (stack[stack.length - 1] === '[') {
+            stack.pop();
+          }
+        }
+      }
+      i++;
+    }
+
+    let repaired = json;
+    if (inString) {
+      // If we ended with a trailing escape backslash, slice it off first
+      if (escaped && repaired.endsWith('\\')) {
+        repaired = repaired.slice(0, -1);
+      }
+      repaired += '"';
+    }
+
+    // Pop remaining open brackets/braces from the stack and append their closing matches
+    while (stack.length > 0) {
+      const open = stack.pop();
+      if (open === '{') {
+        repaired += '}';
+      } else if (open === '[') {
+        repaired += ']';
+      }
+    }
+
+    return repaired;
   }
 
   /**
