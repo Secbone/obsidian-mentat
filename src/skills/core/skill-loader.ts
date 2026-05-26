@@ -13,6 +13,7 @@ import * as ListNotesImpl from '../../../skills/list-notes/scripts';
 import * as AskUserImpl from '../../../skills/ask-user/scripts';
 import * as WebFetchImpl from '../../../skills/web-fetch/scripts';
 import * as WebSearchImpl from '../../../skills/web-search/scripts';
+import * as RunCommandImpl from '../../../skills/run-command/scripts';
 
 /**
  * Skill metadata from SKILL.md frontmatter
@@ -59,7 +60,8 @@ export class SkillLoader {
       ['list_notes', ListNotesImpl],
       ['ask_user', AskUserImpl],
       ['web_fetch', WebFetchImpl],
-      ['web_search', WebSearchImpl]
+      ['web_search', WebSearchImpl],
+      ['run_command', RunCommandImpl]
     ]);
   }
 
