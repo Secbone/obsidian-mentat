@@ -195,6 +195,7 @@ export interface SkillInvocationConfig {
     ttl?: number; // Time to live in milliseconds
     maxSize?: number; // Maximum cache entries
   };
+  directCallSkills?: string[]; // Custom skills to be called directly in 'auto' mode
 }
 
 // Spec Parameters

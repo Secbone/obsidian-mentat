@@ -287,6 +287,17 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
     if (this.aiRouter) {
       this.aiRouter.refresh(this.settings);
     }
+
+    // Refresh Skill Invocation Context when settings change
+    if (this.chatOrchestrator) {
+      const skillContext = this.chatOrchestrator.getSkillInvocationContext();
+      if (skillContext) {
+        skillContext.setMode(this.settings.skillInvocationMode || 'auto');
+        if (this.settings.skillInvocationConfig?.directCallSkills) {
+          skillContext.setDirectCallSkills(this.settings.skillInvocationConfig.directCallSkills);
+        }
+      }
+    }
   }
 
   async activateChatView(): Promise<void> {

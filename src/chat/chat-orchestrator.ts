@@ -55,7 +55,11 @@ export class ChatOrchestrator {
 
     // Initialize skill invocation strategy
     const invocationMode = plugin.settings.skillInvocationMode || 'progressive';
-    this.skillInvocationContext = new SkillInvocationContext(invocationMode, plugin.app);
+    this.skillInvocationContext = new SkillInvocationContext(
+      invocationMode,
+      plugin.app,
+      plugin.settings.skillInvocationConfig?.directCallSkills
+    );
 
     // Initialize skill cache
     const cacheConfig = plugin.settings.skillInvocationConfig?.cacheConfig || {};

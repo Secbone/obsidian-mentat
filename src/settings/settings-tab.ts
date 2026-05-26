@@ -29,6 +29,9 @@ export class SettingsTab extends PluginSettingTab {
     // Feature Toggles Section
     this.displayFeatureTogglesSection(containerEl);
 
+    // Skills Section
+    this.displaySkillsSection(containerEl);
+
     // Performance Section
     this.displayPerformanceSection(containerEl);
   }
@@ -289,6 +292,65 @@ export class SettingsTab extends PluginSettingTab {
         await this.plugin.saveSettings();
         this.display();
       }));
+  }
+
+  displaySkillsSection(containerEl: HTMLElement): void {
+    containerEl.createEl('h2', { text: 'Skill System & Tools' });
+
+    new Setting(containerEl)
+      .setName('Skill Invocation Mode')
+      .setDesc('Choose how skills are exposed to the AI model')
+      .addDropdown(dropdown => dropdown
+        .addOption('auto', 'Hybrid Auto-Strategy (Recommended)')
+        .addOption('progressive', 'Progressive Disclosure (Token Saver)')
+        .addOption('native', 'Native Function Calling')
+        .setValue(this.plugin.settings.skillInvocationMode || 'auto')
+        .onChange(async (value) => {
+          this.plugin.settings.skillInvocationMode = value as 'auto' | 'progressive' | 'native';
+          if (!this.plugin.settings.skillInvocationConfig) {
+            this.plugin.settings.skillInvocationConfig = { mode: value as any };
+          } else {
+            this.plugin.settings.skillInvocationConfig.mode = value as any;
+          }
+          await this.plugin.saveSettings();
+          this.display(); // Redraw to show/hide dynamic fields
+        }));
+
+    if (this.plugin.settings.skillInvocationMode === 'auto') {
+      const config = this.plugin.settings.skillInvocationConfig || {};
+      const directSkills = config.directCallSkills || [
+        'obsidian:read_note',
+        'obsidian:query_notes',
+        'obsidian:edit_note',
+        'obsidian:web_search',
+        'obsidian:ask_user',
+        'obsidian:list_notes',
+        'obsidian:web_fetch'
+      ];
+
+      new Setting(containerEl)
+        .setName('Direct-Call Skills')
+        .setDesc('Enter full names of skills that the agent should call directly (separated by commas or newlines)')
+        .addTextArea(text => text
+          .setPlaceholder('obsidian:read_note, obsidian:query_notes, ...')
+          .setValue(directSkills.join(',\n'))
+          .onChange(async (value) => {
+            const skills = value
+              .split(/[\n,]+/)
+              .map(s => s.trim())
+              .filter(s => s.length > 0);
+            
+            if (!this.plugin.settings.skillInvocationConfig) {
+              this.plugin.settings.skillInvocationConfig = {
+                mode: 'auto',
+                directCallSkills: skills
+              };
+            } else {
+              this.plugin.settings.skillInvocationConfig.directCallSkills = skills;
+            }
+            await this.plugin.saveSettings();
+          }));
+    }
   }
 
   showProviderEditModal(provider: AIProviderConfig | null, index: number): void {

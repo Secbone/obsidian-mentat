@@ -132,7 +132,16 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
     cacheConfig: {
       ttl: 3600000,  // 1 hour
       maxSize: 100   // Max 100 cached skills
-    }
+    },
+    directCallSkills: [
+      'obsidian:read_note',
+      'obsidian:query_notes',
+      'obsidian:edit_note',
+      'obsidian:web_search',
+      'obsidian:ask_user',
+      'obsidian:list_notes',
+      'obsidian:web_fetch'
+    ]
   },
 
   mcpServers: [],

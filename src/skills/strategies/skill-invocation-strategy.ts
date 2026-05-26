@@ -202,16 +202,23 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
   private listGenerator = new SkillListGenerator();
   private detailGenerator = new SkillDetailGenerator();
   private progressiveStrategy: ProgressiveDisclosureStrategy;
-  private coreSkills = new Set([
-    'obsidian:read_note',
-    'obsidian:query_notes',
-    'obsidian:edit_note',
-    'obsidian:web_search',
-    'obsidian:ask_user'
-  ]);
+  private coreSkills: Set<string>;
 
-  constructor(private app?: App) {
+  constructor(private app?: App, directCallSkills?: string[]) {
     this.progressiveStrategy = new ProgressiveDisclosureStrategy(app);
+    if (directCallSkills && directCallSkills.length > 0) {
+      this.coreSkills = new Set(directCallSkills);
+    } else {
+      this.coreSkills = new Set([
+        'obsidian:read_note',
+        'obsidian:query_notes',
+        'obsidian:edit_note',
+        'obsidian:web_search',
+        'obsidian:ask_user',
+        'obsidian:list_notes',
+        'obsidian:web_fetch'
+      ]);
+    }
   }
 
   prepareSystemPrompt(registry: SkillRegistry): string {
@@ -222,6 +229,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
 
     // Separate skills into core and progressive
     const allSkills = registry.getAll();
+    const coreSkillDefs = allSkills.filter(s => this.coreSkills.has(registry.getFullName(s.namespace, s.name)));
     const progressiveSkills = allSkills.filter(s => !this.coreSkills.has(registry.getFullName(s.namespace, s.name)));
 
     // Generate progressive skill list
@@ -230,11 +238,11 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     // Hybrid prompt instructions
     content += '\n\n## SYSTEM TOOLS\n';
     content += 'You have direct, instant access to core system tools. You can invoke these directly in a single turn without using `spec` or `invoke`:\n';
-    content += '- `obsidian:read_note`: Read the contents of a note\n';
-    content += '- `obsidian:query_notes`: Query/list notes based on criteria\n';
-    content += '- `obsidian:edit_note`: Edit or create a note\n';
-    content += '- `obsidian:web_search`: Search the web using Brave Search\n';
-    content += '- `obsidian:ask_user`: Ask the user a question to clarify requirements\n\n';
+    for (const skill of coreSkillDefs) {
+      const fullName = registry.getFullName(skill.namespace, skill.name);
+      content += `- \`${fullName}\`: ${skill.description}\n`;
+    }
+    content += '\n';
 
     content += '## DYNAMIC SKILLS\n';
     content += 'You also have access to advanced/dynamic skills. To use these, you MUST use a two-step process:\n';
@@ -301,10 +309,12 @@ export class SkillInvocationContext {
   private strategy: SkillInvocationStrategy;
   private mode: SkillInvocationMode;
   private app?: App;
+  private directCallSkills?: string[];
 
-  constructor(mode: SkillInvocationMode = 'progressive', app?: App) {
+  constructor(mode: SkillInvocationMode = 'progressive', app?: App, directCallSkills?: string[]) {
     this.mode = mode;
     this.app = app;
+    this.directCallSkills = directCallSkills;
     this.strategy = this.createStrategy(mode);
   }
 
@@ -315,9 +325,9 @@ export class SkillInvocationContext {
       case 'progressive':
         return new ProgressiveDisclosureStrategy(this.app);
       case 'auto':
-        return new HybridSkillInvocationStrategy(this.app);
+        return new HybridSkillInvocationStrategy(this.app, this.directCallSkills);
       default:
-        return new HybridSkillInvocationStrategy(this.app);
+        return new HybridSkillInvocationStrategy(this.app, this.directCallSkills);
     }
   }
 
@@ -327,6 +337,13 @@ export class SkillInvocationContext {
   setMode(mode: SkillInvocationMode): void {
     this.mode = mode;
     this.strategy = this.createStrategy(mode);
+  }
+
+  setDirectCallSkills(skills: string[]): void {
+    this.directCallSkills = skills;
+    if (this.mode === 'auto') {
+      this.strategy = this.createStrategy(this.mode);
+    }
   }
 
   getMode(): SkillInvocationMode {
