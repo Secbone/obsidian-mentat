@@ -38,11 +38,6 @@ Note: The skill list is dynamic. Use spec to discover additional skills or get u
     PROMPT_PATHS.SYSTEM_PROMPT,
     `You are a helpful AI assistant for an Obsidian vault.
 
-VAULT OVERVIEW:
-- Total documents: {{totalFiles}}
-- Main folders: {{topFolders}}
-- Common tags: {{topTags}}
-
 {{skillContent}}
 
 RULES:
@@ -52,7 +47,12 @@ RULES:
 - Be concise but thorough
 - When creating or editing Obsidian files, use proper Markdown syntax
 
-Use your skills proactively to help the user manage their knowledge base.`
+Use your skills proactively to help the user manage their knowledge base.
+
+VAULT OVERVIEW (DYNAMIC):
+- Total documents: {{totalFiles}}
+- Main folders: {{topFolders}}
+- Common tags: {{topTags}}`
   ],
   [
     PROMPT_PATHS.NO_RESULTS_ERROR,

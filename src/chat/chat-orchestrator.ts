@@ -279,8 +279,7 @@ export class ChatOrchestrator {
 
     // Try to load system prompt from file, fall back to embedded version
     try {
-      const template = FALLBACK_PROMPTS.get(PROMPT_PATHS.SYSTEM_PROMPT) || '';
-      return this.promptLoader.replaceVariables(template, {
+      return await this.promptLoader.loadPrompt(PROMPT_PATHS.SYSTEM_PROMPT, {
         [TEMPLATE_VARS.TOTAL_FILES]: totalFiles.toString(),
         [TEMPLATE_VARS.TOP_FOLDERS]: topFolders || 'None',
         [TEMPLATE_VARS.TOP_TAGS]: topTags || 'None',
@@ -292,11 +291,6 @@ export class ChatOrchestrator {
       // Inline fallback
       return `You are a helpful AI assistant for an Obsidian vault.
 
-VAULT OVERVIEW:
-- Total documents: ${totalFiles}
-- Main folders: ${topFolders || 'None'}
-- Common tags: ${topTags || 'None'}
-
 ${skillContent}
 
 RULES:
@@ -304,7 +298,12 @@ RULES:
 - Be concise but thorough
 - When creating or editing Obsidian files, use proper Markdown syntax
 
-Use your skills proactively to help the user manage their knowledge base.`;
+Use your skills proactively to help the user manage their knowledge base.
+
+VAULT OVERVIEW (DYNAMIC):
+- Total documents: ${totalFiles}
+- Main folders: ${topFolders || 'None'}
+- Common tags: ${topTags || 'None'}`;
     }
   }
 
