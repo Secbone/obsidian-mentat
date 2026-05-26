@@ -1,7 +1,7 @@
 // Skill Invocation Strategy - Abstract strategy pattern for skill invocation
 
 import { App } from 'obsidian';
-import { AnySkillDefinition, OpenAIFunction, AnthropicTool } from '../skill-types';
+import { AnySkillDefinition, OpenAIFunction, AnthropicTool, isExecutableSkill } from '../skill-types';
 import { SkillRegistry } from '../core/skill-registry';
 import { SkillListGenerator } from '../generators/skill-list-generator';
 import { SkillDetailGenerator } from '../generators/skill-detail-generator';
@@ -193,6 +193,108 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
 }
 
 /**
+ * Hybrid Skill Invocation Strategy (Auto Mode)
+ * Exposes core, high-frequency skills directly to the LLM as native tools,
+ * while keeping all other skills progressive (accessed via spec and invoke)
+ * to maintain prompt efficiency.
+ */
+export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
+  private listGenerator = new SkillListGenerator();
+  private detailGenerator = new SkillDetailGenerator();
+  private progressiveStrategy: ProgressiveDisclosureStrategy;
+  private coreSkills = new Set([
+    'obsidian:read_note',
+    'obsidian:query_notes',
+    'obsidian:edit_note',
+    'obsidian:web_search',
+    'obsidian:ask_user'
+  ]);
+
+  constructor(private app?: App) {
+    this.progressiveStrategy = new ProgressiveDisclosureStrategy(app);
+  }
+
+  prepareSystemPrompt(registry: SkillRegistry): string {
+    let content = '';
+
+    // Include documentation skills
+    content += registry.getDocumentationContent();
+
+    // Separate skills into core and progressive
+    const allSkills = registry.getAll();
+    const progressiveSkills = allSkills.filter(s => !this.coreSkills.has(registry.getFullName(s.namespace, s.name)));
+
+    // Generate progressive skill list
+    const progressiveSkillList = this.listGenerator.generateSkillList(progressiveSkills);
+
+    // Hybrid prompt instructions
+    content += '\n\n## SYSTEM TOOLS\n';
+    content += 'You have direct, instant access to core system tools. You can invoke these directly in a single turn without using `spec` or `invoke`:\n';
+    content += '- `obsidian:read_note`: Read the contents of a note\n';
+    content += '- `obsidian:query_notes`: Query/list notes based on criteria\n';
+    content += '- `obsidian:edit_note`: Edit or create a note\n';
+    content += '- `obsidian:web_search`: Search the web using Brave Search\n';
+    content += '- `obsidian:ask_user`: Ask the user a question to clarify requirements\n\n';
+
+    content += '## DYNAMIC SKILLS\n';
+    content += 'You also have access to advanced/dynamic skills. To use these, you MUST use a two-step process:\n';
+    content += '1. **Get skill spec first:** Call `spec` with the skill name to get its exact parameters and description.\n';
+    content += '   Example: spec("obsidian:web_fetch")\n';
+    content += '2. **Invoke the skill:** Call `invoke` with the skill name and required parameters.\n';
+    content += '   Example: invoke("obsidian:web_fetch", {"url": "https://..."})\n\n';
+    
+    if (progressiveSkillList && progressiveSkillList.trim()) {
+      content += '**Available Dynamic Skills:**\n';
+      content += progressiveSkillList;
+      content += '\n\n';
+    }
+
+    content += '**Workflows:**\n';
+    content += '- Core tools: Call directly (e.g. obsidian:web_search)\n';
+    content += '- Dynamic tools: Call `spec` first, then call `invoke`\n';
+    content += '- If in doubt about a core tool\'s parameters: You can call `spec` on it too!\n';
+
+    return content;
+  }
+
+  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): any[] {
+    const tools: any[] = [];
+
+    // 1. Expose core skills directly as native tools
+    const allSkills = registry.getAll();
+    const coreSkillDefs = allSkills.filter(s => this.coreSkills.has(registry.getFullName(s.namespace, s.name)));
+
+    if (format === 'openai') {
+      for (const skill of coreSkillDefs) {
+        if (isExecutableSkill(skill)) {
+          tools.push(registry.skillToOpenAIFunction(skill));
+        }
+      }
+      tools.push(getSpecTool('openai') as OpenAIFunction);
+      tools.push(getInvokeTool('openai') as OpenAIFunction);
+    } else {
+      for (const skill of coreSkillDefs) {
+        if (isExecutableSkill(skill)) {
+          tools.push(registry.skillToAnthropicTool(skill));
+        }
+      }
+      tools.push(getSpecTool('anthropic') as AnthropicTool);
+      tools.push(getInvokeTool('anthropic') as AnthropicTool);
+    }
+
+    return tools;
+  }
+
+  isMetaToolCall(toolName: string): boolean {
+    return toolName === 'spec' || toolName === 'invoke';
+  }
+
+  getSkillName(toolName: string): string {
+    return toolName;
+  }
+}
+
+/**
  * Skill Invocation Context - manages strategy and state
  */
 export class SkillInvocationContext {
@@ -213,11 +315,9 @@ export class SkillInvocationContext {
       case 'progressive':
         return new ProgressiveDisclosureStrategy(this.app);
       case 'auto':
-        // Auto mode: use progressive by default
-        // Could be enhanced to choose based on context (number of skills, etc.)
-        return new ProgressiveDisclosureStrategy(this.app);
+        return new HybridSkillInvocationStrategy(this.app);
       default:
-        return new ProgressiveDisclosureStrategy(this.app);
+        return new HybridSkillInvocationStrategy(this.app);
     }
   }
 

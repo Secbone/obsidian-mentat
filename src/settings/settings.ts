@@ -123,9 +123,9 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   maxTurns: 20,
 
   // Skill Invocation Configuration
-  skillInvocationMode: 'progressive', // Use progressive disclosure by default
+  skillInvocationMode: 'auto', // Use hybrid auto strategy by default
   skillInvocationConfig: {
-    mode: 'progressive',
+    mode: 'auto',
     detailFormat: 'markdown',
     enableCache: true,
     enableDynamicDiscovery: true,
