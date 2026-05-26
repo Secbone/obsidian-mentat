@@ -67,6 +67,15 @@ export interface PersonalAgentSettings {
   // Review Configuration
   reviewIntervalDays: number;  // Default 7
   enableSpacedRepetition: boolean;
+
+  // Individual Skill configurations
+  skillConfigurations?: Record<string, SkillConfig>;
+}
+
+export interface SkillConfig {
+  enabled?: boolean;
+  directCall?: boolean;
+  requireConfirmation?: boolean;
 }
 
 export interface AIProviderConfig {
@@ -170,5 +179,6 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   maxEmbeddingCache: 1000,
 
   reviewIntervalDays: 7,
-  enableSpacedRepetition: true
+  enableSpacedRepetition: true,
+  skillConfigurations: {}
 };

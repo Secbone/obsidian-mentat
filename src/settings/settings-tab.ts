@@ -5,6 +5,8 @@ import { ProviderEditModal } from './provider-edit-modal';
 
 export class SettingsTab extends PluginSettingTab {
   plugin: PersonalAgentPlugin;
+  private activeTab: 'general' | 'skills' = 'general';
+  private searchQuery: string = '';
 
   constructor(app: App, plugin: PersonalAgentPlugin) {
     super(app, plugin);
@@ -17,23 +19,69 @@ export class SettingsTab extends PluginSettingTab {
 
     containerEl.createEl('h1', { text: 'Personal Agent Settings' });
 
-    // AI Providers Section
-    this.displayAIProvidersSection(containerEl);
+    // Render tab bar
+    const tabBar = containerEl.createDiv({ cls: 'setting-tab-bar' });
+    tabBar.style.display = 'flex';
+    tabBar.style.gap = '10px';
+    tabBar.style.marginBottom = '20px';
+    tabBar.style.borderBottom = '1px solid var(--border-color)';
+    tabBar.style.paddingBottom = '10px';
 
-    // Task Routing Section
-    this.displayTaskRoutingSection(containerEl);
+    const generalTabButton = tabBar.createEl('button', { text: 'General Configuration' });
+    const skillsTabButton = tabBar.createEl('button', { text: 'Skills & Tools Manager' });
 
-    // Integration Section
-    this.displayIntegrationSection(containerEl);
+    // Style buttons based on active tab
+    const activeStyle = (btn: HTMLButtonElement) => {
+      btn.style.backgroundColor = 'var(--interactive-accent)';
+      btn.style.color = 'var(--text-on-accent)';
+      btn.style.fontWeight = 'bold';
+    };
+    const inactiveStyle = (btn: HTMLButtonElement) => {
+      btn.style.backgroundColor = 'var(--button-background)';
+      btn.style.color = 'var(--text-normal)';
+      btn.style.fontWeight = 'normal';
+    };
 
-    // Feature Toggles Section
-    this.displayFeatureTogglesSection(containerEl);
+    if (this.activeTab === 'general') {
+      activeStyle(generalTabButton);
+      inactiveStyle(skillsTabButton);
+    } else {
+      inactiveStyle(generalTabButton);
+      activeStyle(skillsTabButton);
+    }
 
-    // Skills Section
-    this.displaySkillsSection(containerEl);
+    generalTabButton.addEventListener('click', () => {
+      this.activeTab = 'general';
+      this.display();
+    });
 
-    // Performance Section
-    this.displayPerformanceSection(containerEl);
+    skillsTabButton.addEventListener('click', () => {
+      this.activeTab = 'skills';
+      this.display();
+    });
+
+    if (this.activeTab === 'general') {
+      // AI Providers Section
+      this.displayAIProvidersSection(containerEl);
+
+      // Task Routing Section
+      this.displayTaskRoutingSection(containerEl);
+
+      // Integration Section
+      this.displayIntegrationSection(containerEl);
+
+      // Feature Toggles Section
+      this.displayFeatureTogglesSection(containerEl);
+
+      // Skills Section
+      this.displaySkillsSection(containerEl);
+
+      // Performance Section
+      this.displayPerformanceSection(containerEl);
+    } else {
+      // Skills & Tools Manager Section
+      this.displaySkillsManagerSection(containerEl);
+    }
   }
 
   displayAIProvidersSection(containerEl: HTMLElement): void {
@@ -351,6 +399,188 @@ export class SettingsTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }));
     }
+  }
+
+  displaySkillsManagerSection(containerEl: HTMLElement): void {
+    containerEl.createEl('h2', { text: 'Skills & Tools Manager' });
+    containerEl.createEl('p', {
+      text: 'Manage and configure individual capabilities and tools recognized by your Personal Agent.',
+      cls: 'setting-item-description'
+    });
+
+    const registry = this.plugin.chatOrchestrator?.getSkillRegistry();
+    if (!registry) {
+      containerEl.createEl('p', { text: 'Skill registry is not initialized yet.' });
+      return;
+    }
+    const allSkills = registry.getAll();
+
+    // Search input
+    const searchContainer = containerEl.createDiv();
+    searchContainer.style.marginBottom = '20px';
+    searchContainer.style.display = 'flex';
+    searchContainer.style.gap = '10px';
+
+    const searchInput = searchContainer.createEl('input', {
+      type: 'text',
+      placeholder: 'Search skills (e.g. read_note)...'
+    });
+    searchInput.style.flex = '1';
+    searchInput.value = this.searchQuery;
+    searchInput.addEventListener('input', (e) => {
+      this.searchQuery = (e.target as HTMLInputElement).value;
+      const cards = containerEl.querySelectorAll('.skill-card');
+      const query = this.searchQuery.toLowerCase();
+      cards.forEach((card: any) => {
+        const skillName = card.dataset.skillName.toLowerCase();
+        const description = card.dataset.description.toLowerCase();
+        if (skillName.includes(query) || description.includes(query)) {
+          card.style.display = 'block';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    });
+
+    const listContainer = containerEl.createDiv({ cls: 'skills-list-container' });
+    listContainer.style.display = 'flex';
+    listContainer.style.flexDirection = 'column';
+    listContainer.style.gap = '15px';
+
+    const sortedSkills = [...allSkills].sort((a, b) => {
+      const nameA = registry.getFullName(a.namespace, a.name);
+      const nameB = registry.getFullName(b.namespace, b.name);
+      return nameA.localeCompare(nameB);
+    });
+
+    sortedSkills.forEach(skill => {
+      const fullName = registry.getFullName(skill.namespace, skill.name);
+      
+      // Get existing config or initialize default values
+      if (!this.plugin.settings.skillConfigurations) {
+        this.plugin.settings.skillConfigurations = {};
+      }
+      const skillConfig = this.plugin.settings.skillConfigurations[fullName] || {};
+      
+      const card = listContainer.createDiv({ cls: 'skill-card' });
+      card.dataset.skillName = fullName;
+      card.dataset.description = skill.description || '';
+      
+      card.style.border = '1px solid var(--border-color)';
+      card.style.borderRadius = '6px';
+      card.style.padding = '15px';
+      card.style.backgroundColor = 'var(--background-primary-alt)';
+      
+      // 1. Title and Badge
+      const header = card.createDiv();
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+      header.style.marginBottom = '10px';
+      
+      const title = header.createEl('h3', { text: fullName });
+      title.style.margin = '0';
+      title.style.fontSize = '1.1em';
+      
+      const badge = header.createSpan({ text: skill.namespace.toUpperCase() });
+      badge.style.fontSize = '0.8em';
+      badge.style.padding = '2px 8px';
+      badge.style.borderRadius = '10px';
+      badge.style.backgroundColor = skill.namespace === 'obsidian' ? 'var(--interactive-accent)' : 'var(--background-modifier-border)';
+      badge.style.color = 'var(--text-on-accent)';
+      
+      // 2. Description
+      const desc = card.createDiv({ text: skill.description });
+      desc.style.color = 'var(--text-muted)';
+      desc.style.fontSize = '0.9em';
+      desc.style.marginBottom = '15px';
+      
+      // 3. Toggles/Controls Row
+      const controls = card.createDiv();
+      controls.style.display = 'flex';
+      controls.style.flexWrap = 'wrap';
+      controls.style.gap = '20px';
+      controls.style.paddingTop = '10px';
+      controls.style.borderTop = '1px solid var(--border-color)';
+      
+      // Toggle 1: Enabled
+      const enabledSetting = new Setting(controls)
+        .setName('Allowed')
+        .setDesc('AI can use this tool')
+        .addToggle(toggle => toggle
+          .setValue(skillConfig.enabled !== false)
+          .onChange(async (val) => {
+            if (!this.plugin.settings.skillConfigurations) {
+              this.plugin.settings.skillConfigurations = {};
+            }
+            if (!this.plugin.settings.skillConfigurations[fullName]) {
+              this.plugin.settings.skillConfigurations[fullName] = {};
+            }
+            this.plugin.settings.skillConfigurations[fullName].enabled = val;
+            await this.plugin.saveSettings();
+          }));
+      enabledSetting.settingEl.style.border = 'none';
+      enabledSetting.settingEl.style.padding = '0';
+      enabledSetting.settingEl.style.flex = '1';
+      enabledSetting.settingEl.style.minWidth = '150px';
+      
+      // Toggle 2: Direct Call
+      const defaultCore = [
+        'obsidian:read_note',
+        'obsidian:query_notes',
+        'obsidian:edit_note',
+        'obsidian:web_search',
+        'obsidian:ask_user',
+        'obsidian:list_notes',
+        'obsidian:web_fetch'
+      ];
+      const defaultDirect = defaultCore.includes(fullName);
+      const directCallValue = skillConfig.directCall !== undefined ? skillConfig.directCall : defaultDirect;
+      
+      const directSetting = new Setting(controls)
+        .setName('Direct-Call')
+        .setDesc('Call directly (no spec)')
+        .addToggle(toggle => toggle
+          .setValue(directCallValue)
+          .onChange(async (val) => {
+            if (!this.plugin.settings.skillConfigurations) {
+              this.plugin.settings.skillConfigurations = {};
+            }
+            if (!this.plugin.settings.skillConfigurations[fullName]) {
+              this.plugin.settings.skillConfigurations[fullName] = {};
+            }
+            this.plugin.settings.skillConfigurations[fullName].directCall = val;
+            await this.plugin.saveSettings();
+          }));
+      directSetting.settingEl.style.border = 'none';
+      directSetting.settingEl.style.padding = '0';
+      directSetting.settingEl.style.flex = '1';
+      directSetting.settingEl.style.minWidth = '150px';
+
+      // Toggle 3: Require Confirmation
+      const defaultConfirm = !!skill.metadata?.requiresConfirmation;
+      const confirmValue = skillConfig.requireConfirmation !== undefined ? skillConfig.requireConfirmation : defaultConfirm;
+      
+      const confirmSetting = new Setting(controls)
+        .setName('Confirm First')
+        .setDesc('Requires permission')
+        .addToggle(toggle => toggle
+          .setValue(confirmValue)
+          .onChange(async (val) => {
+            if (!this.plugin.settings.skillConfigurations) {
+              this.plugin.settings.skillConfigurations = {};
+            }
+            if (!this.plugin.settings.skillConfigurations[fullName]) {
+              this.plugin.settings.skillConfigurations[fullName] = {};
+            }
+            this.plugin.settings.skillConfigurations[fullName].requireConfirmation = val;
+            await this.plugin.saveSettings();
+          }));
+      confirmSetting.settingEl.style.border = 'none';
+      confirmSetting.settingEl.style.padding = '0';
+      confirmSetting.settingEl.style.flex = '1';
+      confirmSetting.settingEl.style.minWidth = '150px';
+    });
   }
 
   showProviderEditModal(provider: AIProviderConfig | null, index: number): void {

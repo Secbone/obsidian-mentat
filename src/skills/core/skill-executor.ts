@@ -102,8 +102,13 @@ export class SkillExecutor {
       // Validate input
       const validatedInput = this.validateInput(skill, parameters);
 
-      // Check if confirmation is required
-      if (skill.metadata?.requiresConfirmation && !options.skipConfirmation) {
+      // Check if confirmation is required (settings override takes precedence)
+      const skillConfig = this.context.plugin?.settings?.skillConfigurations?.[fullName];
+      const requiresConfirmation = skillConfig?.requireConfirmation !== undefined
+        ? skillConfig.requireConfirmation
+        : !!skill.metadata?.requiresConfirmation;
+
+      if (requiresConfirmation && !options.skipConfirmation) {
         const confirmed = await this.requestConfirmation(skill, validatedInput);
         if (!confirmed) {
           const result: SkillResult = {

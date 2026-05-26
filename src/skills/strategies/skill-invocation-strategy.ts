@@ -87,8 +87,16 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
     // Include documentation skills
     content += registry.getDocumentationContent();
 
+    // Filter enabled skills
+    const plugin = this.app ? (this.app as any).plugins?.plugins?.['personal-agent'] : null;
+    const configurations = plugin?.settings?.skillConfigurations || {};
+    const enabledSkills = registry.getAll().filter(s => {
+      const fullName = registry.getFullName(s.namespace, s.name);
+      return configurations[fullName]?.enabled !== false;
+    });
+
     // Generate skill list
-    const skillList = this.listGenerator.generateSkillList(registry.getAll());
+    const skillList = this.listGenerator.generateSkillList(enabledSkills);
 
     // Load progressive disclosure prompt template
     if (this.promptLoader) {
@@ -202,23 +210,45 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
   private listGenerator = new SkillListGenerator();
   private detailGenerator = new SkillDetailGenerator();
   private progressiveStrategy: ProgressiveDisclosureStrategy;
-  private coreSkills: Set<string>;
 
   constructor(private app?: App, directCallSkills?: string[]) {
     this.progressiveStrategy = new ProgressiveDisclosureStrategy(app);
-    if (directCallSkills && directCallSkills.length > 0) {
-      this.coreSkills = new Set(directCallSkills);
-    } else {
-      this.coreSkills = new Set([
-        'obsidian:read_note',
-        'obsidian:query_notes',
-        'obsidian:edit_note',
-        'obsidian:web_search',
-        'obsidian:ask_user',
-        'obsidian:list_notes',
-        'obsidian:web_fetch'
-      ]);
+  }
+
+  private getCoreSkillsSet(): Set<string> {
+    const coreSkills = new Set<string>();
+    
+    // Default core skills list
+    const defaultCore = [
+      'obsidian:read_note',
+      'obsidian:query_notes',
+      'obsidian:edit_note',
+      'obsidian:web_search',
+      'obsidian:ask_user',
+      'obsidian:list_notes',
+      'obsidian:web_fetch'
+    ];
+    
+    const plugin = this.app ? (this.app as any).plugins?.plugins?.['personal-agent'] : null;
+    const configurations = plugin?.settings?.skillConfigurations || {};
+    
+    // Base defaults
+    for (const name of defaultCore) {
+      if (configurations[name]?.directCall !== false) {
+        coreSkills.add(name);
+      }
     }
+    
+    // Apply dynamic overrides
+    for (const [name, config] of Object.entries(configurations)) {
+      if (config.directCall === true) {
+        coreSkills.add(name);
+      } else if (config.directCall === false) {
+        coreSkills.delete(name);
+      }
+    }
+
+    return coreSkills;
   }
 
   prepareSystemPrompt(registry: SkillRegistry): string {
@@ -227,10 +257,19 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     // Include documentation skills
     content += registry.getDocumentationContent();
 
+    // Filter enabled skills
+    const plugin = this.app ? (this.app as any).plugins?.plugins?.['personal-agent'] : null;
+    const configurations = plugin?.settings?.skillConfigurations || {};
+    const enabledSkills = registry.getAll().filter(s => {
+      const fullName = registry.getFullName(s.namespace, s.name);
+      return configurations[fullName]?.enabled !== false;
+    });
+
+    const coreSkillsSet = this.getCoreSkillsSet();
+
     // Separate skills into core and progressive
-    const allSkills = registry.getAll();
-    const coreSkillDefs = allSkills.filter(s => this.coreSkills.has(registry.getFullName(s.namespace, s.name)));
-    const progressiveSkills = allSkills.filter(s => !this.coreSkills.has(registry.getFullName(s.namespace, s.name)));
+    const coreSkillDefs = enabledSkills.filter(s => coreSkillsSet.has(registry.getFullName(s.namespace, s.name)));
+    const progressiveSkills = enabledSkills.filter(s => !coreSkillsSet.has(registry.getFullName(s.namespace, s.name)));
 
     // Generate progressive skill list
     const progressiveSkillList = this.listGenerator.generateSkillList(progressiveSkills);
@@ -268,9 +307,18 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
   getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): any[] {
     const tools: any[] = [];
 
+    // Filter enabled skills
+    const plugin = this.app ? (this.app as any).plugins?.plugins?.['personal-agent'] : null;
+    const configurations = plugin?.settings?.skillConfigurations || {};
+    const enabledSkills = registry.getAll().filter(s => {
+      const fullName = registry.getFullName(s.namespace, s.name);
+      return configurations[fullName]?.enabled !== false;
+    });
+
+    const coreSkillsSet = this.getCoreSkillsSet();
+
     // 1. Expose core skills directly as native tools
-    const allSkills = registry.getAll();
-    const coreSkillDefs = allSkills.filter(s => this.coreSkills.has(registry.getFullName(s.namespace, s.name)));
+    const coreSkillDefs = enabledSkills.filter(s => coreSkillsSet.has(registry.getFullName(s.namespace, s.name)));
 
     if (format === 'openai') {
       for (const skill of coreSkillDefs) {
