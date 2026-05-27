@@ -1,0 +1,85 @@
+name: Release Obsidian Plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Tests
+        run: npm run test:run
+
+      - name: Build Plugin
+        run: npm run build
+
+      - name: Validate Release Assets
+        run: |
+          if [ ! -f main.js ]; then
+            echo "❌ main.js was not built!"
+            exit 1
+          fi
+          if [ ! -f manifest.json ]; then
+            echo "❌ manifest.json is missing!"
+            exit 1
+          fi
+          if [ ! -f styles.css ]; then
+            echo "❌ styles.css is missing!"
+            exit 1
+          fi
+          echo "✅ All release assets are present."
+
+      - name: Extract Version from Tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Validate Tag Matches Manifest Version
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          TAG_VERSION=${{ steps.get_version.outputs.VERSION }}
+          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ Version mismatch!"
+            echo "   manifest.json version: $MANIFEST_VERSION"
+            echo "   Git tag version: $TAG_VERSION"
+            exit 1
+          fi
+          echo "✅ Version matches perfectly ($TAG_VERSION)."
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          artifacts: 'main.js,manifest.json,styles.css'
+          body: |
+            ## 🧠 Mentat v${{ steps.get_version.outputs.VERSION }} Release
+            
+            This is an automated release for Mentat—your local agentic cognitive partner for Obsidian.
+            
+            ### 📦 Files included:
+            * `main.js`: Compiled production bundle.
+            * `manifest.json`: Plugin description and metadata.
+            * `styles.css`: Custom UI styles and themes.
+            
+            To install:
+            1. Download the assets.
+            2. Copy them into your vault's plugin directory: `<vault>/.obsidian/plugins/obsidian-mentat/`.
+            3. Enable Mentat in Obsidian's Community Plugins settings.
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
