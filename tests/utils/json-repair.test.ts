@@ -81,4 +81,30 @@ describe('BaseAgent Strict JSON Parsing', () => {
     );
     expect(logged).toBe(true);
   });
+
+  it('should successfully heal raw LaTeX backslashes inside JSON tool arguments', () => {
+    let logged = false;
+    const mockContext = {
+      logDiagnosticIncident: (toolName: string, originalArgs: string, errMsg: string, strategy: string) => {
+        logged = true;
+        expect(toolName).toBe('test');
+        expect(strategy).toBe('Healed (JSON Preprocessor)');
+        return Promise.resolve();
+      },
+      // Mock escapeLoneBackslashes since it is called on BaseAgent
+      escapeLoneBackslashes: (BaseAgent.prototype as any).escapeLoneBackslashes
+    };
+    
+    const toolCall = {
+      id: '2',
+      name: 'test',
+      arguments: '{"content": "LaTeX formula \\lambda and \\sigma in \\mathcal{L}"}'
+    };
+
+    const parsed = safeParse.call(mockContext, toolCall);
+    expect(parsed).toEqual({
+      content: 'LaTeX formula \\lambda and \\sigma in \\mathcal{L}'
+    });
+    expect(logged).toBe(true);
+  });
 });

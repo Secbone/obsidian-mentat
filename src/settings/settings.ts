@@ -73,6 +73,15 @@ export interface PersonalAgentSettings {
   
   // Diagnostics Configuration
   diagnosticsFolder?: string;
+
+  // Custom User System Prompt Preferences
+  userSystemPromptPreferences?: string;
+
+  // Custom User Configurations Folder
+  userConfigFolder?: string;
+
+  // Toggle for multi-agent cooperative Draft-Review loop
+  draftReviewModeEnabled?: boolean;
 }
 
 export interface SkillConfig {
@@ -184,5 +193,8 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   reviewIntervalDays: 7,
   enableSpacedRepetition: true,
   skillConfigurations: {},
-  diagnosticsFolder: 'Personal Agent/Diagnostics'
+  diagnosticsFolder: 'Personal Agent/Diagnostics',
+  userSystemPromptPreferences: '',
+  userConfigFolder: 'Personal Agent/Config',
+  draftReviewModeEnabled: true
 };

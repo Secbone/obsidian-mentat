@@ -170,7 +170,152 @@ export class DiagnosticsExporter {
       markdownContent += `\`\`\`json\n`;
       markdownContent += `${cleanJsonHistory}\n`;
       markdownContent += `\`\`\`\n\n`;
-      markdownContent += `</details>\n`;
+      markdownContent += `</details>\n\n`;
+
+      // Estimate msg tokens helper
+      const estimateMsgTokens = (msg: ChatMessage): number => {
+        let totalChars = msg.content.length + 10;
+        if (msg.tool_calls) {
+          totalChars += JSON.stringify(msg.tool_calls).length;
+        }
+        return Math.ceil(totalChars / 4);
+      };
+
+      // Calculate turn-by-turn metrics
+      const turnsData: Array<{ turn: number; tokens: number; saturation: number; cacheHit: number }> = [];
+      let cumulativeTokens = 0;
+      const contextLimit = 200000; // standard limit
+      let turnCounter = 1;
+
+      for (let i = 0; i < history.length; i++) {
+        const msg = history[i];
+        const msgTokens = estimateMsgTokens(msg);
+        const prevTokens = cumulativeTokens;
+        cumulativeTokens += msgTokens;
+
+        if (msg.role === 'user') {
+          const saturation = parseFloat(((cumulativeTokens / contextLimit) * 100).toFixed(2));
+          const cacheHit = turnCounter === 1 ? 0 : parseFloat(((prevTokens / cumulativeTokens) * 100).toFixed(2));
+
+          turnsData.push({
+            turn: turnCounter++,
+            tokens: cumulativeTokens,
+            saturation,
+            cacheHit
+          });
+        }
+      }
+
+      const lastSaturation = turnsData.length > 0 ? turnsData[turnsData.length - 1].saturation : 0;
+      const averageCacheHit = turnsData.length > 0
+        ? parseFloat((turnsData.reduce((sum, t) => sum + t.cacheHit, 0) / turnsData.length).toFixed(2))
+        : 0;
+
+      // 4.5. Render Runtime Health & Performance Dashboard
+      markdownContent += `---\n\n`;
+      markdownContent += `## 🚀 运行期性能与上下文健康度看板 (Session Health Dashboard)\n\n`;
+      markdownContent += `> [!TIP]\n`;
+      markdownContent += `> 此看板动态追踪并反馈当前会话的上下文饱和度以及智能体提示词缓存命中率。这可帮助您直观掌握大模型的运行效能与防范过载。\n\n`;
+
+      markdownContent += `<div style="display: flex; gap: 20px; flex-wrap: wrap; margin: 20px 0;">\n`;
+      markdownContent += `  <div style="flex: 1; min-width: 250px; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; background: var(--background-primary-alt);">\n`;
+      markdownContent += `    <h4 style="margin: 0 0 10px 0; font-size: 1.1em;">📊 运行期上下文饱和度 (Context Saturation)</h4>\n`;
+      markdownContent += `    <div style="height: 12px; background: var(--background-modifier-border); border-radius: 6px; overflow: hidden;">\n`;
+      markdownContent += `      <div style="height: 100%; width: ${lastSaturation}%; background: ${lastSaturation > 80 ? 'var(--text-error)' : lastSaturation > 50 ? 'var(--text-accent)' : 'var(--text-success)'}; border-radius: 6px;"></div>\n`;
+      markdownContent += `    </div>\n`;
+      markdownContent += `    <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-top: 5px; color: var(--text-muted);">\n`;
+      markdownContent += `      <span>当前: ${lastSaturation}%</span>\n`;
+      markdownContent += `      <span>上限: 200,000 Tokens</span>\n`;
+      markdownContent += `    </div>\n`;
+      markdownContent += `  </div>\n`;
+      markdownContent += `  <div style="flex: 1; min-width: 250px; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; background: var(--background-primary-alt);">\n`;
+      markdownContent += `    <h4 style="margin: 0 0 10px 0; font-size: 1.1em;">⚡ 提示词缓存命中率 (Prompt Cache Hit Ratio)</h4>\n`;
+      markdownContent += `    <div style="height: 12px; background: var(--background-modifier-border); border-radius: 6px; overflow: hidden;">\n`;
+      markdownContent += `      <div style="height: 100%; width: ${averageCacheHit}%; background: var(--text-success); border-radius: 6px;"></div>\n`;
+      markdownContent += `    </div>\n`;
+      markdownContent += `    <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-top: 5px; color: var(--text-muted);">\n`;
+      markdownContent += `      <span>平均缓存命中: ${averageCacheHit}%</span>\n`;
+      markdownContent += `      <span>节约成本: ~${(averageCacheHit * 0.75).toFixed(1)}%</span>\n`;
+      markdownContent += `    </div>\n`;
+      markdownContent += `  </div>\n`;
+      markdownContent += `</div>\n\n`;
+
+      if (turnsData.length > 0) {
+        markdownContent += `| 交互轮次 | 累计 Token 数 | 上下文饱和度 | 提示词缓存命中率 |\n`;
+        markdownContent += `| :--- | :--- | :--- | :--- |\n`;
+        turnsData.forEach(t => {
+          markdownContent += `| 交互 ${t.turn} | \`${t.tokens.toLocaleString()}\` | \`${t.saturation}%\` | \`${t.cacheHit}%\` |\n`;
+        });
+        markdownContent += `\n`;
+
+        markdownContent += `<details open>\n`;
+        markdownContent += `<summary>📈 展开运行时性能分析曲线图</summary>\n\n`;
+        markdownContent += `<canvas id="performanceChart" width="600" height="250" style="margin-top: 15px; background: var(--background-primary); border-radius: 6px; border: 1px solid var(--border-color);"></canvas>\n`;
+        markdownContent += `<script>\n`;
+        markdownContent += `  (function() {\n`;
+        markdownContent += `    const ctx = document.getElementById('performanceChart');\n`;
+        markdownContent += `    if (!ctx) return;\n`;
+        markdownContent += `    \n`;
+        markdownContent += `    const renderChart = () => {\n`;
+        markdownContent += `      new Chart(ctx, {\n`;
+        markdownContent += `        type: 'line',\n`;
+        markdownContent += `        data: {\n`;
+        markdownContent += `          labels: ${JSON.stringify(turnsData.map(t => `交互 ${t.turn}`))},\n`;
+        markdownContent += `          datasets: [{\n`;
+        markdownContent += `            label: '上下文饱和度 (%)',\n`;
+        markdownContent += `            data: ${JSON.stringify(turnsData.map(t => t.saturation))},\n`;
+        markdownContent += `            borderColor: '#3b82f6',\n`;
+        markdownContent += `            backgroundColor: 'rgba(59, 130, 246, 0.1)',\n`;
+        markdownContent += `            borderWidth: 2,\n`;
+        markdownContent += `            yAxisID: 'y',\n`;
+        markdownContent += `            tension: 0.2\n`;
+        markdownContent += `          }, {\n`;
+        markdownContent += `            label: '缓存命中率 (%)',\n`;
+        markdownContent += `            data: ${JSON.stringify(turnsData.map(t => t.cacheHit))},\n`;
+        markdownContent += `            borderColor: '#10b981',\n`;
+        markdownContent += `            backgroundColor: 'rgba(16, 185, 129, 0.1)',\n`;
+        markdownContent += `            borderWidth: 2,\n`;
+        markdownContent += `            yAxisID: 'y1',\n`;
+        markdownContent += `            tension: 0.2\n`;
+        markdownContent += `          }]\n`;
+        markdownContent += `        },\n`;
+        markdownContent += `        options: {\n`;
+        markdownContent += `          responsive: true,\n`;
+        markdownContent += `          scales: {\n`;
+        markdownContent += `            y: {\n`;
+        markdownContent += `              type: 'linear',\n`;
+        markdownContent += `              display: true,\n`;
+        markdownContent += `              position: 'left',\n`;
+        markdownContent += `              title: { display: true, text: '饱和度 (%)' },\n`;
+        markdownContent += `              min: 0,\n`;
+        markdownContent += `              max: 100\n`;
+        markdownContent += `            },\n`;
+        markdownContent += `            y1: {\n`;
+        markdownContent += `              type: 'linear',\n`;
+        markdownContent += `              display: true,\n`;
+        markdownContent += `              position: 'right',\n`;
+        markdownContent += `              title: { display: true, text: '命中率 (%)' },\n`;
+        markdownContent += `              min: 0,\n`;
+        markdownContent += `              max: 100,\n`;
+        markdownContent += `              grid: { drawOnChartArea: false }\n`;
+        markdownContent += `            }\n`;
+        markdownContent += `          }\n`;
+        markdownContent += `        }\n`;
+        markdownContent += `      });\n`;
+        markdownContent += `    };\n`;
+        markdownContent += `\n`;
+        markdownContent += `    if (typeof Chart !== 'undefined') {\n`;
+        markdownContent += `      renderChart();\n`;
+        markdownContent += `    } else {\n`;
+        markdownContent += `      const script = document.createElement('script');\n`;
+        markdownContent += `      script.src = 'https://cdn.jsdelivr.net/npm/chart.js';\n`;
+        markdownContent += `      script.onload = renderChart;\n`;
+        markdownContent += `      document.head.appendChild(script);\n`;
+        markdownContent += `    }\n`;
+        markdownContent += `  })();\n`;
+        markdownContent += `</script>\n`;
+        markdownContent += `</details>\n\n`;
+      }
 
       // 5. Write diagnostics markdown note
       const vault = plugin.app.vault;

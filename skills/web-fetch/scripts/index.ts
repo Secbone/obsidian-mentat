@@ -18,7 +18,10 @@ const InputSchema = z.object({
   timeout: z.number().min(1000).max(60000).optional().default(30000).describe('Timeout in milliseconds (1-60s)'),
   format: z.enum(['auto', 'markdown', 'json', 'text', 'raw']).optional().default('auto').describe('Output format (auto-detects if unspecified)'),
   maxResponseSize: z.number().min(1024).max(10485760).optional().default(5242880).describe('Max response size in bytes (default 5MB, max 10MB)'),
-  strategy: z.enum(['auto', 'jina', 'browserless', 'direct']).optional().default('auto').describe('Fetching strategy: auto (try all), jina (Jina AI Reader), browserless (Browserless API), direct (HTTP request)'),
+  strategy: z.preprocess(
+    (val) => (val === 'jina_reader' ? 'jina' : val),
+    z.enum(['auto', 'jina', 'browserless', 'direct'])
+  ).optional().default('auto').describe('Fetching strategy: auto (try all), jina (Jina AI Reader), browserless (Browserless API), direct (HTTP request)'),
   useJavaScript: z.boolean().optional().default(false).describe('Whether the page requires JavaScript rendering (uses Browserless if true)')
 });
 

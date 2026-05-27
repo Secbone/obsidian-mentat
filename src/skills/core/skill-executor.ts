@@ -179,6 +179,39 @@ export class SkillExecutor {
     return str.substring(0, maxPos);
   }
 
+  /**
+   * Scans a JSON string, identifies raw backslashes that do not form valid JSON
+   * escape sequences, and double-escapes them so they can be parsed successfully.
+   */
+  private escapeLoneBackslashes(jsonStr: string): string {
+    let result = '';
+    for (let i = 0; i < jsonStr.length; i++) {
+      const char = jsonStr[i];
+      if (char === '\\') {
+        const nextChar = jsonStr[i + 1];
+        if (nextChar === undefined) {
+          result += '\\\\';
+        } else if (['"', '\\', '/', 'b', 'f', 'n', 'r', 't'].includes(nextChar)) {
+          result += '\\' + nextChar;
+          i++;
+        } else if (nextChar === 'u') {
+          const hex = jsonStr.substring(i + 2, i + 6);
+          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+            result += '\\u' + hex;
+            i += 5;
+          } else {
+            result += '\\\\';
+          }
+        } else {
+          result += '\\\\';
+        }
+      } else {
+        result += char;
+      }
+    }
+    return result;
+  }
+
   private safeParseToolArguments(toolCall: ToolCall): Record<string, any> | null {
     if (typeof toolCall.arguments !== 'string') {
       return toolCall.arguments;
@@ -189,8 +222,15 @@ export class SkillExecutor {
     try {
       return JSON.parse(argsString);
     } catch (error: any) {
-      console.error('[SkillExecutor] JSON parse failed for', toolCall.name, 'Error:', error.message);
-      return null;
+      console.warn(`[SkillExecutor] JSON strict parse failed for ${toolCall.name}, trying escape-healing...`);
+
+      try {
+        const healedArgsString = this.escapeLoneBackslashes(argsString);
+        return JSON.parse(healedArgsString);
+      } catch (healingError: any) {
+        console.error('[SkillExecutor] JSON parse and healing failed for', toolCall.name, 'Error:', healingError.message);
+        return null;
+      }
     }
   }
 

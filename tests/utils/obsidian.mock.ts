@@ -33,6 +33,8 @@ export const requestUrl = vi.fn(async (options: {
   }
 });
 
+export class App {}
+
 export class Plugin {
   app: any;
   manifest: any;
@@ -47,6 +49,49 @@ export class Plugin {
   }
 }
 
+export class TFile {
+  path: string;
+  name: string;
+}
+
+export class Vault {}
+
 export class Notice {
   constructor(message: string) {}
 }
+
+export class Modal {
+  constructor(app: any) {}
+  open() {}
+  close() {}
+}
+
+export class Setting {
+  constructor(containerEl: any) {}
+  setName(name: string) { return this; }
+  setDesc(desc: string) { return this; }
+  addText(cb: any) { return this; }
+  addToggle(cb: any) { return this; }
+  addButton(cb: any) { return this; }
+  setValue(val: any) { return this; }
+  setPlaceholder(val: any) { return this; }
+  onChange(cb: any) { return this; }
+}
+
+export class PluginSettingTab {
+  constructor(app: any, plugin: any) {}
+}
+
+export class SuggestModal {
+  constructor(app: any) {}
+}
+
+export class ItemView {
+  constructor(leaf: any) {}
+}
+
+export class WorkspaceLeaf {}
+
+export const setIcon = vi.fn();
+
+export class FileSystemAdapter {}

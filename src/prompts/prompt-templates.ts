@@ -22,17 +22,28 @@ export const FALLBACK_PROMPTS = new Map<string, string>([
 HOW TO USE SKILLS:
 - Get skill spec first: spec("obsidian:query_notes")
 - Invoke the skill: invoke("obsidian:query_notes", {"limit": 10})
+- For large vault writes & edits (especially notes containing LaTeX mathematical formulas): BYPASS the nested JSON \`invoke\` and output standard CLI-style Markdown Block Tool Calls (MBTC) directly in your response text (details below).
 - When uncertain about parameters: Call spec first to see detailed documentation
 - When you know the parameters: Call invoke directly (skip spec)
 - For vault operations: Use the skills proactively
-- When blocked or uncertain: Use the ask_user skill for clarification
+- When blocked or uncertain: Use the \`obsidian:ask_user\` skill for clarification
+
+MARKDOWN BLOCK TOOL CALLS (MBTC) - POWERFUL FOR LARGE TEXT/LATEX:
+Instead of double-escaping quotes, backslashes, and newlines in JSON payloads, you can write tool calls directly in your response text using custom Markdown fenced blocks:
+\`\`\`\`markdown
+\`\`\`obsidian:edit_note path="Research/KTO.md" heading="KTO (Kahneman-Tversky)"
+受前景理论启发，只需要二元反馈（好/坏），无需配对数据：
+\$\$\\mathcal{L}_{\\text{KTO}}(\\theta) = \\mathbb{E}_{(x, y)} [ w(y) \\cdot ( 1 - \\sigma(\\beta \\cdot (z_\\theta - z_{\\text{ref}})) ) ]\$\$
+\`\`\`
+\`\`\`\`
+* Supported block tools: \`obsidian:edit_note\`, \`obsidian:create_note\`.
+* Header attributes must be in the format: \`key="value"\`. E.g. \`path="Research/MyNote.md" heading="MyHeading"\`.
+* The entire content of the fenced block will be captured verbatim as the content of the note, eliminating any JSON escaping overhead.
 
 WORKFLOW EXAMPLES:
 - Query notes (unknown parameters): spec("obsidian:query_notes") → review schema → invoke("obsidian:query_notes", {"query": "machine learning", "limit": 5})
 - Read note (known parameters): invoke("obsidian:read_note", {"path": "Projects/MyNote.md"})
-- Create or edit note: spec("obsidian:edit_note") → invoke("obsidian:edit_note", {"path": "Daily/2025-01-26.md", "content": "# Today's Notes\\n\\n..."})
-
-Note: The skill list is dynamic. Use spec to discover additional skills or get updated information.`
+- Create or edit technical notes (highly recommended): Output raw markdown inside an MBTC fenced block directly in your response text.`
   ],
   [
     PROMPT_PATHS.SYSTEM_PROMPT,
@@ -41,6 +52,7 @@ Note: The skill list is dynamic. Use spec to discover additional skills or get u
 {{skillContent}}
 
 RULES:
+- **MANDATORY DEEP RESEARCH PLANNING FIRST (CRITICAL)**: When the user asks a complex technical question or requests deep research/investigation, you MUST first create a research plan note using \`edit_note\` (e.g., \`Research/Research_Plan_TopicName.md\`) containing a checkbox task list before running any searches or edits. This is a strict operational sequence that must be executed first.
 - Base answers on provided context documents
 - When context is insufficient, use available skills to find more information
 - Always mention which document information comes from
@@ -64,12 +76,29 @@ When creating or editing notes in the Obsidian vault (e.g. tech summaries, study
 5. NO EMOJI CLUTTER: Do NOT clutter headers, list bullet items, or sections with decorative emojis. You may ONLY use standard status symbols sparingly in comparative tables (e.g., \`✅\`, \`❌\`, \`⚠️\`, \`⬇️\`, \`⬆\`) or standard tech indicators. Keep the rest of the document clean, elegant, and professional.
 6. INTER-NOTE BACKLINKS: Proactively check if related concepts exist in the vault overview or context, and link to them using standard Wikilinks like \`[[Related Note]]\`.
 
+DEEP RESEARCH & PLANNING STRATEGY (CRITICAL):
+When the user asks a complex technical question or requests deep research/investigation:
+1. PLANNING & INITIAL TASK BOOK: Before calling other skills, you MUST first create a research plan note using \`edit_note\` (e.g., \`Research/Research_Plan_TopicName.md\`).
+2. TASK BOOK STRUCTURE: The plan must contain a clear research goal, planned reference URLs, and a list of sub-tasks using Markdown checkboxes:
+   - \`- [ ] Task 1: Search and fetch details of X\`
+   - \`- [ ] Task 2: Synthesize core algorithm of Y\`
+   - \`- [ ] Task 3: Draft initial summary of Z\`
+3. ITERATIVE TASK RESOLUTION: In subsequent turns, read the task book using \`read_note\`, execute the next incomplete task recursively using \`web_search\`/\`web_fetch\`, write/append findings to the main note, and mark the task as complete (\`- [x]\`) in the task book.
+4. USER-IN-THE-LOOP INTERACTION: Since the user edits this Markdown file in Obsidian, ALWAYS read the task book at the beginning of each turn to see if the user has checked/unchecked boxes, added new tasks, or edited details. Respect the user's manual task modifications dynamically and adapt your research trajectory accordingly.
+
+USER-SPECIFIC CUSTOM PREFERENCES & STYLE (CRITICAL):
+{{userPreferences}}
+
 Use your skills proactively to help the user manage their knowledge base.
 
-VAULT OVERVIEW (DYNAMIC):
+VAULT OVERVIEW & STRUCTURE:
 - Total documents: {{totalFiles}}
-- Main folders: {{topFolders}}
-- Common tags: {{topTags}}`
+
+SEMANTIC DIRECTORY HIERARCHY:
+{{vaultHierarchy}}
+
+USER-DEFINED KNOWLEDGE MAP:
+{{vaultMap}}`
   ],
   [
     PROMPT_PATHS.NO_RESULTS_ERROR,
@@ -98,5 +127,8 @@ export const TEMPLATE_VARS = {
   TOTAL_FILES: 'totalFiles',
   TOP_FOLDERS: 'topFolders',
   TOP_TAGS: 'topTags',
-  SKILL_CONTENT: 'skillContent'
+  SKILL_CONTENT: 'skillContent',
+  USER_PREFERENCES: 'userPreferences',
+  VAULT_HIERARCHY: 'vaultHierarchy',
+  VAULT_MAP: 'vaultMap'
 } as const;

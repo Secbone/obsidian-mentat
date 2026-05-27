@@ -292,8 +292,71 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
           const content = await adapter.read(logPath);
           const debugNotePath = 'Personal Agent Debug Log.md';
           
+          // Calculate 7-Day Performance & Failure Analytics
+          const allLines = content.trim().split('\n');
+          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          
+          let totalIncidents = 0;
+          const toolFailures: Record<string, number> = {};
+          const dailyIncidents: Record<string, number> = {};
+          
+          // Prepopulate daily dates for the last 7 days
+          for (let i = 6; i >= 0; i--) {
+            const dateKey = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toLocaleDateString();
+            dailyIncidents[dateKey] = 0;
+          }
+          
+          allLines.forEach(line => {
+            if (!line.trim()) return;
+            try {
+              const entry = JSON.parse(line);
+              if (entry.timestamp >= sevenDaysAgo) {
+                totalIncidents++;
+                toolFailures[entry.toolName] = (toolFailures[entry.toolName] || 0) + 1;
+                const dateKey = new Date(entry.timestamp).toLocaleDateString();
+                if (dailyIncidents[dateKey] !== undefined) {
+                  dailyIncidents[dateKey]++;
+                }
+              }
+            } catch (e) {
+              // Ignore malformed
+            }
+          });
+          
+          const sortedFailures = Object.entries(toolFailures)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5);
+
           const lines = content.trim().split('\n').reverse().slice(0, 50); // Get latest 50 incidents
           let markdownContent = `# Personal Agent Diagnostics & Debug Log\n\n`;
+          
+          // Render 7-Day Cross-Run Performance Analytics Card
+          markdownContent += `## 📊 7天系统异常走势与工具故障分析 (7-Day Cross-Run Analytics)\n\n`;
+          markdownContent += `> [!IMPORTANT]\n`;
+          markdownContent += `> 以下是过去 7 天内智能体自动捕获的运行时解析异常与工具报错分析。这可帮助您找出故障率最高的技能，进而优化配置。\n\n`;
+          
+          markdownContent += `| 诊断指标 | 7天累计统计值 |\n`;
+          markdownContent += `| :--- | :--- |\n`;
+          markdownContent += `| **7天内累计解析异常 (Total Incidents)** | \`${totalIncidents} 次报错\` |\n`;
+          markdownContent += `| **首要故障技能 (Top Failure Tool)** | \`${sortedFailures[0] ? `${sortedFailures[0][0]} (${sortedFailures[0][1]}次)` : '无'}\` |\n\n`;
+          
+          if (sortedFailures.length > 0) {
+            markdownContent += `### 🚨 工具故障频次排名前五 (Top 5 Failed Tools)\n`;
+            sortedFailures.forEach(([tool, count]) => {
+              markdownContent += `* **\`${tool}\`**: \`${count} 次报错\`\n`;
+            });
+            markdownContent += `\n`;
+          }
+          
+          markdownContent += `### 📈 每日解析异常发生趋势 (Daily Incidents Trend)\n`;
+          markdownContent += `| 日期 | 解析异常频次 |\n`;
+          markdownContent += `| :--- | :--- |\n`;
+          Object.entries(dailyIncidents).forEach(([date, count]) => {
+            markdownContent += `| ${date} | \`${count} 次\` |\n`;
+          });
+          markdownContent += `\n---\n\n`;
+          
+          markdownContent += `## 💬 最新事件日志明细 (Latest Incidents)\n\n`;
           markdownContent += `Showing the latest ${lines.length} incidents (newest first). The complete log is saved at \`${logPath}\`.\n\n`;
           
           if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {

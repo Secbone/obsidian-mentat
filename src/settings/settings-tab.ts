@@ -70,6 +70,9 @@ export class SettingsTab extends PluginSettingTab {
       // Integration Section
       this.displayIntegrationSection(containerEl);
 
+      // User Prompt Preferences Section
+      this.displayUserPreferencesSection(containerEl);
+
       // Feature Toggles Section
       this.displayFeatureTogglesSection(containerEl);
 
@@ -237,6 +240,165 @@ export class SettingsTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.settings.skillsEnabled = value;
           await this.plugin.saveSettings();
+        }));
+  }
+
+  displayUserPreferencesSection(containerEl: HTMLElement): void {
+    containerEl.createEl('h2', { text: 'User Prompt Preferences' });
+
+    containerEl.createEl('p', {
+      text: 'Customize writing styles, formatting rules, and notes compared to your manual style. These preferences are stored directly in your vault as a markdown note, providing a spacious and customizable editing experience. Changes are injected dynamically into the AI system prompt.',
+      cls: 'setting-item-description'
+    });
+
+    new Setting(containerEl)
+      .setName('Configuration Folder')
+      .setDesc('Vault folder path where Personal Agent looks for the user-preferences.md file.')
+      .addText(text => text
+        .setPlaceholder('Personal Agent/Config')
+        .setValue(this.plugin.settings.userConfigFolder || 'Personal Agent/Config')
+        .onChange(async (value) => {
+          this.plugin.settings.userConfigFolder = value.trim() || 'Personal Agent/Config';
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Custom Preferences Note')
+      .setDesc('Create or open the user-preferences.md note directly in Obsidian to customize your writing preferences.')
+      .addButton(button => button
+        .setButtonText('Open Preferences Note')
+        .setCta()
+        .onClick(async () => {
+          try {
+            const folderPath = this.plugin.settings.userConfigFolder || 'Personal Agent/Config';
+            const preferencesPath = `${folderPath}/user-preferences.md`;
+            const vault = this.plugin.app.vault;
+
+            // Auto-create folder paths if they do not exist
+            if (!(await vault.adapter.exists(folderPath))) {
+              const folders = folderPath.split('/');
+              let currentFolder = '';
+              for (const folder of folders) {
+                if (!folder) continue;
+                currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
+                if (!(await vault.adapter.exists(currentFolder))) {
+                  await vault.createFolder(currentFolder);
+                }
+              }
+            }
+
+            // Create default template if file does not exist
+            if (!(await vault.adapter.exists(preferencesPath))) {
+              const defaultTemplate = `# User Prompt Preferences
+
+Write your custom style instructions and preferences here. This file is dynamically read by Personal Agent and injected directly into the AI system prompt to guide its behavior and output style.
+
+## Instructions
+- These settings apply to all chat and research sessions.
+- You can modify this file at any time. Changes are loaded dynamically when a new session starts.
+- Because this note is parsed safely as raw text, you can write anything here without worrying about crashing the plugin.
+
+## Your Custom Preferences
+(Write your rules below, for example: "Do not use emojis in headings", "Use high-density bullet points", "Compare outputs with my personal notes style")
+
+- 
+`;
+              await vault.create(preferencesPath, defaultTemplate);
+            }
+
+            // Open the file in active editor pane
+            const tFile = vault.getAbstractFileByPath(preferencesPath);
+            if (tFile) {
+              const leaf = this.app.workspace.getLeaf(false);
+              await leaf.openFile(tFile as any);
+              new Notice('Opened user-preferences.md in editor');
+            } else {
+              new Notice('Failed to locate preferences file in vault');
+            }
+          } catch (err) {
+            new Notice(`Failed to open/create preferences: ${err.message}`);
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('Vault Knowledge Map')
+      .setDesc('Create or open the vault-map.md note directly in Obsidian to customize your vault structure guidelines and folder rules.')
+      .addButton(button => button
+        .setButtonText('Open Knowledge Map')
+        .setCta()
+        .onClick(async () => {
+          try {
+            const folderPath = this.plugin.settings.userConfigFolder || 'Personal Agent/Config';
+            const mapPath = `${folderPath}/vault-map.md`;
+            const vault = this.plugin.app.vault;
+
+            // Auto-create folder paths if they do not exist
+            if (!(await vault.adapter.exists(folderPath))) {
+              const folders = folderPath.split('/');
+              let currentFolder = '';
+              for (const folder of folders) {
+                if (!folder) continue;
+                currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
+                if (!(await vault.adapter.exists(currentFolder))) {
+                  await vault.createFolder(currentFolder);
+                }
+              }
+            }
+
+            // Create default template if file does not exist
+            if (!(await vault.adapter.exists(mapPath))) {
+              // Proactively scan actual folders in the vault to identify top largest directories
+              const allFiles = vault.getMarkdownFiles();
+              const folderCounts = new Map<string, number>();
+              
+              allFiles.forEach(file => {
+                if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
+                  const p = file.parent.path;
+                  folderCounts.set(p, (folderCounts.get(p) || 0) + 1);
+                }
+              });
+
+              // Sort and pick top 3 largest folders
+              const topFolders = Array.from(folderCounts.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(([p]) => p);
+
+              // If no folders found, fallback to standard guidelines
+              const folderGuidelines = topFolders.length > 0
+                ? topFolders.map(folder => `- \`[[${folder}/]]\`: Describe what kind of notes should go here (e.g., academic research, active projects, daily journals).`).join('\n')
+                : `- \`[[Research/]]\`: Used for deep-dives, academic papers, and study notes.\n- \`[[Projects/]]\`: Used for active work, tracking goals, and task plans.\n- \`[[Inbox/]]\`: Place for raw ideas, quick thoughts, and unprocessed inputs.`;
+
+              const defaultTemplate = `# 🗺️ Vault Knowledge Structure Map
+
+This document defines the high-level knowledge organization and directory roles of my Obsidian vault.
+
+> [!note]
+> Write your folder descriptions, naming rules, and category workflows below. Personal Agent dynamically reads this file to decide where to store new files, how concepts relate, and which directories to query first.
+
+## 📁 Core Folder Guidelines
+${folderGuidelines}
+
+## 🏷️ Category Workflows & Wiki-Linking
+- Define folder roles clearly so the agent knows exactly where new files belong.
+- Document naming conventions (e.g., prefixing research plans with \`Research_Plan_\`).
+- Outline relationships (e.g., notes in \`Inbox/\` should eventually be polished and moved to \`Research/\`).
+`;
+              await vault.create(mapPath, defaultTemplate);
+            }
+
+            // Open the file in active editor pane
+            const tFile = vault.getAbstractFileByPath(mapPath);
+            if (tFile) {
+              const leaf = this.app.workspace.getLeaf(false);
+              await leaf.openFile(tFile as any);
+              new Notice('Opened vault-map.md in editor');
+            } else {
+              new Notice('Failed to locate vault map file');
+            }
+          } catch (err) {
+            new Notice(`Failed to open/create vault map: ${err.message}`);
+          }
         }));
   }
 

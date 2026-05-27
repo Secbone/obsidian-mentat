@@ -271,17 +271,55 @@ export class Context {
 
   /**
    * Summarize tool result content
-   * Takes first 150 chars + ellipsis + last 50 chars
+   * Intelligently parses and condenses HTML, JSON, and raw text structures
    */
   private summarizeToolResult(content: string): string {
-    if (content.length <= 200) {
+    const trimmed = content.trim();
+    if (trimmed.length <= 200) {
       return content;
     }
 
-    const firstPart = content.substring(0, 150).trim();
-    const lastPart = content.substring(content.length - 50).trim();
+    // 1. JSON Data detection & extraction
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object') {
+          const keys = Object.keys(parsed);
+          const success = parsed.success !== undefined ? parsed.success : undefined;
+          const error = parsed.error || undefined;
+          const msg = parsed.message || parsed.msg || undefined;
+          const count = Array.isArray(parsed) ? parsed.length : keys.length;
 
-    return `${firstPart}\n...[summarized]...\n${lastPart}`;
+          let summary = `[JSON Data (summarized): ${Array.isArray(parsed) ? 'Array' : 'Object'} with ${count} fields`;
+          if (success !== undefined) summary += `, success = ${success}`;
+          if (error) summary += `, error = "${String(error).substring(0, 50)}"`;
+          if (msg) summary += `, message = "${String(msg).substring(0, 80)}"`;
+          summary += `]`;
+          return summary;
+        }
+      } catch (e) {
+        // Fall back to general text/html if JSON parsing fails
+      }
+    }
+
+    // 2. HTML content detection & structural summary
+    const htmlLower = trimmed.toLowerCase();
+    if (htmlLower.includes('<html') || htmlLower.includes('<!doctype') || /<[a-z][\s\S]*>/i.test(trimmed)) {
+      const titleMatch = trimmed.match(/<title>(.*?)<\/title>/i);
+      const title = titleMatch ? titleMatch[1].trim() : 'No Title';
+      const paragraphCount = (trimmed.match(/<p\b[^>]*>/gi) || []).length;
+      const tableCount = (trimmed.match(/<table\b[^>]*>/gi) || []).length;
+      const headingCount = (trimmed.match(/<h[1-6]\b[^>]*>/gi) || []).length;
+
+      return `[HTML Content (summarized) - Title: "${title}", Headings: ${headingCount}, Paragraphs: ${paragraphCount}, Tables: ${tableCount}]`;
+    }
+
+    // 3. General Text high-density truncation
+    const originalLength = trimmed.length;
+    const firstPart = trimmed.substring(0, 180).trim();
+    const lastPart = trimmed.substring(trimmed.length - 80).trim();
+
+    return `${firstPart}\n...[summarized] (${originalLength} chars)...\n${lastPart}`;
   }
 
   /**

@@ -55,6 +55,8 @@ interface EditResult {
   reindexed: boolean;
 }
 
+import { NoteLinter } from '../../../src/utils/note-linter';
+
 /**
  * Execute edit note with intelligent operation detection
  */
@@ -62,11 +64,23 @@ export async function execute(
   input: Input,
   context: SkillContext
 ): Promise<SkillResult<EditResult>> {
-  try {
-    const startTime = Date.now();
-    const file = context.vault.getAbstractFileByPath(input.path);
-    const fileExists = !!file;
+  const startTime = Date.now();
+  const file = context.vault.getAbstractFileByPath(input.path);
+  const fileExists = !!file;
 
+  // 1. Memory Buffer Backup (Rollback Point)
+  let previousContent: string | null = null;
+  const wasCreated = !fileExists;
+
+  try {
+    if (fileExists && file instanceof TFile) {
+      previousContent = await context.vault.read(file);
+    }
+  } catch (backupError) {
+    console.warn('[EditNote] Backup failed:', backupError);
+  }
+
+  try {
     // Intelligent operation detection
     let operation: string;
     let result: EditResult;
@@ -103,6 +117,52 @@ export async function execute(
       result = await replaceAllContent(file as TFile, input, context);
     }
 
+    // 2. Linter Validation & Rollback Guard
+    const updatedFile = context.vault.getAbstractFileByPath(input.path);
+    if (updatedFile instanceof TFile) {
+      const newContent = await context.vault.read(updatedFile);
+      const linterResult = NoteLinter.validate(newContent);
+
+      if (!linterResult.isValid) {
+        // Incremental Linter Guard (RAGP v2.3): If the previous content was already invalid,
+        // and our edit did not increase the number of formatting errors, we allow it!
+        // This prevents pre-existing errors in other parts of the document from creating a deadlock.
+        let isIncrementalImprovement = false;
+        let originalErrorsCount = 0;
+        
+        if (previousContent !== null) {
+          const originalLinterResult = NoteLinter.validate(previousContent);
+          originalErrorsCount = originalLinterResult.errors.length;
+          
+          if (linterResult.errors.length <= originalLinterResult.errors.length) {
+            isIncrementalImprovement = true;
+          }
+        }
+
+        if (isIncrementalImprovement) {
+          console.log(`[EditNote] Allowed edit with formatting errors under Incremental Linter Guard. Previous errors: ${originalErrorsCount}, New errors: ${linterResult.errors.length}`);
+        } else {
+          // Rollback to restore vault state
+          try {
+            if (wasCreated) {
+              // Delete newly created file
+              await context.vault.delete(updatedFile);
+            } else if (previousContent !== null) {
+              // Restore previous content
+              await context.vault.modify(updatedFile, previousContent);
+            }
+          } catch (rollbackError) {
+            console.error('[EditNote] Rollback failed:', rollbackError);
+          }
+
+          return {
+            success: false,
+            error: `Note Linter Validation Failed!\nYour edit introduced formatting errors:\n${linterResult.errors.map(err => `- ${err}`).join('\n')}\n\nYour changes have been safely rolled back to protect the vault. Please correct these formatting issues and try again.`
+          };
+        }
+      }
+    }
+
     return {
       success: true,
       data: {
@@ -117,6 +177,21 @@ export async function execute(
     };
   } catch (error) {
     console.error('[EditNote] Error:', error);
+
+    // Rollback on execution crash to be safe
+    try {
+      const crashedFile = context.vault.getAbstractFileByPath(input.path);
+      if (crashedFile instanceof TFile) {
+        if (wasCreated) {
+          await context.vault.delete(crashedFile);
+        } else if (previousContent !== null) {
+          await context.vault.modify(crashedFile, previousContent);
+        }
+      }
+    } catch (rollbackError) {
+      console.error('[EditNote] Rollback on crash failed:', rollbackError);
+    }
+
     return {
       success: false,
       error: (error as Error).message || 'Failed to edit note'
@@ -399,11 +474,23 @@ async function replaceAllContent(
 }
 
 /**
+ * Helper: Build a safe, flexible RegExp pattern for heading matching.
+ * Escapes regex special characters (like parentheses) and replaces spaces with \s+.
+ */
+function getHeadingPattern(heading: string, captureLevel = false): RegExp {
+  const normalized = heading.trim().replace(/\s+/g, ' ');
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const flexibleSpaces = escaped.replace(/ /g, '\\s+');
+  const levelPattern = captureLevel ? '(#+)' : '#+';
+  return new RegExp(`^${levelPattern}\\s+${flexibleSpaces}\\s*$`, 'i');
+}
+
+/**
  * Helper: Insert content after a heading
  */
 function insertAfterHeading(content: string, heading: string, newContent: string): string {
   const lines = content.split('\n');
-  const headingPattern = new RegExp(`^#+\\s+${heading}\\s*$`, 'i');
+  const headingPattern = getHeadingPattern(heading);
 
   for (let i = 0; i < lines.length; i++) {
     if (headingPattern.test(lines[i])) {
@@ -420,7 +507,7 @@ function insertAfterHeading(content: string, heading: string, newContent: string
  */
 function replaceSection(content: string, heading: string, newContent: string): string {
   const lines = content.split('\n');
-  const headingPattern = new RegExp(`^(#+)\\s+${heading}\\s*$`, 'i');
+  const headingPattern = getHeadingPattern(heading, true);
 
   let startIndex = -1;
   let startLevel = 0;
@@ -471,7 +558,7 @@ function exactReplaceString(
   oldString: string,
   newString: string
 ): string {
-  // Find all occurrences
+  // Find all occurrences using exact match
   const occurrences: number[] = [];
   let searchIndex = 0;
 
@@ -483,16 +570,13 @@ function exactReplaceString(
     searchIndex = foundIndex + oldString.length;
   }
 
-  // Validate occurrence count
-  if (occurrences.length === 0) {
-    throw new Error(
-      `Text not found in file: "${oldString}"\n\n` +
-      `Tip: The text must match exactly including whitespace, capitalization, and line breaks.`
-    );
+  // Exactly 1 occurrence - safe to replace
+  if (occurrences.length === 1) {
+    return content.replace(oldString, newString);
   }
 
+  // Multiple occurrences exist - exact replacement requires unique match
   if (occurrences.length > 1) {
-    // Calculate line numbers for each occurrence
     const lines = content.split('\n');
     const locations = occurrences.map(pos => {
       const textBefore = content.substring(0, pos);
@@ -500,7 +584,6 @@ function exactReplaceString(
       return `line ${lineNum}`;
     }).join(', ');
 
-    // Show context preview for first few occurrences
     const previews = occurrences.slice(0, 3).map((pos, idx) => {
       const contextStart = Math.max(0, pos - 40);
       const contextEnd = Math.min(content.length, pos + oldString.length + 40);
@@ -516,8 +599,41 @@ function exactReplaceString(
     );
   }
 
-  // Exactly 1 occurrence - safe to replace
-  return content.replace(oldString, newString);
+  // 0 occurrences - Try Fuzzy/Flexible Matching Fallback (RAGP v2.3)
+  const normalize = (str: string) => str.toLowerCase().replace(/\s+/g, ' ').trim();
+  const normOld = normalize(oldString);
+  
+  if (normOld) {
+    // Escape all regex special characters
+    const escaped = normOld.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Allow flexible spacing (replace any space match with \s+)
+    const flexibleSpaces = escaped.replace(/ /g, '\\s+');
+    
+    const flexibleRegex = new RegExp(flexibleSpaces, 'i');
+    const flexibleGlobalRegex = new RegExp(flexibleSpaces, 'gi');
+    
+    const allMatches = content.match(flexibleGlobalRegex);
+    if (allMatches && allMatches.length === 1) {
+      const matchResult = content.match(flexibleRegex);
+      if (matchResult && matchResult.index !== undefined) {
+        console.log(`[EditNote] Found unique fuzzy/flexible match for: "${oldString.substring(0, 40)}..."`);
+        const start = matchResult.index;
+        const end = start + matchResult[0].length;
+        return content.substring(0, start) + newString + content.substring(end);
+      }
+    } else if (allMatches && allMatches.length > 1) {
+      throw new Error(
+        `Fuzzy Match Conflict: Text "${oldString}" matches ${allMatches.length} times under flexible spacing/capitalization.\n` +
+        `Fuzzy replacement requires a unique match. Please provide more surrounding context to perform the replacement.`
+      );
+    }
+  }
+
+  // If even fuzzy match failed, throw the standard exact-match error
+  throw new Error(
+    `Text not found in file: "${oldString}"\n\n` +
+    `Tip: The text must match exactly including whitespace, capitalization, and line breaks.`
+  );
 }
 
 /**

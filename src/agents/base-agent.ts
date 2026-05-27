@@ -103,6 +103,7 @@ export class BaseAgent {
     }
 
     // Otherwise, execute multi-turn loop with skills (RAGP)
+    const executedKeysHistory: string[] = [];
     let state: AgentState = {
       messages: [
         ...context.messages,
@@ -139,6 +140,14 @@ export class BaseAgent {
         throw err;
       }
 
+      // Look for Markdown Block Tool Calls (MBTC)
+      if (!result.toolCalls || result.toolCalls.length === 0) {
+        const blockCalls = this.parseBlockToolCalls(result.content);
+        if (blockCalls.length > 0) {
+          result.toolCalls = blockCalls;
+        }
+      }
+
       // Update state with assistant response
       const assistantMessage: ChatMessage = {
         role: 'assistant',
@@ -162,6 +171,40 @@ export class BaseAgent {
       const newSkillCalls: SkillCall[] = [];
 
       for (const toolCall of result.toolCalls) {
+        const callKey = `${toolCall.name}:${typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments)}`;
+
+        // Check if the last two executed keys are identical to the current one (consecutive 3x)
+        const isConsecutiveLoop = executedKeysHistory.length >= 2 &&
+                                  executedKeysHistory[executedKeysHistory.length - 1] === callKey &&
+                                  executedKeysHistory[executedKeysHistory.length - 2] === callKey;
+
+        if (isConsecutiveLoop) {
+          yield { type: 'status', message: `⚠️ 检测到工具调用 [${toolCall.name}] 陷入推理死循环，正在强制干预引导自愈...` };
+          yield { type: 'skill_error', name: toolCall.name, error: 'Reasoning loop detected by AP6 Guard' };
+
+          newMessages.push({
+            role: 'tool',
+            content: `⚠️ SYSTEM ALERT: You have executed the tool '${toolCall.name}' with the identical arguments consecutive times. This indicates you are caught in a repetitive reasoning loop. DO NOT repeat the same tool call with the same arguments. Please reconsider your plan, try a different parameter, use another tool (e.g. search or edit), or ask the user for clarification using 'obsidian:ask_user'.`,
+            timestamp: Date.now(),
+            tool_call_id: toolCall.id,
+            name: toolCall.name
+          });
+
+          newSkillCalls.push({
+            id: toolCall.id,
+            skillName: toolCall.name,
+            namespace: 'guard',
+            parameters: typeof toolCall.arguments === 'string' ? { raw: toolCall.arguments } : toolCall.arguments,
+            status: 'error',
+            timestamp: Date.now(),
+            result: { success: false, error: 'Loop detected and prevented by AP6 Guard' }
+          });
+          continue;
+        }
+
+        // Add to history
+        executedKeysHistory.push(callKey);
+
         if (this.skillInvocationContext.isMetaToolCall(toolCall.name)) {
           // Handle meta-tool call (spec/invoke)
           let args: Record<string, any>;
@@ -244,6 +287,19 @@ export class BaseAgent {
           } else if (toolCall.name === 'invoke') {
             const skillName = args.skill_name;
             const skillParams = args.params || {};
+
+            if (!skillName) {
+              yield { type: 'status', message: `⚠️ 工具 [invoke] 缺少必填参数 skill_name` };
+              yield { type: 'skill_error', name: 'invoke:unknown', error: 'Missing required parameter "skill_name"' };
+              newMessages.push({
+                role: 'tool',
+                content: "Error: Missing required parameter 'skill_name' in invoke tool call. You must specify the namespace and skill name (e.g., 'obsidian:edit_note') in 'skill_name'.",
+                timestamp: Date.now(),
+                tool_call_id: toolCall.id,
+                name: toolCall.name
+              });
+              continue;
+            }
 
             const skill = this.skillRegistry.get(skillName);
             const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
@@ -783,6 +839,78 @@ export class BaseAgent {
   }
 
   /**
+   * Scans a JSON string, identifies raw backslashes that do not form valid JSON
+   * escape sequences, and double-escapes them so they can be parsed successfully.
+   */
+  private escapeLoneBackslashes(jsonStr: string): string {
+    let result = '';
+    for (let i = 0; i < jsonStr.length; i++) {
+      const char = jsonStr[i];
+      if (char === '\\') {
+        const nextChar = jsonStr[i + 1];
+        if (nextChar === undefined) {
+          result += '\\\\';
+        } else if (['"', '\\', '/', 'b', 'f', 'n', 'r', 't'].includes(nextChar)) {
+          result += '\\' + nextChar;
+          i++;
+        } else if (nextChar === 'u') {
+          const hex = jsonStr.substring(i + 2, i + 6);
+          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+            result += '\\u' + hex;
+            i += 5;
+          } else {
+            result += '\\\\';
+          }
+        } else {
+          result += '\\\\';
+        }
+      } else {
+        result += char;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Parses Markdown block-style tool calls (MBTC) from assistant response text.
+   * Format: ```obsidian:edit_note path="Research/KTO.md" heading="KTO" ...
+   * content inside block
+   * ```
+   */
+  private parseBlockToolCalls(text: string): ToolCall[] {
+    const toolCalls: ToolCall[] = [];
+    // Match obsidian:edit_note or obsidian:create_note block syntax
+    const blockRegex = /```(obsidian:edit_note|obsidian:create_note)\s*([^\n]*)\n([\s\S]*?)```/g;
+    
+    let match;
+    let index = 1;
+    while ((match = blockRegex.exec(text)) !== null) {
+      const [_, skillName, attributesStr, bodyContent] = match;
+      const params: Record<string, any> = { content: bodyContent.trim() };
+      
+      // Parse attributes in the header, e.g. path="Research/KTO.md" heading="KTO"
+      if (attributesStr) {
+        const attrRegex = /(\w+)\s*=\s*['"]([^'"]*)['"]/g;
+        let attrMatch;
+        while ((attrMatch = attrRegex.exec(attributesStr)) !== null) {
+          const [__, key, value] = attrMatch;
+          if (value === 'true') params[key] = true;
+          else if (value === 'false') params[key] = false;
+          else params[key] = value;
+        }
+      }
+      
+      toolCalls.push({
+        id: `block_call_${Date.now()}_${index++}`,
+        name: skillName,
+        arguments: params
+      });
+    }
+    
+    return toolCalls;
+  }
+
+  /**
    * Safely parse tool call arguments
    */
   private safeParseToolArguments(toolCall: ToolCall): Record<string, any> {
@@ -795,14 +923,26 @@ export class BaseAgent {
     try {
       return JSON.parse(argsString);
     } catch (error: any) {
-      console.error(`[BaseAgent] JSON parse failed for ${toolCall.name}:`, error.message);
+      console.warn(`[BaseAgent] JSON strict parse failed for ${toolCall.name}, trying escape-healing...`);
 
-      // Log failure strictly for diagnostics
-      this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Failed (Strict Parsing)');
+      try {
+        const healedArgsString = this.escapeLoneBackslashes(argsString);
+        const parsed = JSON.parse(healedArgsString);
+        
+        console.log(`[BaseAgent] JSON parse healed successfully for ${toolCall.name}`);
+        this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Healed (JSON Preprocessor)', healedArgsString);
+        
+        return parsed;
+      } catch (healingError: any) {
+        console.error(`[BaseAgent] JSON escape-healing failed for ${toolCall.name}:`, healingError.message);
+        
+        // Log final failure strictly for diagnostics
+        this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Failed (Strict Parsing)');
 
-      throw new Error(
-        `Failed to parse tool call arguments for ${toolCall.name}: ${error.message}`
-      );
+        throw new Error(
+          `Failed to parse tool call arguments for ${toolCall.name}: ${error.message}`
+        );
+      }
     }
   }
 
