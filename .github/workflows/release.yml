@@ -3,7 +3,7 @@ name: Release Obsidian Plugin
 on:
   push:
     tags:
-      - 'v*'
+      - '[0-9]*'
 
 jobs:
   build:
@@ -48,7 +48,7 @@ jobs:
 
       - name: Extract Version from Tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Validate Tag Matches Manifest Version
         run: |
