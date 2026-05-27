@@ -1,4 +1,4 @@
-# Personal Agent - Obsidian Plugin
+# Mentat - Obsidian Plugin
 
 AI-powered personal assistant for Obsidian that helps organize notes, create knowledge links, and build your personal knowledge base.
 
@@ -12,7 +12,7 @@ AI-powered personal assistant for Obsidian that helps organize notes, create kno
 
 ## AI Provider Support
 
-Personal Agent supports multiple AI providers:
+Mentat supports multiple AI providers:
 
 - **OpenAI-compatible APIs**: OpenAI, DeepSeek, and any OpenAI-compatible endpoint
 - **Anthropic**: Native support for Claude models
@@ -25,8 +25,8 @@ Personal Agent supports multiple AI providers:
 1. Clone this repository into your Obsidian vault's plugins folder:
    ```bash
    cd /path/to/your/vault/.obsidian/plugins
-   git clone https://github.com/yourusername/obsidian-personal-agent personal-agent
-   cd personal-agent
+   git clone https://github.com/Secbone/obsidian-mentat mentat
+   cd mentat
    ```
 
 2. Install dependencies:
@@ -39,20 +39,20 @@ Personal Agent supports multiple AI providers:
    npm run build
    ```
 
-4. Reload Obsidian and enable "Personal Agent" in Settings → Community plugins
+4. Reload Obsidian and enable "Mentat" in Settings → Community plugins
 
 ### For Users
 
 1. Open Obsidian Settings
 2. Go to Community plugins and browse
-3. Search for "Personal Agent"
+3. Search for "Mentat"
 4. Install and enable the plugin
 
 ## Configuration
 
 ### Setting up AI Providers
 
-1. Go to Settings → Personal Agent
+1. Go to Settings → Mentat
 2. Click "Add AI Provider"
 3. Configure your provider:
    - **Name**: Give it a descriptive name
@@ -146,8 +146,8 @@ MIT
 
 ## Support
 
-- GitHub Issues: [Report bugs or request features](https://github.com/yourusername/obsidian-personal-agent/issues)
-- Documentation: [Full documentation](https://github.com/yourusername/obsidian-personal-agent/wiki)
+- GitHub Issues: [Report bugs or request features](https://github.com/Secbone/obsidian-mentat/issues)
+- Documentation: [Full documentation](https://github.com/Secbone/obsidian-mentat/wiki)
 
 ## Roadmap
 
