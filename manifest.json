@@ -3,9 +3,9 @@
   "name": "Mentat",
   "version": "0.1.0",
   "minAppVersion": "1.0.0",
-  "description": "Your local agentic cognitive partner for Obsidian, managing structured knowledge, local command operations, and deep mathematical reasoning.",
+  "description": "Your local agentic cognitive partner, managing structured knowledge, local command operations, and deep mathematical reasoning.",
   "author": "Mentat Team",
-  "authorUrl": "https://github.com/Secbone/obsidian-mentat",
+  "authorUrl": "https://github.com/Secbone",
   "fundingUrl": "https://github.com/sponsors/Secbone",
   "isDesktopOnly": false
 }
