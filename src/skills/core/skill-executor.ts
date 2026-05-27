@@ -179,9 +179,6 @@ export class SkillExecutor {
     return str.substring(0, maxPos);
   }
 
-  /**
-   * Safely parse tool call arguments with recovery strategies
-   */
   private safeParseToolArguments(toolCall: ToolCall): Record<string, any> | null {
     if (typeof toolCall.arguments !== 'string') {
       return toolCall.arguments;
@@ -189,48 +186,10 @@ export class SkillExecutor {
 
     const argsString = toolCall.arguments as string;
 
-    // Try normal parsing first
     try {
       return JSON.parse(argsString);
     } catch (error: any) {
-      console.error('[SkillExecutor] JSON parse failed, attempting recovery...');
-      console.error('[SkillExecutor] Tool:', toolCall.name, 'Error:', error.message);
-      console.error('[SkillExecutor] String length:', argsString.length);
-      console.error('[SkillExecutor] First 500 chars:', argsString.substring(0, 500));
-      console.error('[SkillExecutor] Last 500 chars:', argsString.substring(Math.max(0, argsString.length - 500)));
-
-      // Extract error position if available
-      const posMatch = error.message.match(/position (\d+)/);
-      if (posMatch) {
-        const pos = parseInt(posMatch[1]);
-        console.error('[SkillExecutor] Context around position:', pos,
-          argsString.substring(Math.max(0, pos - 100), Math.min(argsString.length, pos + 100)));
-      }
-
-      // Recovery Strategy 1: Try to fix unterminated strings
-      if (error.message.includes('Unterminated string')) {
-        try {
-          const fixed = argsString + '"}';
-          console.log('[SkillExecutor] Attempting to fix with closing quote and brace...');
-          return JSON.parse(fixed);
-        } catch {
-          // Failed, continue to next strategy
-        }
-      }
-
-      // Recovery Strategy 2: Try to extract valid JSON prefix with UTF-8 safe truncation
-      try {
-        let lastValidPos = argsString.lastIndexOf('}');
-        if (lastValidPos > 0) {
-          const truncated = this.truncateAtValidUtf8(argsString, lastValidPos + 1);
-          console.log('[SkillExecutor] Attempting to parse truncated JSON (', truncated.length, 'chars)...');
-          return JSON.parse(truncated);
-        }
-      } catch {
-        // Failed, continue
-      }
-
-      // All recovery strategies failed
+      console.error('[SkillExecutor] JSON parse failed for', toolCall.name, 'Error:', error.message);
       return null;
     }
   }
@@ -242,13 +201,13 @@ export class SkillExecutor {
     toolCall: ToolCall,
     options: ExecutionOptions = {}
   ): Promise<SkillResult> {
-    // Parse parameters with recovery strategies
+    // Parse parameters strictly
     const parameters = this.safeParseToolArguments(toolCall);
 
     if (parameters === null) {
       return {
         success: false,
-        error: `Failed to parse tool arguments for ${toolCall.name}. All recovery strategies failed.`
+        error: `Failed to parse tool arguments for ${toolCall.name}. JSON is malformed.`
       };
     }
 

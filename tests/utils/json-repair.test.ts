@@ -42,3 +42,43 @@ describe('JSON Repair Scanner & Truncation Self-Healing', () => {
     expect(JSON.parse(repaired2)).toEqual({ path: 'Folder\\' });
   });
 });
+
+describe('BaseAgent Strict JSON Parsing', () => {
+  const safeParse = (BaseAgent.prototype as any).safeParseToolArguments;
+
+  it('should successfully parse valid JSON', () => {
+    const mockContext = {
+      logDiagnosticIncident: () => Promise.resolve()
+    };
+    const toolCall = {
+      id: '1',
+      name: 'test',
+      arguments: '{"key": "value"}'
+    };
+    const parsed = safeParse.call(mockContext, toolCall);
+    expect(parsed).toEqual({ key: 'value' });
+  });
+
+  it('should throw an error on malformed JSON without trying recovery', () => {
+    let logged = false;
+    const mockContext = {
+      logDiagnosticIncident: (toolName: string, originalArgs: string, errMsg: string, strategy: string) => {
+        logged = true;
+        expect(toolName).toBe('test');
+        expect(originalArgs).toBe('{"key": "value');
+        expect(strategy).toBe('Failed (Strict Parsing)');
+        return Promise.resolve();
+      }
+    };
+    const toolCall = {
+      id: '1',
+      name: 'test',
+      arguments: '{"key": "value'
+    };
+    
+    expect(() => safeParse.call(mockContext, toolCall)).toThrowError(
+      /Failed to parse tool call arguments for test:/
+    );
+    expect(logged).toBe(true);
+  });
+});

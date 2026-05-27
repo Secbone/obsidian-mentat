@@ -79,8 +79,7 @@ export class BaseAgent {
       try {
         responseContent = yield* this.streamModelSimple(prompt, {
           systemPrompt,
-          temperature: this.config.temperature || 0.7,
-          maxTokens: 2048
+          temperature: this.config.temperature || 0.7
         });
       } catch (err: any) {
         yield { type: 'error', message: `大模型执行异常: ${err.message}` };
@@ -131,7 +130,6 @@ export class BaseAgent {
       try {
         result = yield* this.streamModel(state.messages, {
           temperature: this.config.temperature || 0.7,
-          maxTokens: 2048,
           systemPrompt: state.systemPrompt,
           skills: state.skills,
           toolChoice: 'auto'
@@ -166,7 +164,35 @@ export class BaseAgent {
       for (const toolCall of result.toolCalls) {
         if (this.skillInvocationContext.isMetaToolCall(toolCall.name)) {
           // Handle meta-tool call (spec/invoke)
-          const args = this.safeParseToolArguments(toolCall);
+          let args: Record<string, any>;
+          try {
+            args = this.safeParseToolArguments(toolCall);
+          } catch (err: any) {
+            // Parsing failed!
+            // Yield skill_call with raw arguments so it appears in the UI console
+            yield { type: 'skill_call', name: toolCall.name, params: toolCall.arguments };
+            yield { type: 'status', message: `⚠️ 工具 [${toolCall.name}] 参数解析失败，正在引导智能体自我纠错...` };
+            yield { type: 'skill_error', name: toolCall.name, error: err.message };
+
+            newMessages.push({
+              role: 'tool',
+              content: `Error: Failed to parse arguments for tool '${toolCall.name}'. Details: ${err.message}. Please regenerate the tool call with valid, balanced JSON formatting.`,
+              timestamp: Date.now(),
+              tool_call_id: toolCall.id,
+              name: toolCall.name
+            });
+
+            newSkillCalls.push({
+              id: toolCall.id,
+              skillName: toolCall.name,
+              namespace: 'meta',
+              parameters: { raw_arguments: toolCall.arguments },
+              status: 'error',
+              timestamp: Date.now(),
+              result: { success: false, error: err.message }
+            });
+            continue;
+          }
           
           if (toolCall.name === 'spec') {
             const skillName = args.skill_name;
@@ -364,11 +390,19 @@ export class BaseAgent {
               });
             }
             
+            // Safe JSON parsing of parameters to avoid crashing the execute loop on malformed toolCall.arguments
+            let parsedParams = {};
+            try {
+              parsedParams = typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : toolCall.arguments;
+            } catch {
+              parsedParams = { raw_arguments: toolCall.arguments };
+            }
+
             newSkillCalls.push({
               id: toolCall.id,
               skillName: toolCall.name,
               namespace: toolCall.name.startsWith('mcp:') ? 'mcp' : 'obsidian',
-              parameters: typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : toolCall.arguments,
+              parameters: parsedParams,
               status: runResult.success ? 'success' : 'error',
               timestamp: Date.now(),
               result: runResult
@@ -376,12 +410,27 @@ export class BaseAgent {
           } catch (execErr: any) {
             yield { type: 'status', message: `⚠️ 工具 [${toolCall.name}] 参数解析或运行异常，正在自动纠错...` };
             yield { type: 'skill_error', name: toolCall.name, error: execErr.message };
-            newMessages.push({
-              role: 'tool',
-              content: `Error: Exception during execution: ${execErr.message}`,
+            
+            // Avoid duplicate message if it was already pushed inside the try block before exception
+            const isAlreadyPushed = newMessages.some(m => m.tool_call_id === toolCall.id);
+            if (!isAlreadyPushed) {
+              newMessages.push({
+                role: 'tool',
+                content: `Error: Exception during execution: ${execErr.message}`,
+                timestamp: Date.now(),
+                tool_call_id: toolCall.id,
+                name: toolCall.name
+              });
+            }
+
+            newSkillCalls.push({
+              id: toolCall.id,
+              skillName: toolCall.name,
+              namespace: toolCall.name.startsWith('mcp:') ? 'mcp' : 'obsidian',
+              parameters: { raw_arguments: toolCall.arguments },
+              status: 'error',
               timestamp: Date.now(),
-              tool_call_id: toolCall.id,
-              name: toolCall.name
+              result: { success: false, error: execErr.message }
             });
           }
         }
@@ -580,22 +629,30 @@ export class BaseAgent {
       // Handle spec: get skill specification
       const skillName = args.skill_name;
 
-      if (onStream) {
-        onStream(`\n\n📖 Getting spec: ${skillName}\n`);
-      }
-
-      const details = this.skillRegistry.getSkillDetails(skillName, 'markdown');
-
-      if (details.startsWith('Error:')) {
+      if (!skillName) {
         success = false;
-        resultContent = details;
+        resultContent = "Error: Missing required parameter 'skill_name' in spec tool call. You must specify which skill you want to see specification for.";
         if (onStream) {
-          onStream(`✗ not found\n\n`);
+          onStream(`✗ failed\n\n`);
         }
       } else {
-        resultContent = details;
         if (onStream) {
-          onStream(`✓ loaded\n\n`);
+          onStream(`\n\n📖 Getting spec: ${skillName}\n`);
+        }
+
+        const details = this.skillRegistry.getSkillDetails(skillName, 'markdown');
+
+        if (details.startsWith('Error:')) {
+          success = false;
+          resultContent = details;
+          if (onStream) {
+            onStream(`✗ not found\n\n`);
+          }
+        } else {
+          resultContent = details;
+          if (onStream) {
+            onStream(`✓ loaded\n\n`);
+          }
         }
       }
     } else if (toolCall.name === 'invoke') {
@@ -603,42 +660,50 @@ export class BaseAgent {
       const skillName = args.skill_name;
       const skillParams = args.params || {};
 
-      // Get skill for display purposes
-      const skill = this.skillRegistry.get(skillName);
-      const shortName = skillName.split(':').pop() || skillName;
-      const displayParam = this.getSkillDisplayParam(skillName, skillParams);
-      const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
-
-      // Notify about skill call
-      if (onStream) {
-        if (requiresConfirmation) {
-          const paramStr = displayParam ? `(${displayParam})` : '()';
-          onStream(`\n\n⚠️ ${shortName}${paramStr}\n`);
-        } else {
-          const paramStr = displayParam ? `(${displayParam})` : '()';
-          onStream(`\n\n${shortName}${paramStr}\n`);
-        }
-      }
-
-      // Parse skill name to get namespace and name
-      const { namespace, name } = this.skillRegistry.parseName(skillName);
-
-      // Execute the skill
-      const result = await this.skillExecutor.execute(namespace, name, skillParams);
-
-      success = result.success;
-      resultContent = result.success
-        ? JSON.stringify(result.data, null, 2)
-        : `Error: ${result.error}`;
-
-      // Notify about completion
-      if (onStream) {
-        if (result.success) {
-          onStream(`✓ success\n\n`);
-        } else if (result.error && result.error.includes('cancelled')) {
-          onStream(`✗ cancelled\n\n`);
-        } else {
+      if (!skillName) {
+        success = false;
+        resultContent = "Error: Missing required parameter 'skill_name' in invoke tool call. You must specify the namespace and skill name (e.g., 'obsidian:edit_note') in 'skill_name'.";
+        if (onStream) {
           onStream(`✗ failed\n\n`);
+        }
+      } else {
+        // Get skill for display purposes
+        const skill = this.skillRegistry.get(skillName);
+        const shortName = skillName.split(':').pop() || skillName;
+        const displayParam = this.getSkillDisplayParam(skillName, skillParams);
+        const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
+
+        // Notify about skill call
+        if (onStream) {
+          if (requiresConfirmation) {
+            const paramStr = displayParam ? `(${displayParam})` : '()';
+            onStream(`\n\n⚠️ ${shortName}${paramStr}\n`);
+          } else {
+            const paramStr = displayParam ? `(${displayParam})` : '()';
+            onStream(`\n\n${shortName}${paramStr}\n`);
+          }
+        }
+
+        // Parse skill name to get namespace and name
+        const { namespace, name } = this.skillRegistry.parseName(skillName);
+
+        // Execute the skill
+        const result = await this.skillExecutor.execute(namespace, name, skillParams);
+
+        success = result.success;
+        resultContent = result.success
+          ? JSON.stringify(result.data, null, 2)
+          : `Error: ${result.error}`;
+
+        // Notify about completion
+        if (onStream) {
+          if (result.success) {
+            onStream(`✓ success\n\n`);
+          } else if (result.error && result.error.includes('cancelled')) {
+            onStream(`✗ cancelled\n\n`);
+          } else {
+            onStream(`✗ failed\n\n`);
+          }
         }
       }
     } else {
@@ -732,47 +797,9 @@ export class BaseAgent {
     } catch (error: any) {
       console.error(`[BaseAgent] JSON parse failed for ${toolCall.name}:`, error.message);
 
-      // Try recovery strategies
-      // Strategy 0: Repair unescaped quotes and raw control newlines/returns inside strings
-      try {
-        const repaired = this.repairJsonString(argsString);
-        const parsed = JSON.parse(repaired);
-        this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Strategy 0 (Scanner Repair)', repaired);
-        return parsed;
-      } catch (repairError) {
-        // Repair failed or still malformed, continue to other strategies
-      }
+      // Log failure strictly for diagnostics
+      this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Failed (Strict Parsing)');
 
-      // Strategy 1: Fix unterminated strings / truncated JSON objects
-      if (
-        error.message.includes('Unterminated string') || 
-        error.message.includes('Unexpected end of JSON input') || 
-        error.message.includes('Expected \',\' or \'}\'')
-      ) {
-        try {
-          const fixed = this.repairTruncatedJson(argsString);
-          const parsed = JSON.parse(fixed);
-          this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Strategy 1 (Truncation & Bracket Repair)', fixed);
-          return parsed;
-        } catch {
-          // Continue to next strategy
-        }
-      }
-
-      // Strategy 2: Extract valid JSON prefix
-      try {
-        const lastValidPos = argsString.lastIndexOf('}');
-        if (lastValidPos > 0) {
-          const truncated = argsString.substring(0, lastValidPos + 1);
-          const parsed = JSON.parse(truncated);
-          this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Strategy 2 (JSON Prefix)', truncated);
-          return parsed;
-        }
-      } catch {
-        // Failed
-      }
-
-      this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Failed (All Strategies Failed)');
       throw new Error(
         `Failed to parse tool call arguments for ${toolCall.name}: ${error.message}`
       );

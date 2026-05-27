@@ -2,6 +2,7 @@
 
 import { ItemView, WorkspaceLeaf, setIcon, TFile } from 'obsidian';
 import PersonalAgentPlugin from '../../main';
+import { DiagnosticsExporter } from '../../diagnostics/diagnostics-exporter';
 import { ChatManager } from '../../chat/chat-manager';
 import { MessageRenderer } from '../message-renderer';
 import { ChatOrchestrator, ChatQueryResult } from '../../chat/chat-orchestrator';
@@ -34,6 +35,7 @@ export class ChatView extends ItemView {
   private sendButton: HTMLButtonElement;
   private clearButton: HTMLButtonElement;
   private settingsButton: HTMLButtonElement;
+  private exportDiagnosticsButton: HTMLButtonElement;
   private documentPanel: HTMLElement;
   private documentList: HTMLElement;
   private addDocumentButton: HTMLButtonElement;
@@ -103,6 +105,10 @@ export class ChatView extends ItemView {
     this.clearButton = actionsContainer.createEl('button', { cls: 'chat-icon-button' });
     setIcon(this.clearButton, 'trash-2');
     this.clearButton.setAttribute('aria-label', 'Clear chat');
+
+    this.exportDiagnosticsButton = actionsContainer.createEl('button', { cls: 'chat-icon-button' });
+    setIcon(this.exportDiagnosticsButton, 'scroll');
+    this.exportDiagnosticsButton.setAttribute('aria-label', 'Export Session Diagnostics');
 
     // Document panel (between header and messages)
     this.documentPanel = container.createDiv('document-panel');
@@ -245,6 +251,11 @@ export class ChatView extends ItemView {
 
     // Clear conversation
     this.clearButton.addEventListener('click', () => this.handleClear());
+
+    // Export Session Diagnostics
+    this.exportDiagnosticsButton.addEventListener('click', () => {
+      DiagnosticsExporter.exportSession(this.plugin, this.chatManager);
+    });
   }
 
   private async handleSend(): Promise<void> {
@@ -406,9 +417,24 @@ export class ChatView extends ItemView {
 
     } catch (error) {
       console.error('Chat error:', error);
-      this.currentStreamingElement!.setText(
-        `Error: ${error.message}. Please check your AI provider settings.`
-      );
+      if (this.currentStreamingElement) {
+        const answerContainer = this.currentStreamingElement.querySelector('.final-answer-container') as HTMLElement;
+        if (answerContainer) {
+          const errorDiv = answerContainer.createDiv({ cls: 'chat-error-banner' });
+          errorDiv.setText(`Error: ${error.message}. Please check your AI provider settings.`);
+          errorDiv.style.color = 'var(--text-error)';
+          errorDiv.style.marginTop = '10px';
+          errorDiv.style.padding = '8px';
+          errorDiv.style.borderRadius = '4px';
+          errorDiv.style.backgroundColor = 'var(--background-modifier-error)';
+          errorDiv.style.fontSize = 'var(--font-smaller)';
+          errorDiv.style.borderLeft = '3px solid var(--text-error)';
+        } else {
+          this.currentStreamingElement.setText(
+            `Error: ${error.message}. Please check your AI provider settings.`
+          );
+        }
+      }
     } finally {
       // Remove streaming indicator
       this.currentStreamingElement?.removeClass('streaming');

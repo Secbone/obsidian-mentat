@@ -70,6 +70,9 @@ export interface PersonalAgentSettings {
 
   // Individual Skill configurations
   skillConfigurations?: Record<string, SkillConfig>;
+  
+  // Diagnostics Configuration
+  diagnosticsFolder?: string;
 }
 
 export interface SkillConfig {
@@ -180,5 +183,6 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
 
   reviewIntervalDays: 7,
   enableSpacedRepetition: true,
-  skillConfigurations: {}
+  skillConfigurations: {},
+  diagnosticsFolder: 'Personal Agent/Diagnostics'
 };

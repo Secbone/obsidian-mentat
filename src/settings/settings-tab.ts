@@ -78,6 +78,9 @@ export class SettingsTab extends PluginSettingTab {
 
       // Performance Section
       this.displayPerformanceSection(containerEl);
+
+      // Diagnostics Section
+      this.displayDiagnosticsSection(containerEl);
     } else {
       // Skills & Tools Manager Section
       this.displaySkillsManagerSection(containerEl);
@@ -591,5 +594,20 @@ export class SettingsTab extends PluginSettingTab {
       index,
       () => this.display()
     ).open();
+  }
+
+  displayDiagnosticsSection(containerEl: HTMLElement): void {
+    containerEl.createEl('h2', { text: 'Diagnostics & Troubleshooting' });
+
+    new Setting(containerEl)
+      .setName('Diagnostics Export Folder')
+      .setDesc('Folder where session diagnostics reports are exported (relative to vault root)')
+      .addText(text => text
+        .setPlaceholder('Personal Agent/Diagnostics')
+        .setValue(this.plugin.settings.diagnosticsFolder || 'Personal Agent/Diagnostics')
+        .onChange(async (value) => {
+          this.plugin.settings.diagnosticsFolder = value.trim() || 'Personal Agent/Diagnostics';
+          await this.plugin.saveSettings();
+        }));
   }
 }

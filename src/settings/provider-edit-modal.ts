@@ -202,8 +202,8 @@ export class ProviderEditModal extends Modal {
       .setName('最大Tokens')
       .setDesc('单次响应的最大Token数')
       .addText(text => text
-        .setPlaceholder('2048')
-        .setValue(String(this.tempConfig.maxTokens || 2048))
+        .setPlaceholder('16384')
+        .setValue(String(this.tempConfig.maxTokens || 16384))
         .onChange(value => {
           const num = parseInt(value);
           if (!isNaN(num)) {
@@ -383,7 +383,7 @@ export class ProviderEditModal extends Modal {
       this.tempConfig.temperature = 0.7;
     }
     if (this.tempConfig.maxTokens === undefined) {
-      this.tempConfig.maxTokens = 2048;
+      this.tempConfig.maxTokens = 16384;
     }
     if (this.tempConfig.enabled === undefined) {
       this.tempConfig.enabled = true;

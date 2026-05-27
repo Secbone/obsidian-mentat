@@ -53,7 +53,7 @@ export class OpenAIProvider implements AIProvider {
         model: this.config.model,
         messages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 2048,
+        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384,
         stop: options?.stopSequences
       });
 
@@ -88,7 +88,7 @@ export class OpenAIProvider implements AIProvider {
         model: this.config.model,
         messages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 2048,
+        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384,
         stream: true,
         stop: options?.stopSequences
       });
@@ -172,7 +172,7 @@ export class OpenAIProvider implements AIProvider {
         model: this.config.model,
         messages: openaiMessages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 2048
+        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384
       };
 
       // Add tools if provided
@@ -239,7 +239,7 @@ export class OpenAIProvider implements AIProvider {
         model: this.config.model,
         messages: openaiMessages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 2048,
+        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384,
         stream: true
       };
 
