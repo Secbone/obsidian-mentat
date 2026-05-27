@@ -16,7 +16,7 @@ export class ChatManager {
   private history: ChatMessage[] = [];
   private selectedFiles: Set<string> = new Set(); // Selected document paths
   private sessionId: string;
-  private readonly STORAGE_KEY = 'personal-agent-chat-history';
+  private readonly STORAGE_KEY = 'mentat-chat-history';
   private readonly MAX_HISTORY_SIZE = 100; // Keep last 100 messages
 
   constructor(plugin: PersonalAgentPlugin) {
@@ -147,7 +147,7 @@ export class ChatManager {
       lastUpdated: Date.now()
     };
 
-    // Use Obsidian's data storage (stored in .obsidian/plugins/personal-agent/)
+    // Use Obsidian's data storage (stored in .obsidian/plugins/mentat/)
     const pluginData = await this.plugin.loadData() || {};
     pluginData[this.STORAGE_KEY] = data;
     await this.plugin.saveData(pluginData);

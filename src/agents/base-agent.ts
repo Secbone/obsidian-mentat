@@ -966,7 +966,7 @@ export class BaseAgent {
       const vault = this.skillExecutor.getContext().vault;
       if (!vault) return;
 
-      const logDir = '.personal-agent';
+      const logDir = '.mentat';
       const logPath = `${logDir}/diagnostics.jsonl`;
 
       // Check if folder exists, if not, create it

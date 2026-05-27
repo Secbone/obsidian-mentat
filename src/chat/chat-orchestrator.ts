@@ -53,7 +53,7 @@ export class ChatOrchestrator {
     // Initialize Skill system
     this.skillRegistry = new SkillRegistry();
     this.mcpManager = new MCPManager(this.skillRegistry);
-    this.skillLoader = new SkillLoader(plugin.app, 'personal-agent');
+    this.skillLoader = new SkillLoader(plugin.app, 'mentat');
 
     // Initialize skill invocation strategy
     const invocationMode = plugin.settings.skillInvocationMode || 'progressive';

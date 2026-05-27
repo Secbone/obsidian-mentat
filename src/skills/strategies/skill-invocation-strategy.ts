@@ -88,7 +88,7 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
     content += registry.getDocumentationContent();
 
     // Filter enabled skills
-    const plugin = this.app ? (this.app as any).plugins?.plugins?.['personal-agent'] : null;
+    const plugin = this.app ? (this.app as any).plugins?.plugins?.['mentat'] : null;
     const configurations = plugin?.settings?.skillConfigurations || {};
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
@@ -229,7 +229,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
       'obsidian:web_fetch'
     ];
     
-    const plugin = this.app ? (this.app as any).plugins?.plugins?.['personal-agent'] : null;
+    const plugin = this.app ? (this.app as any).plugins?.plugins?.['mentat'] : null;
     const configurations = plugin?.settings?.skillConfigurations || {};
     
     // Base defaults
@@ -258,7 +258,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     content += registry.getDocumentationContent();
 
     // Filter enabled skills
-    const plugin = this.app ? (this.app as any).plugins?.plugins?.['personal-agent'] : null;
+    const plugin = this.app ? (this.app as any).plugins?.plugins?.['mentat'] : null;
     const configurations = plugin?.settings?.skillConfigurations || {};
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
@@ -308,7 +308,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     const tools: any[] = [];
 
     // Filter enabled skills
-    const plugin = this.app ? (this.app as any).plugins?.plugins?.['personal-agent'] : null;
+    const plugin = this.app ? (this.app as any).plugins?.plugins?.['mentat'] : null;
     const configurations = plugin?.settings?.skillConfigurations || {};
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);

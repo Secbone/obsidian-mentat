@@ -281,7 +281,7 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
       name: 'Open Diagnostics and Debug Log',
       callback: async () => {
         const adapter = this.app.vault.adapter;
-        const logPath = '.personal-agent/diagnostics.jsonl';
+        const logPath = '.mentat/diagnostics.jsonl';
         
         if (!(await adapter.exists(logPath))) {
           new Notice('No diagnostics logs found. Everything is running smoothly!');

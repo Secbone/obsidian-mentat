@@ -55,7 +55,7 @@ export class MCPClient {
         params: {
           protocolVersion: '2024-11-05',
           clientInfo: {
-            name: 'personal-agent',
+            name: 'mentat',
             version: '0.1.0'
           },
           capabilities: {

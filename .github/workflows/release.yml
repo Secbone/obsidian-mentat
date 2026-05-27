@@ -80,7 +80,7 @@ jobs:
             
             To install:
             1. Download the assets.
-            2. Copy them into your vault's plugin directory: `<vault>/.obsidian/plugins/obsidian-mentat/`.
+            2. Copy them into your vault's plugin directory: `<vault>/.obsidian/plugins/mentat/`.
             3. Enable Mentat in Obsidian's Community Plugins settings.
           draft: false
           prerelease: false

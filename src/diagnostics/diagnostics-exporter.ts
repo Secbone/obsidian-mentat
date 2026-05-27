@@ -39,7 +39,7 @@ export class DiagnosticsExporter {
       const directCallSkills = settings.skillInvocationConfig?.directCallSkills || [];
       const directCallCount = directCallSkills.length;
 
-      // 1. Resolve and parse diagnostic logs (.personal-agent/diagnostics.jsonl)
+      // 1. Resolve and parse diagnostic logs (.mentat/diagnostics.jsonl)
       const logs = await DiagnosticsExporter.retrieveIncidentLogs(plugin, startTime, endTime);
 
       // 2. Generate Mermaid Sequence Diagram
@@ -363,7 +363,7 @@ export class DiagnosticsExporter {
     const logs: any[] = [];
     try {
       const adapter = plugin.app.vault.adapter;
-      const logPath = '.personal-agent/diagnostics.jsonl';
+      const logPath = '.mentat/diagnostics.jsonl';
       
       if (await adapter.exists(logPath)) {
         const rawContent = await adapter.read(logPath);

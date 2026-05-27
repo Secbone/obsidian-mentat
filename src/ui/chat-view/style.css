@@ -1,7 +1,7 @@
 /* Chat View - Main container, header, document panel, and input styles */
 
 /* ===== CONTAINER ===== */
-.personal-agent-chat-view {
+.mentat-chat-view {
   display: flex;
   flex-direction: column;
   height: 100%;

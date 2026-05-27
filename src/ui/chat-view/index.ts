@@ -11,7 +11,7 @@ import { ConfirmationModal } from '../confirmation-modal';
 import { TaskType, ChatMessage, ToolCall } from '../../types';
 import { AgentEvent } from '../../agents/agent-types';
 
-export const CHAT_VIEW_TYPE = 'personal-agent-chat';
+export const CHAT_VIEW_TYPE = 'mentat-chat';
 
 interface ActiveTask {
   id: string;
@@ -91,7 +91,7 @@ export class ChatView extends ItemView {
   private buildUI(): void {
     const container = this.containerEl.children[1];
     container.empty();
-    container.addClass('personal-agent-chat-view');
+    container.addClass('mentat-chat-view');
 
     // Header with icon, title, and action buttons
     const header = container.createDiv('chat-header');
