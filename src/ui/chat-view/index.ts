@@ -19,6 +19,7 @@ interface ActiveTask {
   status: 'pending' | 'executing' | 'success' | 'error' | 'confirm';
   params?: any;
   result?: any;
+  explanation?: string;
 }
 
 export class ChatView extends ItemView {
@@ -45,6 +46,8 @@ export class ChatView extends ItemView {
   private currentStreamingElement: HTMLElement | null = null;
   private lastRenderedStatus: string = '';
   private lastRenderedTasksJson: string = '';
+  private lastRenderTime: number = 0;
+  private renderTimeout: any = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: PersonalAgentPlugin) {
     super(leaf);
@@ -318,6 +321,8 @@ export class ChatView extends ItemView {
         }
       );
 
+      let currentTurnResponse = ''; // Tracks text streamed inside the current turn
+      let finalAnswer = ''; // Accumulates clean final answer text
       let current = await stream.next();
 
       while (!current.done) {
@@ -325,19 +330,27 @@ export class ChatView extends ItemView {
 
         if (event.type === 'status') {
           currentStatus = event.message;
-          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
+          this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse);
         } else if (event.type === 'chunk') {
-          fullResponse += event.text;
-          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
+          currentTurnResponse += event.text;
+          // If we haven't run any tools yet, stream it in final answer so the user sees real-time progress.
+          // Otherwise, it is intermediate explanation text and will be shown inside the TUI console.
+          if (activeTasks.length === 0) {
+            this.updateStreamingUI(currentStatus, activeTasks, currentTurnResponse, currentTurnResponse);
+          } else {
+            this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse);
+          }
         } else if (event.type === 'skill_call') {
           activeTasks.push({
             id: event.name + Date.now(),
             name: event.name,
             status: 'executing',
-            params: event.params
+            params: event.params,
+            explanation: currentTurnResponse.trim() // Capture intermediate explanation
           });
+          currentTurnResponse = ''; // Reset for next turn
           currentStatus = `执行工具: ${event.name.split(':').pop() || event.name}`;
-          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
+          this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true); // force update console immediately
         } else if (event.type === 'skill_success') {
           const task = activeTasks.find(t => t.name === event.name && t.status === 'executing');
           if (task) {
@@ -345,7 +358,7 @@ export class ChatView extends ItemView {
             task.result = event.result;
           }
           currentStatus = '';
-          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
+          this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
         } else if (event.type === 'skill_error') {
           const task = activeTasks.find(t => t.name === event.name && t.status === 'executing');
           if (task) {
@@ -353,19 +366,21 @@ export class ChatView extends ItemView {
             task.result = event.error;
           }
           currentStatus = '';
-          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
+          this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
         } else if (event.type === 'confirm_request') {
           // Native user interactive confirmations (Human-in-the-loop)
           const task: ActiveTask = {
             id: event.skillName + Date.now(),
             name: event.skillName,
             status: 'confirm',
-            params: event.params
+            params: event.params,
+            explanation: currentTurnResponse.trim() // Capture explanation for confirm request too!
           };
+          currentTurnResponse = ''; // Reset for next turn
           activeTasks.push(task);
           
           currentStatus = `等待授权: ${event.skillName.split(':').pop() || event.skillName}`;
-          this.updateStreamingUI(currentStatus, activeTasks, fullResponse);
+          this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
 
           // Wait for Obsidian modal feedback asynchronously
           const approved = await new Promise<boolean>((resolve) => {
@@ -386,12 +401,19 @@ export class ChatView extends ItemView {
             task.result = 'User cancelled execution';
           }
 
+          this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
           current = await stream.next({ approved });
           continue;
         }
 
         current = await stream.next();
       }
+
+      // End of streaming loop: consolidate final answer
+      if (currentTurnResponse) {
+        finalAnswer = finalAnswer ? `${finalAnswer}\n\n${currentTurnResponse}` : currentTurnResponse;
+      }
+      this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, '', true);
 
       const result = current.value as ChatQueryResult;
 
@@ -765,7 +787,9 @@ export class ChatView extends ItemView {
   private updateStreamingUI(
     statusMsg: string,
     activeTasks: ActiveTask[],
-    fullResponse: string
+    fullResponse: string,
+    currentTurnResponse: string = '',
+    force: boolean = false
   ): void {
     if (!this.currentStreamingElement) return;
 
@@ -773,9 +797,9 @@ export class ChatView extends ItemView {
     const answerContainer = this.currentStreamingElement.querySelector('.final-answer-container') as HTMLElement;
     if (!consoleContainer || !answerContainer) return;
 
-    // Check if we need to update the console (only when statusMsg or activeTasks change)
+    // Check if we need to update the console (only when statusMsg, activeTasks, or currentTurnResponse change)
     const tasksJson = JSON.stringify(activeTasks);
-    const shouldUpdateConsole = statusMsg !== this.lastRenderedStatus || tasksJson !== this.lastRenderedTasksJson;
+    const shouldUpdateConsole = force || statusMsg !== this.lastRenderedStatus || tasksJson !== this.lastRenderedTasksJson;
 
     if (shouldUpdateConsole) {
       this.lastRenderedStatus = statusMsg;
@@ -787,7 +811,7 @@ export class ChatView extends ItemView {
 
       consoleContainer.empty();
 
-      if (statusMsg || activeTasks.length > 0) {
+      if (statusMsg || activeTasks.length > 0 || currentTurnResponse.trim()) {
         const consoleEl = consoleContainer.createEl('details', { cls: 'tui-console' });
         if (wasConsoleOpen) {
           consoleEl.setAttribute('open', '');
@@ -802,7 +826,7 @@ export class ChatView extends ItemView {
         const failedTools = activeTasks.filter(t => t.status === 'error').length;
 
         let summaryText = '';
-        if (runningTools > 0 || statusMsg) {
+        if (runningTools > 0 || statusMsg || (currentTurnResponse.trim() && activeTasks.length > 0)) {
           summaryText = `⠋ 正在运行 (已执行 ${totalTools} 个工具)...`;
         } else {
           if (failedTools > 0) {
@@ -816,9 +840,12 @@ export class ChatView extends ItemView {
         const consoleBody = consoleEl.createDiv('tui-console-body');
 
         // Render current active status line at top of console body
-        if (statusMsg) {
+        if (statusMsg || (currentTurnResponse.trim() && activeTasks.length > 0)) {
           const statusLine = consoleBody.createDiv('tui-status-line');
-          statusLine.innerHTML = `<span class="tui-spinner">⠋</span> <span class="tui-status-text">${statusMsg}</span>`;
+          const displayText = statusMsg 
+            ? statusMsg 
+            : `思考中: ${currentTurnResponse.trim().slice(-60)}${currentTurnResponse.trim().length > 60 ? '...' : ''}`;
+          statusLine.innerHTML = `<span class="tui-spinner">⠋</span> <span class="tui-status-text">${displayText}</span>`;
         }
 
         // Render all active/completed tasks
@@ -848,6 +875,18 @@ export class ChatView extends ItemView {
 
           const detailsBody = details.createDiv('tui-line-details');
 
+          // Render transition explanation / intermediate thoughts
+          if (task.explanation) {
+            const expDiv = detailsBody.createDiv('tui-explanation');
+            expDiv.setText(task.explanation);
+            expDiv.style.fontStyle = 'italic';
+            expDiv.style.color = 'var(--text-muted)';
+            expDiv.style.marginBottom = '8px';
+            expDiv.style.borderLeft = '2px solid var(--interactive-accent)';
+            expDiv.style.paddingLeft = '6px';
+            expDiv.style.fontSize = 'var(--font-smaller)';
+          }
+
           if (task.params) {
             const argsPre = detailsBody.createEl('pre');
             argsPre.createEl('code', { 
@@ -865,16 +904,38 @@ export class ChatView extends ItemView {
       }
     }
 
-    // 2. Render Streaming Answer Content
-    if (fullResponse) {
-      answerContainer.empty();
-      const answerEl = answerContainer.createDiv('final-answer');
-      answerEl.innerHTML = this.messageRenderer.render(fullResponse);
-    } else {
-      answerContainer.empty();
-    }
+    // 2. Render Streaming Answer Content (Throttled for performance)
+    const now = Date.now();
+    const throttleInterval = 150; // ms rendering throttle to avoid UI lag
 
-    this.scrollToBottom();
+    const performRenderText = () => {
+      if (!answerContainer) return;
+      if (fullResponse) {
+        answerContainer.empty();
+        const answerEl = answerContainer.createDiv('final-answer');
+        answerEl.innerHTML = this.messageRenderer.render(fullResponse);
+      } else {
+        answerContainer.empty();
+      }
+      this.scrollToBottom();
+    };
+
+    if (force || shouldUpdateConsole || (now - this.lastRenderTime > throttleInterval)) {
+      if (this.renderTimeout) {
+        clearTimeout(this.renderTimeout);
+        this.renderTimeout = null;
+      }
+      performRenderText();
+      this.lastRenderTime = now;
+    } else {
+      if (!this.renderTimeout) {
+        this.renderTimeout = setTimeout(() => {
+          performRenderText();
+          this.lastRenderTime = Date.now();
+          this.renderTimeout = null;
+        }, throttleInterval);
+      }
+    }
   }
 
   async onClose(): Promise<void> {
