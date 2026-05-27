@@ -879,13 +879,19 @@ export class BaseAgent {
    */
   private parseBlockToolCalls(text: string): ToolCall[] {
     const toolCalls: ToolCall[] = [];
-    // Match obsidian:edit_note or obsidian:create_note block syntax
-    const blockRegex = /```(obsidian:edit_note|obsidian:create_note)\s*([^\n]*)\n([\s\S]*?)```/g;
+    // Match obsidian:edit_note, obsidian:editnote, obsidian:create_note, or obsidian:createnote block syntax
+    const blockRegex = /```(obsidian:edit_note|obsidian:editnote|obsidian:create_note|obsidian:createnote)\s*([^\n]*)\n([\s\S]*?)```/g;
     
     let match;
     let index = 1;
     while ((match = blockRegex.exec(text)) !== null) {
       const [_, skillName, attributesStr, bodyContent] = match;
+      
+      // Map to official registered skill names if underscores are omitted
+      let officialName = skillName;
+      if (officialName === 'obsidian:editnote') officialName = 'obsidian:edit_note';
+      else if (officialName === 'obsidian:createnote') officialName = 'obsidian:create_note';
+      
       const params: Record<string, any> = { content: bodyContent.trim() };
       
       // Parse attributes in the header, e.g. path="Research/KTO.md" heading="KTO"
@@ -902,7 +908,7 @@ export class BaseAgent {
       
       toolCalls.push({
         id: `block_call_${Date.now()}_${index++}`,
-        name: skillName,
+        name: officialName,
         arguments: params
       });
     }

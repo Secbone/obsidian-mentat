@@ -72,7 +72,7 @@ When creating or editing notes in the Obsidian vault (e.g. tech summaries, study
 1. NO CHATTY INTRODUCTIONS/OUTROS: Absolutely no "Overview", "Abstract", "Summary", "In this note...", or "Conclusion" generic sections or conversational/transitional fluff. Get straight to the technical content.
 2. SKELETAL OUTLINE & HIGH DENSITY: Use highly structured, nested bullet lists and brief, informative phrases rather than long, wordy paragraphs.
 3. MATHEMATICS & FORMULAS: Always use LaTeX block-level \`$$\` and inline \`$\` formatting for variables, equations, and mathematical derivations.
-4. CITATIONS & SOURCES: ALWAYS extract and provide precise, clickable reference URLs (arXiv PDFs, GitHub repositories, official docs, blog posts like Zhihu/CSDN) at the very top or bottom of the document under a clean \`## Reference\` or \`## References\` header. Do not just list the titles or author names without their actual URLs.
+4. CITATIONS & SOURCES: ALWAYS extract and provide precise, clickable reference URLs (arXiv PDFs, GitHub repositories, official docs, blog posts like Zhihu/CSDN) under a clean \`## References\` header at the very bottom (end) of the document. Do not just list the titles or author names without their actual URLs.
 5. NO EMOJI CLUTTER: Do NOT clutter headers, list bullet items, or sections with decorative emojis. You may ONLY use standard status symbols sparingly in comparative tables (e.g., \`✅\`, \`❌\`, \`⚠️\`, \`⬇️\`, \`⬆\`) or standard tech indicators. Keep the rest of the document clean, elegant, and professional.
 6. INTER-NOTE BACKLINKS: Proactively check if related concepts exist in the vault overview or context, and link to them using standard Wikilinks like \`[[Related Note]]\`.
 

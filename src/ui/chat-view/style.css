@@ -502,3 +502,65 @@
   padding-top: 10px;
   border-top: 1px dashed var(--background-modifier-border);
 }
+
+/* ===== CHRONOLOGICAL TIMELINE & UX ENHANCEMENTS ===== */
+.tui-explanation {
+  font-style: normal;
+  color: var(--text-normal);
+  margin: 6px 0 10px 4px;
+  border-left: 3px solid var(--interactive-accent);
+  padding: 4px 0 4px 10px;
+  font-size: 12.5px;
+  font-family: var(--font-interface);
+  line-height: 1.5;
+}
+
+.tui-explanation p {
+  margin: 0 0 6px 0;
+}
+
+.tui-explanation p:last-child {
+  margin-bottom: 0;
+}
+
+.tui-truncation-btn {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--interactive-accent);
+  cursor: pointer;
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--interactive-accent);
+  transition: color 0.15s ease, border-color 0.15s ease;
+  user-select: none;
+}
+
+.tui-truncation-btn:hover {
+  color: var(--text-accent-hover);
+  border-bottom-color: var(--text-accent-hover);
+}
+
+.chat-warning-callout {
+  background-color: var(--background-modifier-warning);
+  border-left: 4px solid var(--text-warning);
+  padding: 12px;
+  border-radius: 6px;
+  margin: 10px 0 14px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.chat-warning-callout-header {
+  font-weight: 600;
+  color: var(--text-warning);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.chat-warning-callout-header svg {
+  width: 16px;
+  height: 16px;
+}

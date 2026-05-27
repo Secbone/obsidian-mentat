@@ -46,6 +46,10 @@ export class ChatView extends ItemView {
   private currentStreamingElement: HTMLElement | null = null;
   private lastRenderedStatus: string = '';
   private lastRenderedTasksJson: string = '';
+  private lastRenderedTurnResponse: string = '';
+  private expandedTaskOutputs = new Set<string>();
+  private lastExecutedToolName: string = '';
+  private lastExecutedToolStatus: 'success' | 'error' | 'pending' = 'pending';
   private lastRenderTime: number = 0;
   private renderTimeout: any = null;
 
@@ -341,6 +345,10 @@ export class ChatView extends ItemView {
             this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse);
           }
         } else if (event.type === 'skill_call') {
+          const shortName = event.name.split(':').pop() || event.name;
+          this.lastExecutedToolName = shortName;
+          this.lastExecutedToolStatus = 'pending';
+
           activeTasks.push({
             id: event.name + Date.now(),
             name: event.name,
@@ -349,9 +357,14 @@ export class ChatView extends ItemView {
             explanation: currentTurnResponse.trim() // Capture intermediate explanation
           });
           currentTurnResponse = ''; // Reset for next turn
-          currentStatus = `执行工具: ${event.name.split(':').pop() || event.name}`;
+          currentStatus = `执行工具: ${shortName}`;
           this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true); // force update console immediately
         } else if (event.type === 'skill_success') {
+          const shortName = event.name.split(':').pop() || event.name;
+          if (shortName === this.lastExecutedToolName) {
+            this.lastExecutedToolStatus = 'success';
+          }
+
           const task = activeTasks.find(t => t.name === event.name && t.status === 'executing');
           if (task) {
             task.status = 'success';
@@ -360,6 +373,11 @@ export class ChatView extends ItemView {
           currentStatus = '';
           this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
         } else if (event.type === 'skill_error') {
+          const shortName = event.name.split(':').pop() || event.name;
+          if (shortName === this.lastExecutedToolName) {
+            this.lastExecutedToolStatus = 'error';
+          }
+
           const task = activeTasks.find(t => t.name === event.name && t.status === 'executing');
           if (task) {
             task.status = 'error';
@@ -368,6 +386,10 @@ export class ChatView extends ItemView {
           currentStatus = '';
           this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
         } else if (event.type === 'confirm_request') {
+          const shortName = event.skillName.split(':').pop() || event.skillName;
+          this.lastExecutedToolName = shortName;
+          this.lastExecutedToolStatus = 'pending';
+
           // Native user interactive confirmations (Human-in-the-loop)
           const task: ActiveTask = {
             id: event.skillName + Date.now(),
@@ -379,7 +401,7 @@ export class ChatView extends ItemView {
           currentTurnResponse = ''; // Reset for next turn
           activeTasks.push(task);
           
-          currentStatus = `等待授权: ${event.skillName.split(':').pop() || event.skillName}`;
+          currentStatus = `等待授权: ${shortName}`;
           this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
 
           // Wait for Obsidian modal feedback asynchronously
@@ -396,9 +418,11 @@ export class ChatView extends ItemView {
           // Feed approved response back to generator
           if (approved) {
             task.status = 'executing';
+            this.lastExecutedToolStatus = 'pending';
           } else {
             task.status = 'error';
             task.result = 'User cancelled execution';
+            this.lastExecutedToolStatus = 'error';
           }
 
           this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
@@ -433,9 +457,8 @@ export class ChatView extends ItemView {
       const lastUserIndex = result.messages.map(m => m.role).lastIndexOf('user');
       const currentTurnMessages = lastUserIndex !== -1 ? result.messages.slice(lastUserIndex + 1) : result.messages;
 
-      // Consolidate and render the permanent message
-      const consolidatedMsg = this.consolidateAssistantMessages(currentTurnMessages);
-      this.renderAssistantMessage(consolidatedMsg, result.messages, this.messagesContainer);
+      // Render the permanent chronological timeline message
+      this.renderAssistantMessage(currentTurnMessages, this.messagesContainer);
 
     } catch (error) {
       console.error('Chat error:', error);
@@ -606,43 +629,15 @@ export class ChatView extends ItemView {
     });
   }
 
-  /**
-   * Consolidates a sequence of assistant and tool messages in a turn into a single unified assistant message representation.
-   */
-  private consolidateAssistantMessages(
-    turnMessages: ChatMessage[]
-  ): ChatMessage {
-    const assistantMsgs = turnMessages.filter(m => m.role === 'assistant');
-    const toolCalls = assistantMsgs.reduce<ToolCall[]>((acc, m) => {
-      if (m.tool_calls) {
-        acc.push(...m.tool_calls);
-      }
-      return acc;
-    }, []);
-
-    const contents = assistantMsgs
-      .map(m => m.content?.trim())
-      .filter(Boolean);
-    const consolidatedContent = contents.join('\n\n');
-
-    return {
-      role: 'assistant',
-      content: consolidatedContent,
-      timestamp: assistantMsgs[assistantMsgs.length - 1]?.timestamp || Date.now(),
-      tool_calls: toolCalls.length > 0 ? toolCalls : undefined
-    };
-  }
-
   private async loadHistory(): Promise<void> {
     const messages = await this.chatManager.getHistory();
 
     // Group consecutive assistant/tool turns after each user message
-    const renderedMessages: ChatMessage[] = [];
     let i = 0;
     while (i < messages.length) {
       const msg = messages[i];
       if (msg.role === 'user') {
-        renderedMessages.push(msg);
+        this.addUserMessage(msg.content);
         i++;
       } else if (msg.role === 'assistant') {
         // Collect all assistant and tool messages until the next user message
@@ -651,18 +646,10 @@ export class ChatView extends ItemView {
           group.push(messages[i]);
           i++;
         }
-        renderedMessages.push(this.consolidateAssistantMessages(group));
+        this.renderAssistantMessage(group, this.messagesContainer);
       } else {
         // Skip system or other message types
         i++;
-      }
-    }
-
-    for (const msg of renderedMessages) {
-      if (msg.role === 'user') {
-        this.addUserMessage(msg.content);
-      } else if (msg.role === 'assistant') {
-        this.renderAssistantMessage(msg, messages, this.messagesContainer);
       }
     }
 
@@ -673,8 +660,7 @@ export class ChatView extends ItemView {
    * Renders an assistant message bubble with its tool executions bundled in a collapsible TUI terminal console block
    */
   private renderAssistantMessage(
-    msg: ChatMessage,
-    allMessages: ChatMessage[],
+    turnMessages: ChatMessage[],
     container: HTMLElement
   ): HTMLElement {
     const wrapper = container.createDiv('chat-message chat-message-assistant');
@@ -689,22 +675,40 @@ export class ChatView extends ItemView {
 
     const contentEl = msgWrapper.createDiv('message-content');
 
+    const assistantMsgs = turnMessages.filter(m => m.role === 'assistant');
+    const lastAssistantMsg = assistantMsgs[assistantMsgs.length - 1];
+
+    if (assistantMsgs.length === 0) return wrapper;
+
+    const allToolCalls = assistantMsgs.reduce<ToolCall[]>((acc, m) => {
+      if (m.tool_calls) {
+        acc.push(...m.tool_calls);
+      }
+      return acc;
+    }, []);
+
+    // Check if interrupted (limit reached)
+    const endedWithToolCalls = lastAssistantMsg && lastAssistantMsg.tool_calls && lastAssistantMsg.tool_calls.length > 0;
+    const hasUnrespondedToolCall = allToolCalls.some(tc => 
+      !turnMessages.some(m => m.role === 'tool' && m.tool_call_id === tc.id)
+    );
+    const isInterrupted = endedWithToolCalls || hasUnrespondedToolCall;
+
     // 1. Build TUI Console for Tool Calls if any
-    const toolCalls = msg.tool_calls || [];
-    if (toolCalls.length > 0) {
+    if (allToolCalls.length > 0) {
       const consoleEl = contentEl.createEl('details', { cls: 'tui-console' });
       
       // Render Summary Header
       const consoleSummary = consoleEl.createEl('summary', { cls: 'tui-console-summary' });
       const summaryTextEl = consoleSummary.createSpan({ cls: 'tui-console-status' });
       
-      const totalTools = toolCalls.length;
+      const totalTools = allToolCalls.length;
       
       // Determine if any of the tool calls had an error
       let hasError = false;
       const responses: { isSuccess: boolean; responseMsg?: ChatMessage }[] = [];
-      for (const tc of toolCalls) {
-        const responseMsg = allMessages.find(
+      for (const tc of allToolCalls) {
+        const responseMsg = turnMessages.find(
           m => m.role === 'tool' && m.tool_call_id === tc.id
         );
         const isSuccess = responseMsg && !responseMsg.content.startsWith('Error:');
@@ -715,7 +719,9 @@ export class ChatView extends ItemView {
       }
       
       let summaryText = '';
-      if (hasError) {
+      if (isInterrupted) {
+        summaryText = `⚠️ 运行中断 (已执行 ${totalTools} 个工具)...`;
+      } else if (hasError) {
         summaryText = `✗ 任务完成，有工具调用错误 (共调用 ${totalTools} 个工具)`;
       } else {
         summaryText = `✔ 任务完成 (共调用 ${totalTools} 个工具)`;
@@ -724,53 +730,102 @@ export class ChatView extends ItemView {
       
       const consoleBody = consoleEl.createDiv('tui-console-body');
 
-      for (let index = 0; index < toolCalls.length; index++) {
-        const tc = toolCalls[index];
-        const { isSuccess, responseMsg } = responses[index];
+      // Now, render the timeline chronologically!
+      for (let index = 0; index < turnMessages.length; index++) {
+        const turnMsg = turnMessages[index];
         
-        // Resolve display name for meta-tools (spec/invoke) to match execution style
-        let displayName = tc.name;
-        if (tc.name === 'spec' || tc.name === 'invoke') {
-          try {
-            const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
-            const skillName = args.skill_name;
-            if (skillName) {
-              displayName = `${tc.name}:${skillName}`;
+        if (turnMsg.role === 'assistant') {
+          const isLastMsg = turnMsg === lastAssistantMsg;
+          const showContentAsExplanation = turnMsg.content && (isInterrupted || !isLastMsg);
+          
+          if (showContentAsExplanation) {
+            const cleanExplanation = this.stripBlockToolCalls(turnMsg.content);
+            if (cleanExplanation.trim()) {
+              const expDiv = consoleBody.createDiv('tui-explanation');
+              expDiv.innerHTML = this.messageRenderer.render(cleanExplanation);
             }
-          } catch (e) {
-            // Keep original if parsing fails
           }
-        }
-        const shortName = displayName.split(':').pop() || displayName;
-
-        // Create collapsible details block
-        const details = consoleBody.createEl('details', { cls: 'tui-line-item' });
-        const summary = details.createEl('summary', { cls: 'tui-line-summary' });
-        
-        // Status indicator icon
-        const icon = isSuccess ? '✔' : (responseMsg ? '✗' : '⠋');
-        const statusClass = isSuccess ? 'success' : (responseMsg ? 'error' : 'pending');
-        
-        summary.innerHTML = `<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`;
-
-        // Content / Logs
-        const detailsBody = details.createDiv('tui-line-details');
-        const argsPre = detailsBody.createEl('pre');
-        argsPre.createEl('code', { 
-          text: `Parameters: ${typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments, null, 2)}` 
-        });
-
-        if (responseMsg) {
-          const resPre = detailsBody.createEl('pre');
-          resPre.createEl('code', { text: `Response: ${responseMsg.content}` });
+          
+          if (turnMsg.tool_calls) {
+            for (const tc of turnMsg.tool_calls) {
+              const responseMsg = turnMessages.find(
+                m => m.role === 'tool' && m.tool_call_id === tc.id
+              );
+              const isSuccess = responseMsg && !responseMsg.content.startsWith('Error:');
+              
+              let displayName = tc.name;
+              if (tc.name === 'spec' || tc.name === 'invoke') {
+                try {
+                  const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+                  const skillName = args.skill_name;
+                  if (skillName) {
+                    displayName = `${tc.name}:${skillName}`;
+                  }
+                } catch (e) {
+                  // Keep original if parsing fails
+                }
+              }
+              const shortName = displayName.split(':').pop() || displayName;
+              
+              // Create collapsible details block
+              const details = consoleBody.createEl('details', { cls: 'tui-line-item' });
+              const summary = details.createEl('summary', { cls: 'tui-line-summary' });
+              
+              // Status indicator icon
+              const icon = isSuccess ? '✔' : (responseMsg ? '✗' : '⠋');
+              const statusClass = isSuccess ? 'success' : (responseMsg ? 'error' : 'pending');
+              
+              summary.innerHTML = `<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`;
+              
+              const detailsBody = details.createDiv('tui-line-details');
+              
+              if (tc.arguments) {
+                this.renderTruncatedText(
+                  detailsBody,
+                  'Parameters',
+                  tc.arguments,
+                  `${tc.id}-params`
+                );
+              }
+              
+              if (responseMsg) {
+                this.renderTruncatedText(
+                  detailsBody,
+                  'Response',
+                  responseMsg.content,
+                  `${tc.id}-result`
+                );
+              }
+            }
+          }
         }
       }
     }
 
-    // 2. Render Final Answer
-    if (msg.content) {
-      const answerEl = contentEl.createDiv('final-answer');
-      answerEl.innerHTML = this.messageRenderer.render(msg.content);
+    // 2. Render Final Answer / Warning Callouts
+    if (isInterrupted) {
+      // Render warning card
+      const warningDiv = contentEl.createDiv('chat-warning-callout');
+      const warningHeader = warningDiv.createDiv('chat-warning-callout-header');
+      warningHeader.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        已达到最大运行迭代次数限制 (20 轮)
+      `;
+      const warningText = warningDiv.createDiv();
+      warningText.setText('智能体已被系统强制挂起，以防陷入无限循环。如果任务还未完成，您可以发送指令“继续”让其继续执行。');
+      
+      // Render last partial text if any
+      const cleanAnswer = this.stripBlockToolCalls(lastAssistantMsg.content);
+      if (cleanAnswer.trim()) {
+        const answerEl = contentEl.createDiv('final-answer');
+        answerEl.innerHTML = this.messageRenderer.render(cleanAnswer);
+      }
+    } else {
+      const cleanAnswer = this.stripBlockToolCalls(lastAssistantMsg.content);
+      if (cleanAnswer.trim()) {
+        const answerEl = contentEl.createDiv('final-answer');
+        answerEl.innerHTML = this.messageRenderer.render(cleanAnswer);
+      }
     }
 
     // Add copy buttons and setup
@@ -779,6 +834,79 @@ export class ChatView extends ItemView {
     this.setupMessageCopyButtons(msgWrapper);
 
     return wrapper;
+  }
+
+  /**
+   * Strips large fenced markdown block tool calls (MBTC) from text explanations.
+   */
+  private stripBlockToolCalls(text: string): string {
+    if (!text) return '';
+    return text.replace(/```(?:obsidian:edit_note|obsidian:editnote|obsidian:create_note|obsidian:createnote)\s*[^\n]*\n[\s\S]*?```/g, '').trim();
+  }
+
+  /**
+   * Helper to render a code block with smart click-to-expand truncation
+   */
+  private renderTruncatedText(
+    container: HTMLElement,
+    label: string,
+    value: any,
+    typeKey: string,
+    onToggle?: () => void
+  ): void {
+    const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    const threshold = 500;
+
+    const pre = container.createEl('pre');
+
+    if (text.length <= threshold) {
+      pre.createEl('code', { text: `${label}: ${text}` });
+      return;
+    }
+
+    const code = pre.createEl('code');
+    const isExpanded = this.expandedTaskOutputs.has(typeKey);
+
+    if (isExpanded) {
+      code.setText(`${label}: ${text}`);
+
+      const toggleBtn = pre.createEl('a', {
+        cls: 'tui-truncation-btn',
+        text: ' [Collapse Content ▴]'
+      });
+
+      toggleBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.expandedTaskOutputs.delete(typeKey);
+        if (onToggle) {
+          onToggle();
+        } else {
+          // Re-render locally if no global stream redraw is provided
+          pre.remove();
+          this.renderTruncatedText(container, label, value, typeKey);
+        }
+      });
+    } else {
+      const truncated = text.slice(0, 400);
+      code.setText(`${label}: ${truncated}...`);
+
+      const toggleBtn = pre.createEl('a', {
+        cls: 'tui-truncation-btn',
+        text: ` [Show Full Content (${text.length} chars) ▾]`
+      });
+
+      toggleBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.expandedTaskOutputs.add(typeKey);
+        if (onToggle) {
+          onToggle();
+        } else {
+          // Re-render locally if no global stream redraw is provided
+          pre.remove();
+          this.renderTruncatedText(container, label, value, typeKey);
+        }
+      });
+    }
   }
 
   /**
@@ -799,11 +927,16 @@ export class ChatView extends ItemView {
 
     // Check if we need to update the console (only when statusMsg, activeTasks, or currentTurnResponse change)
     const tasksJson = JSON.stringify(activeTasks);
-    const shouldUpdateConsole = force || statusMsg !== this.lastRenderedStatus || tasksJson !== this.lastRenderedTasksJson;
+    const cleanTurnResponse = currentTurnResponse.trim();
+    const shouldUpdateConsole = force || 
+      statusMsg !== this.lastRenderedStatus || 
+      tasksJson !== this.lastRenderedTasksJson ||
+      (cleanTurnResponse !== this.lastRenderedTurnResponse && activeTasks.length > 0);
 
     if (shouldUpdateConsole) {
       this.lastRenderedStatus = statusMsg;
       this.lastRenderedTasksJson = tasksJson;
+      this.lastRenderedTurnResponse = cleanTurnResponse;
 
       // Check if details console was previously open
       const existingConsole = consoleContainer.querySelector('.tui-console') as HTMLDetailsElement | null;
@@ -811,7 +944,7 @@ export class ChatView extends ItemView {
 
       consoleContainer.empty();
 
-      if (statusMsg || activeTasks.length > 0 || currentTurnResponse.trim()) {
+      if (statusMsg || activeTasks.length > 0 || cleanTurnResponse) {
         const consoleEl = consoleContainer.createEl('details', { cls: 'tui-console' });
         if (wasConsoleOpen) {
           consoleEl.setAttribute('open', '');
@@ -826,8 +959,32 @@ export class ChatView extends ItemView {
         const failedTools = activeTasks.filter(t => t.status === 'error').length;
 
         let summaryText = '';
-        if (runningTools > 0 || statusMsg || (currentTurnResponse.trim() && activeTasks.length > 0)) {
+        const executingTask = activeTasks.find(t => t.status === 'executing');
+        const confirmTask = activeTasks.find(t => t.status === 'confirm');
+
+        if (confirmTask) {
+          const shortName = confirmTask.name.split(':').pop() || confirmTask.name;
+          summaryText = `⚠️ 等待授权 ⏳ : ${shortName}...`;
+        } else if (executingTask) {
+          const shortName = executingTask.name.split(':').pop() || executingTask.name;
+          summaryText = `⠋ 正在运行 ⚙️ : 执行工具 ${shortName}...`;
+        } else if (statusMsg) {
+          summaryText = `⠋ 思考中 ↗ : ${statusMsg}`;
+        } else if (cleanTurnResponse) {
+          const cleanText = cleanTurnResponse.replace(/[\r\n]+/g, ' ');
+          const stripped = this.stripBlockToolCalls(cleanText);
+          const truncated = stripped.length > 30 ? stripped.slice(-30) + '...' : stripped;
+          summaryText = `⠋ 思考中 ↘ : ${truncated}`;
+        } else if (runningTools > 0) {
           summaryText = `⠋ 正在运行 (已执行 ${totalTools} 个工具)...`;
+        } else if (this.lastExecutedToolName) {
+          if (this.lastExecutedToolStatus === 'success') {
+            summaryText = `✔ 已完成 ⚙️ : 执行工具 ${this.lastExecutedToolName} (共调用 ${totalTools} 个工具)`;
+          } else if (this.lastExecutedToolStatus === 'error') {
+            summaryText = `✗ 失败 ⚙️ : 执行工具 ${this.lastExecutedToolName} (共调用 ${totalTools} 个工具)`;
+          } else {
+            summaryText = `✔ 任务完成 (共调用 ${totalTools} 个工具)`;
+          }
         } else {
           if (failedTools > 0) {
             summaryText = `✗ 任务完成，有工具调用错误 (共调用 ${totalTools} 个工具)`;
@@ -839,17 +996,17 @@ export class ChatView extends ItemView {
 
         const consoleBody = consoleEl.createDiv('tui-console-body');
 
-        // Render current active status line at top of console body
-        if (statusMsg || (currentTurnResponse.trim() && activeTasks.length > 0)) {
-          const statusLine = consoleBody.createDiv('tui-status-line');
-          const displayText = statusMsg 
-            ? statusMsg 
-            : `思考中: ${currentTurnResponse.trim().slice(-60)}${currentTurnResponse.trim().length > 60 ? '...' : ''}`;
-          statusLine.innerHTML = `<span class="tui-spinner">⠋</span> <span class="tui-status-text">${displayText}</span>`;
-        }
-
-        // Render all active/completed tasks
+        // Render chronological timeline of tasks and intermediate thoughts
         for (const task of activeTasks) {
+          // Render explanation chronologically outside the tool block
+          if (task.explanation) {
+            const cleanExplanation = this.stripBlockToolCalls(task.explanation);
+            if (cleanExplanation.trim()) {
+              const expDiv = consoleBody.createDiv('tui-explanation');
+              expDiv.innerHTML = this.messageRenderer.render(cleanExplanation);
+            }
+          }
+
           const details = consoleBody.createEl('details', { cls: 'tui-line-item' });
           const summary = details.createEl('summary', { cls: 'tui-line-summary' });
 
@@ -875,31 +1032,32 @@ export class ChatView extends ItemView {
 
           const detailsBody = details.createDiv('tui-line-details');
 
-          // Render transition explanation / intermediate thoughts
-          if (task.explanation) {
-            const expDiv = detailsBody.createDiv('tui-explanation');
-            expDiv.setText(task.explanation);
-            expDiv.style.fontStyle = 'italic';
-            expDiv.style.color = 'var(--text-muted)';
-            expDiv.style.marginBottom = '8px';
-            expDiv.style.borderLeft = '2px solid var(--interactive-accent)';
-            expDiv.style.paddingLeft = '6px';
-            expDiv.style.fontSize = 'var(--font-smaller)';
-          }
-
           if (task.params) {
-            const argsPre = detailsBody.createEl('pre');
-            argsPre.createEl('code', { 
-              text: `Parameters: ${typeof task.params === 'string' ? task.params : JSON.stringify(task.params, null, 2)}` 
-            });
+            this.renderTruncatedText(
+              detailsBody,
+              'Parameters',
+              task.params,
+              `${task.id}-params`,
+              () => this.updateStreamingUI(statusMsg, activeTasks, fullResponse, currentTurnResponse, true)
+            );
           }
 
           if (task.result) {
-            const resPre = detailsBody.createEl('pre');
-            resPre.createEl('code', { 
-              text: `Response: ${typeof task.result === 'string' ? task.result : JSON.stringify(task.result, null, 2)}` 
-            });
+            this.renderTruncatedText(
+              detailsBody,
+              'Response',
+              task.result,
+              `${task.id}-result`,
+              () => this.updateStreamingUI(statusMsg, activeTasks, fullResponse, currentTurnResponse, true)
+            );
           }
+        }
+
+        // Render current active streaming explanation at the bottom of the console timeline
+        const cleanExplanationChunk = this.stripBlockToolCalls(cleanTurnResponse);
+        if (cleanExplanationChunk && activeTasks.length > 0 && !executingTask && !confirmTask) {
+          const expDiv = consoleBody.createDiv('tui-explanation');
+          expDiv.innerHTML = this.messageRenderer.render(cleanExplanationChunk) + '<span class="tui-spinner">⠋</span>';
         }
       }
     }
@@ -910,10 +1068,11 @@ export class ChatView extends ItemView {
 
     const performRenderText = () => {
       if (!answerContainer) return;
-      if (fullResponse) {
+      const cleanResponseText = this.stripBlockToolCalls(fullResponse);
+      if (cleanResponseText) {
         answerContainer.empty();
         const answerEl = answerContainer.createDiv('final-answer');
-        answerEl.innerHTML = this.messageRenderer.render(fullResponse);
+        answerEl.innerHTML = this.messageRenderer.render(cleanResponseText);
       } else {
         answerContainer.empty();
       }
