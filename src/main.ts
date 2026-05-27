@@ -17,7 +17,7 @@ export default class PersonalAgentPlugin extends Plugin {
   agentManager: AgentManager;
 
   async onload() {
-    console.log('Loading Personal Agent plugin');
+    console.log('Loading Mentat plugin');
 
     // Load settings
     await this.loadSettings();
@@ -49,18 +49,18 @@ export default class PersonalAgentPlugin extends Plugin {
     this.addSettingTab(new SettingsTab(this.app, this));
 
     // Add ribbon icon for quick access
-    this.addRibbonIcon('brain', 'Personal Agent', async () => {
+    this.addRibbonIcon('brain', 'Mentat', async () => {
       await this.activateChatView();
     });
 
     // Register commands
     this.registerCommands();
 
-    console.log('Personal Agent plugin loaded successfully');
+    console.log('Mentat plugin loaded successfully');
   }
 
   async onunload() {
-    console.log('Unloading Personal Agent plugin');
+    console.log('Unloading Mentat plugin');
 
     // Detach chat views
     this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
@@ -290,7 +290,7 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
         
         try {
           const content = await adapter.read(logPath);
-          const debugNotePath = 'Personal Agent Debug Log.md';
+          const debugNotePath = 'Mentat Debug Log.md';
           
           // Calculate 7-Day Performance & Failure Analytics
           const allLines = content.trim().split('\n');
@@ -328,7 +328,7 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
             .slice(0, 5);
 
           const lines = content.trim().split('\n').reverse().slice(0, 50); // Get latest 50 incidents
-          let markdownContent = `# Personal Agent Diagnostics & Debug Log\n\n`;
+          let markdownContent = `# Mentat Diagnostics & Debug Log\n\n`;
           
           // Render 7-Day Cross-Run Performance Analytics Card
           markdownContent += `## 📊 7天系统异常走势与工具故障分析 (7-Day Cross-Run Analytics)\n\n`;
@@ -390,7 +390,7 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
             await this.app.workspace.getLeaf().openFile(tFile as any);
             new Notice('Diagnostics Log opened successfully');
           } else {
-            new Notice('Log compiled. Please open "Personal Agent Debug Log.md" in your vault root.');
+            new Notice('Log compiled. Please open "Mentat Debug Log.md" in your vault root.');
           }
         } catch (err) {
           new Notice(`Failed to load diagnostics: ${err.message}`);

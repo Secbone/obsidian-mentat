@@ -17,7 +17,7 @@ export class SettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h1', { text: 'Personal Agent Settings' });
+    containerEl.createEl('h1', { text: 'Mentat Settings' });
 
     // Render tab bar
     const tabBar = containerEl.createDiv({ cls: 'setting-tab-bar' });
@@ -253,12 +253,12 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Configuration Folder')
-      .setDesc('Vault folder path where Personal Agent looks for the user-preferences.md file.')
+      .setDesc('Vault folder path where Mentat looks for the user-preferences.md file.')
       .addText(text => text
-        .setPlaceholder('Personal Agent/Config')
-        .setValue(this.plugin.settings.userConfigFolder || 'Personal Agent/Config')
+        .setPlaceholder('Mentat/Config')
+        .setValue(this.plugin.settings.userConfigFolder || 'Mentat/Config')
         .onChange(async (value) => {
-          this.plugin.settings.userConfigFolder = value.trim() || 'Personal Agent/Config';
+          this.plugin.settings.userConfigFolder = value.trim() || 'Mentat/Config';
           await this.plugin.saveSettings();
         }));
 
@@ -270,7 +270,7 @@ export class SettingsTab extends PluginSettingTab {
         .setCta()
         .onClick(async () => {
           try {
-            const folderPath = this.plugin.settings.userConfigFolder || 'Personal Agent/Config';
+            const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
             const preferencesPath = `${folderPath}/user-preferences.md`;
             const vault = this.plugin.app.vault;
 
@@ -291,7 +291,7 @@ export class SettingsTab extends PluginSettingTab {
             if (!(await vault.adapter.exists(preferencesPath))) {
               const defaultTemplate = `# User Prompt Preferences
 
-Write your custom style instructions and preferences here. This file is dynamically read by Personal Agent and injected directly into the AI system prompt to guide its behavior and output style.
+Write your custom style instructions and preferences here. This file is dynamically read by Mentat and injected directly into the AI system prompt to guide its behavior and output style.
 
 ## Instructions
 - These settings apply to all chat and research sessions.
@@ -328,7 +328,7 @@ Write your custom style instructions and preferences here. This file is dynamica
         .setCta()
         .onClick(async () => {
           try {
-            const folderPath = this.plugin.settings.userConfigFolder || 'Personal Agent/Config';
+            const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
             const mapPath = `${folderPath}/vault-map.md`;
             const vault = this.plugin.app.vault;
 
@@ -374,7 +374,7 @@ Write your custom style instructions and preferences here. This file is dynamica
 This document defines the high-level knowledge organization and directory roles of my Obsidian vault.
 
 > [!note]
-> Write your folder descriptions, naming rules, and category workflows below. Personal Agent dynamically reads this file to decide where to store new files, how concepts relate, and which directories to query first.
+> Write your folder descriptions, naming rules, and category workflows below. Mentat dynamically reads this file to decide where to store new files, how concepts relate, and which directories to query first.
 
 ## 📁 Core Folder Guidelines
 ${folderGuidelines}
@@ -569,7 +569,7 @@ ${folderGuidelines}
   displaySkillsManagerSection(containerEl: HTMLElement): void {
     containerEl.createEl('h2', { text: 'Skills & Tools Manager' });
     containerEl.createEl('p', {
-      text: 'Manage and configure individual capabilities and tools recognized by your Personal Agent.',
+      text: 'Manage and configure individual capabilities and tools recognized by Mentat.',
       cls: 'setting-item-description'
     });
 
@@ -765,10 +765,10 @@ ${folderGuidelines}
       .setName('Diagnostics Export Folder')
       .setDesc('Folder where session diagnostics reports are exported (relative to vault root)')
       .addText(text => text
-        .setPlaceholder('Personal Agent/Diagnostics')
-        .setValue(this.plugin.settings.diagnosticsFolder || 'Personal Agent/Diagnostics')
+        .setPlaceholder('Mentat/Diagnostics')
+        .setValue(this.plugin.settings.diagnosticsFolder || 'Mentat/Diagnostics')
         .onChange(async (value) => {
-          this.plugin.settings.diagnosticsFolder = value.trim() || 'Personal Agent/Diagnostics';
+          this.plugin.settings.diagnosticsFolder = value.trim() || 'Mentat/Diagnostics';
           await this.plugin.saveSettings();
         }));
   }

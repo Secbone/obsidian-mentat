@@ -193,8 +193,8 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   reviewIntervalDays: 7,
   enableSpacedRepetition: true,
   skillConfigurations: {},
-  diagnosticsFolder: 'Personal Agent/Diagnostics',
+  diagnosticsFolder: 'Mentat/Diagnostics',
   userSystemPromptPreferences: '',
-  userConfigFolder: 'Personal Agent/Config',
+  userConfigFolder: 'Mentat/Config',
   draftReviewModeEnabled: true
 };

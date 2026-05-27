@@ -53,12 +53,12 @@ export class DiagnosticsExporter {
       const fileTimestamp = new Date(endTime).toISOString().replace(/:/g, '-').split('.')[0];
       const filename = `Session_Diagnostics_${sessionId}_${fileTimestamp}.md`;
 
-      const folderPath = settings.diagnosticsFolder?.trim() || 'Personal Agent/Diagnostics';
+      const folderPath = settings.diagnosticsFolder?.trim() || 'Mentat/Diagnostics';
 
       let markdownContent = `# 🛠️ AI 会话诊断与分析报告\n\n`;
       
       markdownContent += `> [!NOTE]\n`;
-      markdownContent += `> 此诊断报告由 Personal Agent 一键自动生成。您可将此文件直接投喂给更大、更高级的模型（如 Claude 3.5 Sonnet / GPT-4o），帮助其精准诊断、反思和优化当前智能体的运行逻辑及工具调用参数。\n\n`;
+      markdownContent += `> 此诊断报告由 Mentat 一键自动生成。您可将此文件直接投喂给更大、更高级的模型（如 Claude 3.5 Sonnet / GPT-4o），帮助其精准诊断、反思和优化当前智能体的运行逻辑及工具调用参数。\n\n`;
 
       // 📌 Metadata section
       markdownContent += `## 📌 元数据与环境信息\n\n`;

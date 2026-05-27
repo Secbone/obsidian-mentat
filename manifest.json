@@ -1,11 +1,11 @@
 {
-  "id": "personal-agent",
-  "name": "Personal Agent",
+  "id": "obsidian-mentat",
+  "name": "Mentat",
   "version": "0.1.0",
   "minAppVersion": "1.0.0",
-  "description": "AI-powered personal assistant for Obsidian that helps organize notes, create knowledge links, and build your personal knowledge base",
-  "author": "Personal Agent Team",
-  "authorUrl": "https://github.com/yourusername/obsidian-personal-agent",
-  "fundingUrl": "https://github.com/sponsors/yourusername",
+  "description": "Your local agentic cognitive partner for Obsidian, managing structured knowledge, local command operations, and deep mathematical reasoning.",
+  "author": "Mentat Team",
+  "authorUrl": "https://github.com/Secbone/obsidian-mentat",
+  "fundingUrl": "https://github.com/sponsors/Secbone",
   "isDesktopOnly": false
 }

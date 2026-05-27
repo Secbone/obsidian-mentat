@@ -366,7 +366,7 @@ ${vaultMap}`;
    */
   async getVaultMap(): Promise<string> {
     try {
-      const configFolder = this.plugin.settings.userConfigFolder || 'Personal Agent/Config';
+      const configFolder = this.plugin.settings.userConfigFolder || 'Mentat/Config';
       const mapPath = `${configFolder}/vault-map.md`;
       const vault = this.plugin.app.vault;
 
@@ -547,7 +547,7 @@ ${vaultMap}`;
    */
   async getUserPreferences(): Promise<string> {
     try {
-      const configFolder = this.plugin.settings.userConfigFolder || 'Personal Agent/Config';
+      const configFolder = this.plugin.settings.userConfigFolder || 'Mentat/Config';
       const preferencesPath = `${configFolder}/user-preferences.md`;
       const vault = this.plugin.app.vault;
 
@@ -572,7 +572,7 @@ ${vaultMap}`;
       // 3. Create the template file
       const defaultTemplate = `# User Prompt Preferences
 
-Write your custom style instructions and preferences here. This file is dynamically read by Personal Agent and injected directly into the AI system prompt to guide its behavior and output style.
+Write your custom style instructions and preferences here. This file is dynamically read by Mentat and injected directly into the AI system prompt to guide its behavior and output style.
 
 ## Instructions
 - These settings apply to all chat and research sessions.

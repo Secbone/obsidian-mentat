@@ -1,7 +1,7 @@
 {
-  "name": "personal-agent",
+  "name": "obsidian-mentat",
   "version": "0.1.0",
-  "description": "AI-powered personal assistant for Obsidian",
+  "description": "Your local agentic cognitive partner for Obsidian",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -17,9 +17,11 @@
     "plugin",
     "AI",
     "knowledge",
-    "notes"
+    "notes",
+    "mentat",
+    "agentic"
   ],
-  "author": "Personal Agent Team",
+  "author": "Mentat Team",
   "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
