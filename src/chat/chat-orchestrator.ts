@@ -457,6 +457,119 @@ ${folderGuidelines}
   }
 
   /**
+   * Premium AI-Assisted Vault-Map Generation
+   * Scans vault directories, collects note counts, popular tags, and recent file names,
+   * then feeds this structural context to the active LLM to generate highly personalized guidelines.
+   */
+  async aiRebuildVaultMap(): Promise<void> {
+    const configFolder = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+    const mapPath = `${configFolder}/vault-map.md`;
+    const vault = this.plugin.app.vault;
+
+    // 1. Gather all files in the vault to analyze folder structures, file names, and tag frequencies
+    const allFiles = vault.getMarkdownFiles();
+    const folderStats = new Map<string, { noteCount: number; files: { name: string; mtime: number }[]; tags: Map<string, number> }>();
+
+    allFiles.forEach(file => {
+      if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
+        const folder = file.parent.path;
+        if (!folderStats.has(folder)) {
+          folderStats.set(folder, {
+            noteCount: 0,
+            files: [],
+            tags: new Map<string, number>()
+          });
+        }
+
+        const stat = folderStats.get(folder)!;
+        stat.noteCount += 1;
+        stat.files.push({ name: file.name, mtime: file.stat.mtime });
+
+        // Extract tags for tag frequency mapping
+        const tags = this.getFileTags(file);
+        tags.forEach(tag => {
+          stat.tags.set(tag, (stat.tags.get(tag) || 0) + 1);
+        });
+      }
+    });
+
+    // Process the stats to compile structured metadata for the LLM
+    const analyzedFolders: any[] = [];
+    folderStats.forEach((stat, folder) => {
+      // Sort files by modification time descending and pick top 5
+      const recentFiles = stat.files
+        .sort((a, b) => b.mtime - a.mtime)
+        .slice(0, 5)
+        .map(f => f.name);
+
+      // Sort tags by frequency descending and pick top 3
+      const topTags = Array.from(stat.tags.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([tag]) => tag);
+
+      analyzedFolders.push({
+        folder: `${folder}/`,
+        totalNoteCount: stat.noteCount,
+        recentSampleFiles: recentFiles,
+        topFrequentTags: topTags
+      });
+    });
+
+    // 2. Fetch the active AI provider
+    const provider = await this.plugin.aiRouter.getProvider(TaskType.CHAT);
+    if (!provider) {
+      throw new Error('未配置或未启用任何 AI 服务商，请先在设置中配置 API Key。 (No active AI provider configured)');
+    }
+
+    // 3. Format prompting with actual vault statistics
+    const vaultDataStr = JSON.stringify(analyzedFolders, null, 2);
+    const prompt = `You are a professional knowledge management expert specializing in Obsidian vaults.
+Analyze the following folder structure, sample filenames, and tag distributions in the user's vault to draft a customized, highly comprehensive vault-map guidelines file.
+
+Vault Structure Data:
+${vaultDataStr}
+
+Guidelines for generating the "vault-map.md" file:
+1. Provide a beautiful title: "# 🗺️ Vault Knowledge Structure Map".
+2. Create a "## 📁 Core Folder Guidelines" section. For EACH folder listed in the data, write a detailed, highly accurate description (in Chinese) of what kind of notes belong there based on the sample files and popular tags found. Format the folder names as double-bracket wiki-links (e.g. "- \`[[Research/ML/]]\`: 用于存放机器学习、最优化损失函数及研究计划的笔记与推导。").
+3. Create a "## 🏷️ Category Workflows & Wiki-Linking" section. Under it:
+   - Identify naming conventions (e.g., prefixing, suffixing, or case formats) you detect from note titles in each directory.
+   - Outline suggested workflows and relationships between these folders (e.g., rough notes and captured inputs in Inbox should be polished and moved to Research or Projects).
+4. Strictly return ONLY the raw Markdown content. Do not include any HTML script tags, dynamic canvas elements, markdown block wrappers (\`\`\`), or conversational preamble.
+
+Return the finalized markdown content:`;
+
+    // 4. Call LLM to generate the content
+    const response = await provider.generate(prompt);
+    if (!response || !response.trim()) {
+      throw new Error('AI 生成了空内容，请重试。 (AI returned empty response)');
+    }
+
+    const cleanMarkdown = response.replace(/^```markdown\n/i, '').replace(/```$/i, '').trim();
+
+    // 5. Ensure config folder exists
+    if (!(await vault.adapter.exists(configFolder))) {
+      const folders = configFolder.split('/');
+      let currentFolder = '';
+      for (const folder of folders) {
+        if (!folder) continue;
+        currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
+        if (!(await vault.adapter.exists(currentFolder))) {
+          await vault.createFolder(currentFolder);
+        }
+      }
+    }
+
+    // 6. Overwrite or create file
+    if (await vault.adapter.exists(mapPath)) {
+      await vault.adapter.write(mapPath, cleanMarkdown);
+    } else {
+      await vault.create(mapPath, cleanMarkdown);
+    }
+  }
+
+  /**
    * Helper to extract tags safely from metadata cache of a single file
    */
   private getFileTags(file: TFile): string[] {

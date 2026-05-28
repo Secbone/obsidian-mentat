@@ -404,48 +404,51 @@ ${folderGuidelines}
         .setButtonText('Rebuild Knowledge Map')
         .setWarning()
         .onClick(() => {
-          new RebuildConfirmModal(this.app, async () => {
-            try {
-              const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
-              const mapPath = `${folderPath}/vault-map.md`;
-              const vault = this.plugin.app.vault;
+          new RebuildConfirmModal(
+            this.app,
+            // 1. Fast Local Rebuild Callback
+            async () => {
+              try {
+                const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+                const mapPath = `${folderPath}/vault-map.md`;
+                const vault = this.plugin.app.vault;
 
-              // Auto-create folder paths if they do not exist
-              if (!(await vault.adapter.exists(folderPath))) {
-                const folders = folderPath.split('/');
-                let currentFolder = '';
-                for (const folder of folders) {
-                  if (!folder) continue;
-                  currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
-                  if (!(await vault.adapter.exists(currentFolder))) {
-                    await vault.createFolder(currentFolder);
+                // Auto-create folder paths if they do not exist
+                if (!(await vault.adapter.exists(folderPath))) {
+                  const folders = folderPath.split('/');
+                  let currentFolder = '';
+                  for (const folder of folders) {
+                    if (!folder) continue;
+                    currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
+                    if (!(await vault.adapter.exists(currentFolder))) {
+                      await vault.createFolder(currentFolder);
+                    }
                   }
                 }
-              }
 
-              // Scan vault markdown files to identify top largest directories
-              const allFiles = vault.getMarkdownFiles();
-              const folderCounts = new Map<string, number>();
-              
-              allFiles.forEach(file => {
-                if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
-                  const p = file.parent.path;
-                  folderCounts.set(p, (folderCounts.get(p) || 0) + 1);
-                }
-              });
+                // Scan vault markdown files to identify top largest directories
+                const allFiles = vault.getMarkdownFiles();
+                const folderCounts = new Map<string, number>();
+                
+                allFiles.forEach(file => {
+                  if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
+                    const p = file.parent.path;
+                    folderCounts.set(p, (folderCounts.get(p) || 0) + 1);
+                  }
+                });
 
-              // Sort and pick top 3 largest folders
-              const topFolders = Array.from(folderCounts.entries())
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 3)
-                .map(([p]) => p);
+                // Sort and pick top 3 largest folders
+                const topFolders = Array.from(folderCounts.entries())
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 3)
+                  .map(([p]) => p);
 
-              // If no folders found, fallback to standard guidelines
-              const folderGuidelines = topFolders.length > 0
-                ? topFolders.map(folder => `- \`[[${folder}/]]\`: Describe what kind of notes should go here (e.g., academic research, active projects, daily journals).`).join('\n')
-                : `- \`[[Research/]]\`: Used for deep-dives, academic papers, and study notes.\n- \`[[Projects/]]\`: Used for active work, tracking goals, and task plans.\n- \`[[Inbox/]]\`: Place for raw ideas, quick thoughts, and unprocessed inputs.`;
+                // If no folders found, fallback to standard guidelines
+                const folderGuidelines = topFolders.length > 0
+                  ? topFolders.map(folder => `- \`[[${folder}/]]\`: Describe what kind of notes should go here (e.g., academic research, active projects, daily journals).`).join('\n')
+                  : `- \`[[Research/]]\`: Used for deep-dives, academic papers, and study notes.\n- \`[[Projects/]]\`: Used for active work, tracking goals, and task plans.\n- \`[[Inbox/]]\`: Place for raw ideas, quick thoughts, and unprocessed inputs.`;
 
-              const defaultTemplate = `# 🗺️ Vault Knowledge Structure Map
+                const defaultTemplate = `# 🗺️ Vault Knowledge Structure Map
 
 This document defines the high-level knowledge organization and directory roles of my Obsidian vault.
 
@@ -460,26 +463,103 @@ ${folderGuidelines}
 - Document naming conventions (e.g., prefixing research plans with \`Research_Plan_\`).
 - Outline relationships (e.g., notes in \`Inbox/\` should eventually be polished and moved to \`Research/\`).
 `;
-              // Overwrite existing file content or create it if missing
-              if (await vault.adapter.exists(mapPath)) {
-                await vault.adapter.write(mapPath, defaultTemplate);
-              } else {
-                await vault.create(mapPath, defaultTemplate);
-              }
+                // Overwrite existing file content or create it if missing
+                if (await vault.adapter.exists(mapPath)) {
+                  await vault.adapter.write(mapPath, defaultTemplate);
+                } else {
+                  await vault.create(mapPath, defaultTemplate);
+                }
 
-              // Open in active editor
-              const tFile = vault.getAbstractFileByPath(mapPath);
-              if (tFile) {
-                const leaf = this.app.workspace.getLeaf(false);
-                await leaf.openFile(tFile as any);
-                new Notice('Successfully rebuilt and opened vault-map.md!');
-              } else {
-                new Notice('Failed to locate rebuilt vault map file');
+                // Open in active editor
+                const tFile = vault.getAbstractFileByPath(mapPath);
+                if (tFile) {
+                  const leaf = this.app.workspace.getLeaf(false);
+                  await leaf.openFile(tFile as any);
+                  new Notice('⚡ 知识地图本地快速重建成功！');
+                } else {
+                  new Notice('Failed to locate rebuilt vault map file');
+                }
+              } catch (err) {
+                new Notice(`Failed to rebuild vault map: ${err.message}`);
               }
-            } catch (err) {
-              new Notice(`Failed to rebuild vault map: ${err.message}`);
+            },
+            // 2. AI-Assisted Rebuild Callback
+            async () => {
+              const loadingNotice = new Notice('🧠 AI 正在深度分析您的知识库并规划知识地图，这可能需要 5-10 秒，请稍候...', 0);
+              try {
+                await this.plugin.chatOrchestrator.aiRebuildVaultMap();
+                loadingNotice.hide();
+
+                // Open in active editor
+                const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+                const mapPath = `${folderPath}/vault-map.md`;
+                const tFile = this.plugin.app.vault.getAbstractFileByPath(mapPath);
+                if (tFile) {
+                  const leaf = this.app.workspace.getLeaf(false);
+                  await leaf.openFile(tFile as any);
+                  new Notice('🎉 知识地图 AI 智能重建成功！已为您定制最新的文件夹指南与工作流规则。');
+                }
+              } catch (err) {
+                loadingNotice.hide();
+                new Notice(`❌ AI 智能重建失败: ${err.message}\n正在自动为您切换至本地快速重建模式...`);
+                console.error('[SettingsTab] AI Rebuild failed:', err);
+                
+                // Fallback to local rebuild automatically
+                try {
+                  const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+                  const mapPath = `${folderPath}/vault-map.md`;
+                  const vault = this.plugin.app.vault;
+
+                  // Overwrite with local template
+                  const allFiles = vault.getMarkdownFiles();
+                  const folderCounts = new Map<string, number>();
+                  allFiles.forEach(file => {
+                    if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
+                      const p = file.parent.path;
+                      folderCounts.set(p, (folderCounts.get(p) || 0) + 1);
+                    }
+                  });
+                  const topFolders = Array.from(folderCounts.entries())
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 3)
+                    .map(([p]) => p);
+                  const folderGuidelines = topFolders.length > 0
+                    ? topFolders.map(folder => `- \`[[${folder}/]]\`: Describe what kind of notes should go here (e.g., academic research, active projects, daily journals).`).join('\n')
+                    : `- \`[[Research/]]\`: Used for deep-dives, academic papers, and study notes.\n- \`[[Projects/]]\`: Used for active work, tracking goals, and task plans.\n- \`[[Inbox/]]\`: Place for raw ideas, quick thoughts, and unprocessed inputs.`;
+
+                  const defaultTemplate = `# 🗺️ Vault Knowledge Structure Map
+
+This document defines the high-level knowledge organization and directory roles of my Obsidian vault.
+
+> [!note]
+> Write your folder descriptions, naming rules, and category workflows below. Mentat dynamically reads this file to decide where to store new files, how concepts relate, and which directories to query first.
+
+## 📁 Core Folder Guidelines
+${folderGuidelines}
+
+## 🏷️ Category Workflows & Wiki-Linking
+- Define folder roles clearly so the agent knows exactly where new files belong.
+- Document naming conventions (e.g., prefixing research plans with \`Research_Plan_\`).
+- Outline relationships (e.g., notes in \`Inbox/\` should eventually be polished and moved to \`Research/\`).
+`;
+                  if (await vault.adapter.exists(mapPath)) {
+                    await vault.adapter.write(mapPath, defaultTemplate);
+                  } else {
+                    await vault.create(mapPath, defaultTemplate);
+                  }
+
+                  const tFile = vault.getAbstractFileByPath(mapPath);
+                  if (tFile) {
+                    const leaf = this.app.workspace.getLeaf(false);
+                    await leaf.openFile(tFile as any);
+                    new Notice('⚡ 自动回退：本地快速重建成功！');
+                  }
+                } catch (fallbackErr) {
+                  new Notice(`❌ 本地回退重建也失败了: ${fallbackErr.message}`);
+                }
+              }
             }
-          }).open();
+          ).open();
         }));
   }
 
@@ -856,19 +936,21 @@ ${folderGuidelines}
 }
 
 class RebuildConfirmModal extends Modal {
-  private onConfirm: () => void;
+  private onConfirmLocal: () => void;
+  private onConfirmAI: () => void;
 
-  constructor(app: App, onConfirm: () => void) {
+  constructor(app: App, onConfirmLocal: () => void, onConfirmAI: () => void) {
     super(app);
-    this.onConfirm = onConfirm;
+    this.onConfirmLocal = onConfirmLocal;
+    this.onConfirmAI = onConfirmAI;
   }
 
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl('h2', { text: '⚠️ 重建知识地图确认 (Rebuild Knowledge Map)' });
+    contentEl.createEl('h2', { text: '🗺️ 重建知识地图 (Rebuild Knowledge Map)' });
     contentEl.createEl('p', {
-      text: '您确定要重新构建 `vault-map.md` 知识地图文件吗？这将重新扫描库中的文件夹结构并用默认模板覆盖当前文件，您之前手动写入的自定义规则和配置将会丢失。'
+      text: '请选择如何重新构建 `vault-map.md` 文件。重建将扫描您当前的文件夹结构、最常使用的标签和最新笔记。您之前手动写入的自定义规则和配置将会被覆盖。'
     });
 
     const buttonContainer = contentEl.createDiv({ cls: 'modal-button-container' });
@@ -880,12 +962,22 @@ class RebuildConfirmModal extends Modal {
     const cancelButton = buttonContainer.createEl('button', { text: '取消' });
     cancelButton.addEventListener('click', () => this.close());
 
-    const confirmButton = buttonContainer.createEl('button', {
-      text: '确认重建',
-      cls: 'mod-warning'
+    const localButton = buttonContainer.createEl('button', {
+      text: '⚡ 快速本地重建',
+      cls: 'mod-neutral'
     });
-    confirmButton.addEventListener('click', () => {
-      this.onConfirm();
+    localButton.style.marginRight = 'auto'; // push local button to the left
+    localButton.addEventListener('click', () => {
+      this.onConfirmLocal();
+      this.close();
+    });
+
+    const aiButton = buttonContainer.createEl('button', {
+      text: '🧠 AI 智能重建 (推荐)',
+      cls: 'mod-cta'
+    });
+    aiButton.addEventListener('click', () => {
+      this.onConfirmAI();
       this.close();
     });
   }
