@@ -106,6 +106,9 @@ export class ChatOrchestrator {
 
     // Create default agent
     await this.createDefaultAgent();
+
+    // Ensure vault-map.md exists (Cold-Start Engine)
+    await this.ensureVaultMapExists();
   }
 
   /**
@@ -377,6 +380,79 @@ ${vaultMap}`;
     } catch (error) {
       console.error('[ChatOrchestrator] Error reading vault-map.md:', error);
       return '*(None defined. Click "Open Vault Knowledge Map" in Settings to outline your vault structure.)*';
+    }
+  }
+
+  /**
+   * Automatically creates the vault-map.md with default templates and scanned vault directories if it does not exist.
+   */
+  async ensureVaultMapExists(): Promise<void> {
+    try {
+      const configFolder = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+      const mapPath = `${configFolder}/vault-map.md`;
+      const vault = this.plugin.app.vault;
+
+      // Auto-create folder paths recursively if they do not exist
+      if (!(await vault.adapter.exists(configFolder))) {
+        const folders = configFolder.split('/');
+        let currentFolder = '';
+        for (const folder of folders) {
+          if (!folder) continue;
+          currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
+          if (!(await vault.adapter.exists(currentFolder))) {
+            if (typeof vault.createFolder === 'function') {
+              await vault.createFolder(currentFolder);
+            }
+          }
+        }
+      }
+
+      // Create default template if file does not exist
+      if (!(await vault.adapter.exists(mapPath))) {
+        // Proactively scan actual folders in the vault to identify top largest directories
+        const allFiles = vault.getMarkdownFiles();
+        const folderCounts = new Map<string, number>();
+        
+        allFiles.forEach(file => {
+          if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
+            const p = file.parent.path;
+            folderCounts.set(p, (folderCounts.get(p) || 0) + 1);
+          }
+        });
+
+        // Sort and pick top 3 largest folders
+        const topFolders = Array.from(folderCounts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([p]) => p);
+
+        // If no folders found, fallback to standard guidelines
+        const folderGuidelines = topFolders.length > 0
+          ? topFolders.map(folder => `- \`[[${folder}/]]\`: Describe what kind of notes should go here (e.g., academic research, active projects, daily journals).`).join('\n')
+          : `- \`[[Research/]]\`: Used for deep-dives, academic papers, and study notes.\n- \`[[Projects/]]\`: Used for active work, tracking goals, and task plans.\n- \`[[Inbox/]]\`: Place for raw ideas, quick thoughts, and unprocessed inputs.`;
+
+        const defaultTemplate = `# 🗺️ Vault Knowledge Structure Map
+
+This document defines the high-level knowledge organization and directory roles of my Obsidian vault.
+
+> [!note]
+> Write your folder descriptions, naming rules, and category workflows below. Mentat dynamically reads this file to decide where to store new files, how concepts relate, and which directories to query first.
+
+## 📁 Core Folder Guidelines
+${folderGuidelines}
+
+## 🏷️ Category Workflows & Wiki-Linking
+- Define folder roles clearly so the agent knows exactly where new files belong.
+- Document naming conventions (e.g., prefixing research plans with \`Research_Plan_\`).
+- Outline relationships (e.g., notes in \`Inbox/\` should eventually be polished and moved to \`Research/\`).
+`;
+        if (typeof vault.create === 'function') {
+          await vault.create(mapPath, defaultTemplate);
+          console.log('[ChatOrchestrator] Automatically initialized vault-map.md successfully');
+        }
+      }
+    } catch (error) {
+      console.error('[ChatOrchestrator] Error initializing vault-map.md:', error);
     }
   }
 
