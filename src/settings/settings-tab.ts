@@ -1,6 +1,6 @@
 import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import PersonalAgentPlugin from '../main';
-import { AIProviderConfig } from '../settings/settings';
+import { AIProviderConfig } from './settings';
 import { ProviderEditModal } from './provider-edit-modal';
 
 export class SettingsTab extends PluginSettingTab {
