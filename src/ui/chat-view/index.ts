@@ -32,7 +32,8 @@ export class ChatView extends ItemView {
   private chatContainer: HTMLElement;
   private messagesContainer: HTMLElement;
   private inputContainer: HTMLElement;
-  private inputArea: HTMLTextAreaElement;
+  private inputWrapper: HTMLElement;
+  private inputArea: HTMLDivElement;
   private sendButton: HTMLButtonElement;
   private clearButton: HTMLButtonElement;
   private settingsButton: HTMLButtonElement;
@@ -40,6 +41,8 @@ export class ChatView extends ItemView {
   private documentPanel: HTMLElement;
   private documentList: HTMLElement;
   private addDocumentButton: HTMLButtonElement;
+  private charCountEl: HTMLElement;
+  private badgesEl: HTMLElement;
 
   // State
   private isStreaming: boolean = false;
@@ -52,6 +55,17 @@ export class ChatView extends ItemView {
   private lastExecutedToolStatus: 'success' | 'error' | 'pending' = 'pending';
   private lastRenderTime: number = 0;
   private renderTimeout: any = null;
+
+  // Steerability & Autocomplete & Draft States
+  private activeContext: any | null = null;
+  private activeSuggestType: 'slash' | 'mention' | null = null;
+  private suggestDropdown: HTMLDivElement | null = null;
+  private suggestSelectedIndex: number = 0;
+  private suggestFilteredItems: any[] = [];
+  private suggestQuery: string = '';
+  private suggestTriggerNode: Node | null = null;
+  private suggestTriggerRange: Range | null = null;
+  private draftSaveTimeout: any = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: PersonalAgentPlugin) {
     super(leaf);
@@ -86,6 +100,9 @@ export class ChatView extends ItemView {
 
     // Setup event listeners
     this.setupEventListeners();
+
+    // Restore draft
+    await this.restoreDraft();
   }
 
   private buildUI(): void {
@@ -127,21 +144,29 @@ export class ChatView extends ItemView {
     // Input container at bottom
     this.inputContainer = container.createDiv('chat-input-container');
 
-    // Input wrapper (contains textarea + send button)
-    const inputWrapper = this.inputContainer.createDiv('chat-input-wrapper');
+    // Input wrapper (contains contenteditable div + send button)
+    this.inputWrapper = this.inputContainer.createDiv('chat-input-wrapper');
 
-    this.inputArea = inputWrapper.createEl('textarea', {
+    this.inputArea = this.inputWrapper.createEl('div', {
       cls: 'chat-input',
       attr: {
-        placeholder: 'Ask me anything...',
-        rows: '1'
+        contenteditable: 'true',
+        placeholder: 'Ask me anything...'
       }
     });
 
     // Send button (positioned inside input via CSS)
-    this.sendButton = inputWrapper.createEl('button', { cls: 'chat-send-button' });
+    this.sendButton = this.inputWrapper.createEl('button', { cls: 'chat-send-button' });
     setIcon(this.sendButton, 'send');
     this.sendButton.setAttribute('aria-label', 'Send message');
+
+    // Bottom Info Bar
+    const infoBar = this.inputContainer.createDiv('chat-input-info-bar');
+    this.charCountEl = infoBar.createDiv('chat-input-char-count');
+    this.charCountEl.setText('0 字');
+    
+    this.badgesEl = infoBar.createDiv('chat-input-badges');
+    this.updateInputInfoBar();
   }
 
   private buildDocumentPanel(): void {
@@ -235,19 +260,125 @@ export class ChatView extends ItemView {
 
   private setupEventListeners(): void {
     // Send on button click
-    this.sendButton.addEventListener('click', () => this.handleSend());
-
-    // Send on Enter (Shift+Enter for newline)
-    this.inputArea.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
+    this.sendButton.addEventListener('click', () => {
+      if (this.isStreaming) {
+        this.handleSteer();
+      } else {
         this.handleSend();
       }
     });
 
-    // Auto-resize textarea as user types
+    // Pill click delegation
+    this.inputArea.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.hasClass('remove-pill')) {
+        const pill = target.closest('.mentat-doc-pill');
+        if (pill) {
+          pill.remove();
+          this.updateInputInfoBar();
+          this.saveDraftDebounced();
+        }
+      }
+    });
+
+    // Custom Key Listeners
+    this.inputArea.addEventListener('keydown', (e: KeyboardEvent) => {
+      // 1. Intercept keys if Autocomplete Dropdown is open
+      if (this.activeSuggestType && this.suggestDropdown && this.suggestFilteredItems.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this.suggestSelectedIndex = (this.suggestSelectedIndex + 1) % this.suggestFilteredItems.length;
+          this.renderSuggestDropdownItems();
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          this.suggestSelectedIndex = (this.suggestSelectedIndex - 1 + this.suggestFilteredItems.length) % this.suggestFilteredItems.length;
+          this.renderSuggestDropdownItems();
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.handleSuggestSelect();
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          this.closeSuggest();
+          return;
+        }
+      }
+
+      // 2. Clear input area on Escape key (if no suggestions open)
+      if (e.key === 'Escape' && !this.activeSuggestType) {
+        const rawText = this.getRawTextContent();
+        if (rawText || this.inputArea.querySelectorAll('.mentat-doc-pill').length > 0) {
+          e.preventDefault();
+          this.inputArea.innerHTML = '';
+          this.updateInputInfoBar();
+          this.saveDraftDebounced();
+          return;
+        }
+      }
+
+      // 3. Handle Send Command via configured shortcuts
+      if (e.key === 'Enter') {
+        const sendWithCmdEnter = !!this.plugin.settings.sendWithCmdEnter;
+        const isSendKey = sendWithCmdEnter ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
+
+        if (isSendKey) {
+          e.preventDefault();
+          if (this.isStreaming) {
+            this.handleSteer();
+          } else {
+            this.handleSend();
+          }
+        }
+      }
+    });
+
+    // Handle input, caret mention triggers, and auto-save
     this.inputArea.addEventListener('input', () => {
-      this.autoResizeTextarea();
+      this.updateInputInfoBar();
+      this.saveDraftDebounced();
+      
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) {
+        this.closeSuggest();
+        return;
+      }
+      
+      const range = sel.getRangeAt(0);
+      const node = range.endContainer;
+      
+      if (node.nodeType === Node.TEXT_NODE) {
+        const nodeText = node.textContent || '';
+        const offset = range.endOffset;
+        const textBeforeCaret = nodeText.slice(0, offset);
+        
+        // Check Slash trigger (at start of text) - trim to strip browser trailing newlines
+        const fullText = this.getRawTextContent().trim();
+        if (fullText.startsWith('/') && !fullText.includes('\n')) {
+          const query = fullText.slice(1);
+          const rangeTrigger = document.createRange();
+          rangeTrigger.setStart(this.inputArea.firstChild || node, 0);
+          rangeTrigger.setEnd(node, offset);
+          this.triggerSuggest('slash', 0, query, this.inputArea.firstChild || node, rangeTrigger);
+          return;
+        }
+        
+        // Check Mention trigger: '@' preceding current caret position
+        const lastAtIdx = textBeforeCaret.lastIndexOf('@');
+        if (lastAtIdx !== -1 && !textBeforeCaret.slice(lastAtIdx, offset).includes(' ')) {
+          const query = textBeforeCaret.slice(lastAtIdx + 1);
+          const rangeTrigger = range.cloneRange();
+          rangeTrigger.setStart(node, lastAtIdx);
+          this.triggerSuggest('mention', lastAtIdx, query, node, rangeTrigger);
+          return;
+        }
+      }
+      
+      this.closeSuggest();
     });
 
     // Settings button
@@ -265,13 +396,102 @@ export class ChatView extends ItemView {
     });
   }
 
+  private async handleSteer(): Promise<void> {
+    const text = this.getRawTextContent().trim();
+    if (!text) return;
+
+    // Clear input & draft
+    this.inputArea.innerHTML = '';
+    this.updateInputInfoBar();
+    this.clearDraft();
+
+    if (this.activeContext) {
+      if (!this.activeContext.pendingSteerMessages) {
+        this.activeContext.pendingSteerMessages = [];
+      }
+      this.activeContext.pendingSteerMessages.push(text);
+    }
+  }
+
   private async handleSend(): Promise<void> {
-    const userMessage = this.inputArea.value.trim();
-    if (!userMessage || this.isStreaming) return;
+    const userMessage = this.getRawTextContent();
+    const referencedFiles = this.getContextPillPaths();
+
+    if (!userMessage && referencedFiles.length === 0) return;
+
+    // 1. Handle Slash commands first
+    if (userMessage.startsWith('/')) {
+      const parts = userMessage.split(' ');
+      const cmd = parts[0].toLowerCase();
+      const arg = parts.slice(1).join(' ').trim();
+
+      // Clear input
+      this.inputArea.innerHTML = '';
+      this.updateInputInfoBar();
+      this.clearDraft();
+
+      if (cmd === '/clear') {
+        this.handleClear();
+        return;
+      }
+      if (cmd === '/settings') {
+        this.app.setting.open();
+        this.app.setting.openTabById(this.plugin.manifest.id);
+        return;
+      }
+      if (cmd === '/index') {
+        let filesToSearch = this.app.vault.getMarkdownFiles();
+        if (arg) {
+          filesToSearch = filesToSearch.filter(f => f.path.includes(arg));
+        }
+
+        if (filesToSearch.length === 0) {
+          new Notice('没有找到匹配的文档以重建索引。');
+          return;
+        }
+
+        const notice = new Notice(`正在重建 ${filesToSearch.length} 个文档的向量索引...`, 0);
+        try {
+          let processed = 0;
+          await this.plugin.indexManager.indexFiles(filesToSearch, (progress) => {
+            processed = progress.current;
+            notice.setMessage(`索引进度: ${progress.current}/${progress.total} - ${progress.currentFile}`);
+          });
+          notice.hide();
+          new Notice(`✓ 成功索引了 ${processed} 个文档`);
+        } catch (err) {
+          notice.hide();
+          new Notice(`✗ 索引失败: ${err.message}`);
+        }
+        return;
+      }
+      if (cmd === '/help') {
+        const wrapper = this.createMessageElement('assistant');
+        const contentEl = wrapper.createDiv('message-content');
+        contentEl.innerHTML = `
+          <h3>💡 Mentat 快捷指令帮助手册</h3>
+          <p>您可以在输入框中输入以下以 <code>/</code> 开头的指令快速控制智能体：</p>
+          <ul>
+            <li><code>/clear</code>: 清空历史会话记录</li>
+            <li><code>/index [路径]</code>: 重建索引。如果指定了路径，则仅索引该路径下的笔记。</li>
+            <li><code>/settings</code>: 快速打开 Mentat 插件配置面板</li>
+            <li><code>/help</code>: 渲染本帮助说明</li>
+          </ul>
+          <p>另外，在输入文字中输入 <code>@文件名</code>，可以直接召唤出文件模糊检索卡片，将笔记以“胶囊”形式加入到当前对话上下文中。</p>
+        `;
+        this.scrollToBottom();
+        return;
+      }
+    }
+
+    // 2. Add referenced files to context manager
+    referencedFiles.forEach(path => this.chatManager.addDocument(path));
+    this.renderDocumentList();
 
     // Clear input
-    this.inputArea.value = '';
-    this.autoResizeTextarea(); // Reset height
+    this.inputArea.innerHTML = '';
+    this.updateInputInfoBar();
+    this.clearDraft();
 
     // Add user message to UI only (not to history yet)
     this.addUserMessage(userMessage);
@@ -295,10 +515,13 @@ export class ChatView extends ItemView {
     // Scroll to bottom
     this.scrollToBottom();
 
-    // Disable input during streaming
+    // Enable streaming steer mode state UI
     this.isStreaming = true;
-    this.sendButton.disabled = true;
-    this.inputArea.disabled = true;
+    this.inputWrapper.addClass('is-streaming');
+    this.inputArea.setAttribute('placeholder', '💡 智能体正在运行... 输入以动态引导其思考方向...');
+    this.sendButton.addClass('is-steer-mode');
+    setIcon(this.sendButton, 'lightbulb');
+    this.sendButton.setAttribute('aria-label', 'Steer agent');
 
     try {
       const selectedPaths = this.chatManager.getSelectedFiles();
@@ -315,34 +538,68 @@ export class ChatView extends ItemView {
       const activeTasks: ActiveTask[] = [];
       let currentStatus = '初始化智能体...';
 
+      // Setup activeContext reference
+      this.activeContext = {
+        messages: contextMessages,
+        sessionId: this.chatManager.getSessionInfo().sessionId || Date.now().toString(),
+        metadata: {
+          maxTurns: this.plugin.settings.maxTurns || 20
+        },
+        pendingSteerMessages: []
+      };
+
       // Use ChatOrchestrator for skill support - RAGP event generator loop
       const stream = this.chatOrchestrator.query(
         userMessage,
         {
           enableSkills: this.plugin.settings.skillsEnabled,
-          contextMessages: contextMessages,
-          maxTurns: this.plugin.settings.maxTurns || 20
+          maxTurns: this.plugin.settings.maxTurns || 20,
+          context: this.activeContext
         }
       );
 
       let currentTurnResponse = ''; // Tracks text streamed inside the current turn
       let finalAnswer = ''; // Accumulates clean final answer text
+      let hasFinalAnswerTag = false; // Tracks if the current run has outputted the <final_answer> tag
       let current = await stream.next();
 
       while (!current.done) {
         const event = current.value as AgentEvent;
 
-        if (event.type === 'status') {
+        if (event.type === 'steer') {
+          currentTurnResponse = ''; // Clear current turn response to prevent bleed-through
+          this.renderSteerCard(event.message, this.currentStreamingElement);
+          this.scrollToBottom();
+        } else if (event.type === 'status') {
           currentStatus = event.message;
           this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse);
         } else if (event.type === 'chunk') {
           currentTurnResponse += event.text;
-          // If we haven't run any tools yet, stream it in final answer so the user sees real-time progress.
-          // Otherwise, it is intermediate explanation text and will be shown inside the TUI console.
-          if (activeTasks.length === 0) {
-            this.updateStreamingUI(currentStatus, activeTasks, currentTurnResponse, currentTurnResponse);
+
+          // 黄金流式混合解析器核心分流逻辑：
+          if (currentTurnResponse.includes('<final_answer>')) {
+            hasFinalAnswerTag = true;
+            const parts = currentTurnResponse.split('<final_answer>');
+            const explanationPart = parts[0]; // 标签前的中间思维链/工具解释
+            let answerPart = parts[1] || ''; // 标签后的最终答复文本
+
+            // 流式主动剔除可能尚未闭合的 </final_answer> 标签本身，杜绝 UI 杂质
+            if (answerPart.includes('</final_answer>')) {
+              answerPart = answerPart.split('</final_answer>')[0];
+            }
+
+            finalAnswer = answerPart;
+            // 将标签前的文本送去审计折叠面板，最终回复实时送往主气泡框，流式打字爆发！
+            this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, explanationPart);
           } else {
-            this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse);
+            // 未检测到最终回复标签时：
+            // 如果尚无任何工具执行，作为最终答案流输出（保证冷启动流式交互）；
+            // 否则全部收纳在折叠 timeline 内作为思维链
+            if (activeTasks.length === 0) {
+              this.updateStreamingUI(currentStatus, activeTasks, currentTurnResponse, currentTurnResponse);
+            } else {
+              this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse);
+            }
           }
         } else if (event.type === 'skill_call') {
           const shortName = event.name.split(':').pop() || event.name;
@@ -433,9 +690,21 @@ export class ChatView extends ItemView {
         current = await stream.next();
       }
 
-      // End of streaming loop: consolidate final answer
-      if (currentTurnResponse) {
-        finalAnswer = finalAnswer ? `${finalAnswer}\n\n${currentTurnResponse}` : currentTurnResponse;
+      // End of streaming loop: consolidate final answer safely
+      if (hasFinalAnswerTag) {
+        const parts = currentTurnResponse.split('<final_answer>');
+        const explanationPart = parts[0].trim();
+        let answerPart = parts[1] || '';
+        if (answerPart.includes('</final_answer>')) {
+          answerPart = answerPart.split('</final_answer>')[0];
+        }
+        finalAnswer = answerPart.trim();
+        // 将思维解释赋给 currentTurnResponse 以便记录到历史消息
+        currentTurnResponse = explanationPart;
+      } else {
+        if (currentTurnResponse) {
+          finalAnswer = finalAnswer ? `${finalAnswer}\n\n${currentTurnResponse}` : currentTurnResponse;
+        }
       }
       this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, '', true);
 
@@ -484,16 +753,29 @@ export class ChatView extends ItemView {
       // Remove streaming indicator
       this.currentStreamingElement?.removeClass('streaming');
 
-      // Re-enable input
+      // Re-enable input state UI
       this.isStreaming = false;
-      this.sendButton.disabled = false;
-      this.inputArea.disabled = false;
+      this.inputWrapper.removeClass('is-streaming');
+      this.inputArea.setAttribute('placeholder', 'Ask me anything...');
+      this.sendButton.removeClass('is-steer-mode');
+      setIcon(this.sendButton, 'send');
+      this.sendButton.setAttribute('aria-label', 'Send message');
+
       this.currentStreamingElement = null;
+      this.activeContext = null;
+      this.updateInputInfoBar();
       this.inputArea.focus();
     }
   }
 
   private addUserMessage(content: string): void {
+    if (content.startsWith('[HUMAN DYNAMIC INTERVENTION]:')) {
+      const steerText = content.replace('[HUMAN DYNAMIC INTERVENTION]:', '').trim();
+      this.renderSteerCard(steerText, this.messagesContainer);
+      this.scrollToBottom();
+      return;
+    }
+
     const wrapper = this.createMessageElement('user');
     const contentEl = wrapper.createDiv('message-content');
     contentEl.innerHTML = this.messageRenderer.render(content);
@@ -530,11 +812,7 @@ export class ChatView extends ItemView {
     });
   }
 
-  private autoResizeTextarea(): void {
-    this.inputArea.style.height = 'auto';
-    const newHeight = Math.min(this.inputArea.scrollHeight, 150);
-    this.inputArea.style.height = newHeight + 'px';
-  }
+  private autoResizeTextarea(): void {}
 
   private setupCodeCopyButtons(messageEl: HTMLElement): void {
     const copyButtons = messageEl.querySelectorAll('.code-copy-button');
@@ -739,7 +1017,13 @@ export class ChatView extends ItemView {
           const showContentAsExplanation = turnMsg.content && (isInterrupted || !isLastMsg);
           
           if (showContentAsExplanation) {
-            const cleanExplanation = this.stripBlockToolCalls(turnMsg.content);
+            let rawContent = turnMsg.content || '';
+            let explanationPart = rawContent;
+            // 静态剥离最终答复部分，只在 timeline 审计折叠框里保留纯净的思维链
+            if (rawContent.includes('<final_answer>')) {
+              explanationPart = rawContent.split('<final_answer>')[0].trim();
+            }
+            const cleanExplanation = this.stripBlockToolCalls(explanationPart);
             if (cleanExplanation.trim()) {
               const expDiv = consoleBody.createDiv('tui-explanation');
               expDiv.innerHTML = this.messageRenderer.render(cleanExplanation);
@@ -803,6 +1087,18 @@ export class ChatView extends ItemView {
     }
 
     // 2. Render Final Answer / Warning Callouts
+    // 对最终静态气泡渲染中的最终回复做自适应标签剥离与清洗
+    let rawContent = lastAssistantMsg.content || '';
+    let parsedAnswer = rawContent;
+    if (rawContent.includes('<final_answer>')) {
+      const parts = rawContent.split('<final_answer>');
+      let answerPart = parts[1] || '';
+      if (answerPart.includes('</final_answer>')) {
+        answerPart = answerPart.split('</final_answer>')[0];
+      }
+      parsedAnswer = answerPart.trim();
+    }
+
     if (isInterrupted) {
       // Render warning card
       const warningDiv = contentEl.createDiv('chat-warning-callout');
@@ -815,13 +1111,13 @@ export class ChatView extends ItemView {
       warningText.setText('智能体已被系统强制挂起，以防陷入无限循环。如果任务还未完成，您可以发送指令“继续”让其继续执行。');
       
       // Render last partial text if any
-      const cleanAnswer = this.stripBlockToolCalls(lastAssistantMsg.content);
+      const cleanAnswer = this.stripBlockToolCalls(parsedAnswer);
       if (cleanAnswer.trim()) {
         const answerEl = contentEl.createDiv('final-answer');
         answerEl.innerHTML = this.messageRenderer.render(cleanAnswer);
       }
     } else {
-      const cleanAnswer = this.stripBlockToolCalls(lastAssistantMsg.content);
+      const cleanAnswer = this.stripBlockToolCalls(parsedAnswer);
       if (cleanAnswer.trim()) {
         const answerEl = contentEl.createDiv('final-answer');
         answerEl.innerHTML = this.messageRenderer.render(cleanAnswer);
@@ -1095,6 +1391,296 @@ export class ChatView extends ItemView {
         }, throttleInterval);
       }
     }
+  }
+
+  private getRawTextContent(): string {
+    const clone = this.inputArea.cloneNode(true) as HTMLElement;
+    const pills = clone.querySelectorAll('.mentat-doc-pill');
+    pills.forEach(pill => pill.remove());
+    return (clone.innerText || clone.textContent || '').trim();
+  }
+
+  private getContextPillPaths(): string[] {
+    const paths: string[] = [];
+    const pills = this.inputArea.querySelectorAll('.mentat-doc-pill');
+    pills.forEach(pill => {
+      const path = pill.getAttribute('data-path');
+      if (path) paths.push(path);
+    });
+    return paths;
+  }
+
+  private triggerSuggest(type: 'slash' | 'mention', triggerIdx: number, query: string, node?: Node, rangeTrigger?: Range): void {
+    this.activeSuggestType = type;
+    this.suggestTriggerIdx = triggerIdx;
+    this.suggestQuery = query.toLowerCase();
+    this.suggestTriggerNode = node || null;
+    this.suggestTriggerRange = rangeTrigger || null;
+    
+    this.updateSuggestDropdown();
+  }
+
+  private closeSuggest(): void {
+    this.activeSuggestType = null;
+    this.suggestTriggerIdx = -1;
+    this.suggestQuery = '';
+    this.suggestTriggerNode = null;
+    this.suggestTriggerRange = null;
+    
+    if (this.suggestDropdown) {
+      this.suggestDropdown.remove();
+      this.suggestDropdown = null;
+    }
+  }
+
+  private updateSuggestDropdown(): void {
+    if (!this.suggestDropdown) {
+      this.suggestDropdown = this.inputWrapper.createDiv('mentat-suggest-dropdown');
+    }
+    
+    this.suggestDropdown.empty();
+    
+    if (this.activeSuggestType === 'slash') {
+      const allCommands = [
+        { name: '/clear', desc: '清空会话历史记录 (Clear history)' },
+        { name: '/index', desc: '对指定文件重建向量索引 (Rebuild index)' },
+        { name: '/settings', desc: '打开 Mentat 插件配置面板 (Open settings)' },
+        { name: '/help', desc: '在对话框渲染常用帮助手册 (Show help guide)' }
+      ];
+      
+      this.suggestFilteredItems = allCommands.filter(c => c.name.includes(this.suggestQuery));
+    } else if (this.activeSuggestType === 'mention') {
+      const allFiles = this.app.vault.getMarkdownFiles();
+      const filtered = allFiles.filter(f => f.basename.toLowerCase().includes(this.suggestQuery));
+      
+      // Sort: starts with query first
+      filtered.sort((a, b) => {
+        const aStart = a.basename.toLowerCase().startsWith(this.suggestQuery);
+        const bStart = b.basename.toLowerCase().startsWith(this.suggestQuery);
+        if (aStart && !bStart) return -1;
+        if (!aStart && bStart) return 1;
+        return a.basename.localeCompare(b.basename);
+      });
+      
+      this.suggestFilteredItems = filtered.slice(0, 10).map(f => ({
+        name: f.basename,
+        desc: f.path,
+        file: f
+      }));
+    }
+    
+    if (this.suggestFilteredItems.length === 0) {
+      this.closeSuggest();
+      return;
+    }
+    
+    // Normalize index
+    if (this.suggestSelectedIndex >= this.suggestFilteredItems.length) {
+      this.suggestSelectedIndex = 0;
+    }
+    
+    this.renderSuggestDropdownItems();
+  }
+
+  private renderSuggestDropdownItems(): void {
+    if (!this.suggestDropdown) return;
+    this.suggestDropdown.empty();
+    
+    this.suggestFilteredItems.forEach((item, idx) => {
+      const itemEl = this.suggestDropdown!.createDiv('mentat-suggest-item');
+      if (idx === this.suggestSelectedIndex) {
+        itemEl.addClass('is-selected');
+      }
+      
+      const iconEl = itemEl.createSpan('mentat-suggest-item-icon');
+      setIcon(iconEl, this.activeSuggestType === 'slash' ? 'terminal' : 'file-text');
+      
+      const nameEl = itemEl.createSpan('mentat-suggest-item-name');
+      nameEl.setText(item.name);
+      
+      const descEl = itemEl.createSpan('mentat-suggest-item-desc');
+      descEl.setText(item.desc);
+      
+      itemEl.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // Prevents inputArea from losing focus!
+        e.stopPropagation();
+        this.suggestSelectedIndex = idx;
+        this.handleSuggestSelect();
+      });
+    });
+  }
+
+  private handleSuggestSelect(): void {
+    const selected = this.suggestFilteredItems[this.suggestSelectedIndex];
+    if (!selected) return;
+    
+    if (this.activeSuggestType === 'slash') {
+      this.insertSlashCommand(selected.name);
+    } else if (this.activeSuggestType === 'mention' && this.suggestTriggerNode && this.suggestTriggerRange) {
+      this.insertPill(selected.name, selected.desc, this.suggestTriggerNode, this.suggestTriggerRange);
+    }
+  }
+
+  private insertSlashCommand(command: string): void {
+    if (this.suggestTriggerRange) {
+      this.suggestTriggerRange.deleteContents();
+      
+      const cmdText = document.createTextNode(command + '\u00A0');
+      this.suggestTriggerRange.insertNode(cmdText);
+      
+      // Move cursor after the slash command
+      const range = document.createRange();
+      range.setStartAfter(cmdText);
+      range.collapse(true);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    } else {
+      this.inputArea.innerHTML = `${command}&nbsp;`;
+      // Move cursor to end
+      const range = document.createRange();
+      range.selectNodeContents(this.inputArea);
+      range.collapse(false);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+    
+    this.closeSuggest();
+    this.updateInputInfoBar();
+    this.saveDraftDebounced();
+    this.inputArea.focus();
+  }
+
+  private insertPill(fileName: string, filePath: string, node: Node, rangeTrigger: Range): void {
+    // Delete trigger character and the query text
+    rangeTrigger.deleteContents();
+    
+    // Create the pill element
+    const pill = document.createElement('span');
+    pill.className = 'mentat-doc-pill';
+    pill.setAttribute('contenteditable', 'false');
+    pill.setAttribute('data-path', filePath);
+    pill.innerHTML = `📄 ${fileName} <span class="remove-pill" aria-label="Remove document">×</span>`;
+    
+    rangeTrigger.insertNode(pill);
+    
+    // Insert a space after the pill to allow typing
+    const space = document.createTextNode('\u00A0');
+    rangeTrigger.setStartAfter(pill);
+    rangeTrigger.collapse(true);
+    rangeTrigger.insertNode(space);
+    
+    // Move selection caret after space
+    const sel = window.getSelection();
+    if (sel) {
+      const nextRange = document.createRange();
+      nextRange.setStartAfter(space);
+      nextRange.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(nextRange);
+    }
+    
+    this.closeSuggest();
+    this.updateInputInfoBar();
+    this.saveDraftDebounced();
+    this.inputArea.focus();
+  }
+
+  private updateInputInfoBar(): void {
+    if (!this.charCountEl || !this.badgesEl) return;
+    
+    const text = this.getRawTextContent();
+    this.charCountEl.setText(`${text.length} 字`);
+    
+    this.badgesEl.empty();
+    
+    // Referenced documents count badge
+    const filePaths = this.getContextPillPaths();
+    if (filePaths.length > 0) {
+      const badge = this.badgesEl.createDiv('chat-input-badge');
+      badge.setText(`📎 ${filePaths.length}个文档`);
+      badge.setAttribute('aria-label', `包含文档: ${filePaths.map(p => p.split('/').pop()).join(', ')}`);
+    }
+  }
+
+  private saveDraftDebounced(): void {
+    if (this.draftSaveTimeout) {
+      clearTimeout(this.draftSaveTimeout);
+    }
+    
+    this.draftSaveTimeout = setTimeout(async () => {
+      const sessionInfo = this.chatManager.getSessionInfo();
+      const sessionId = sessionInfo.sessionId;
+      if (!sessionId) return;
+      
+      const htmlContent = this.inputArea.innerHTML;
+      
+      const pluginData = await this.plugin.loadData() || {};
+      if (!pluginData.drafts) {
+        pluginData.drafts = {};
+      }
+      
+      // Save
+      pluginData.drafts[sessionId] = htmlContent;
+      await this.plugin.saveData(pluginData);
+    }, 300);
+  }
+
+  private async restoreDraft(): Promise<void> {
+    const sessionInfo = this.chatManager.getSessionInfo();
+    const sessionId = sessionInfo.sessionId;
+    if (!sessionId) return;
+    
+    const pluginData = await this.plugin.loadData();
+    if (pluginData && pluginData.drafts && pluginData.drafts[sessionId]) {
+      this.inputArea.innerHTML = pluginData.drafts[sessionId];
+      
+      // Move cursor to the end
+      const range = document.createRange();
+      range.selectNodeContents(this.inputArea);
+      range.collapse(false);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      
+      this.updateInputInfoBar();
+    }
+  }
+
+  private async clearDraft(): Promise<void> {
+    const sessionInfo = this.chatManager.getSessionInfo();
+    const sessionId = sessionInfo.sessionId;
+    if (!sessionId) return;
+    
+    const pluginData = await this.plugin.loadData();
+    if (pluginData && pluginData.drafts && pluginData.drafts[sessionId]) {
+      delete pluginData.drafts[sessionId];
+      await this.plugin.saveData(pluginData);
+    }
+  }
+
+  private renderSteerCard(message: string, container: HTMLElement): HTMLElement {
+    const card = container.createDiv('chat-steer-card');
+    
+    const iconEl = card.createSpan('steer-card-icon');
+    setIcon(iconEl, 'lightbulb');
+    
+    const contentEl = card.createDiv('steer-card-content');
+    
+    const titleEl = contentEl.createDiv('steer-card-title');
+    titleEl.setText('人类动态引导');
+    
+    const textEl = contentEl.createDiv('steer-card-text');
+    textEl.setText(message);
+    
+    return card;
   }
 
   async onClose(): Promise<void> {

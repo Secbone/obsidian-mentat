@@ -124,6 +124,24 @@ export class BaseAgent {
     while (state.turnCount < state.maxTurns) {
       state.turnCount++;
 
+      // 运行时动态插嘴检测与上下文拼接 (Dynamic Steering)
+      if (context.pendingSteerMessages && context.pendingSteerMessages.length > 0) {
+        const steerTexts = [...context.pendingSteerMessages];
+        context.pendingSteerMessages = []; // 清空
+
+        for (const steerText of steerTexts) {
+          // 产生一个人类引导的事件，推送给前端 UI 记录
+          yield { type: 'steer', message: steerText };
+
+          // 强行将这一步的人类干预追加到大模型当前轮的 context messages 中！
+          state.messages.push({
+            role: 'user',
+            content: `[HUMAN DYNAMIC INTERVENTION]: ${steerText}`,
+            timestamp: Date.now()
+          });
+        }
+      }
+
       yield { type: 'status', message: `正在思考 (第 ${state.turnCount} 轮)...` };
 
       // Node A: Stream Model

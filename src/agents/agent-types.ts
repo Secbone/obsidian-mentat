@@ -23,6 +23,7 @@ export interface AgentContext {
   messages: ChatMessage[];
   sessionId: string;
   metadata?: Record<string, any>;
+  pendingSteerMessages?: string[];
 }
 
 /**
@@ -46,6 +47,7 @@ export type AgentEvent =
   | { type: 'skill_success'; name: string; result: any }
   | { type: 'skill_error'; name: string; error: string }
   | { type: 'confirm_request'; skillName: string; params: any; message: string }
+  | { type: 'steer'; message: string }
   | { type: 'error'; message: string };
 
 /**

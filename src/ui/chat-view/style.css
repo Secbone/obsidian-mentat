@@ -239,6 +239,9 @@
   border-top: 1px solid var(--background-modifier-border);
   padding: 12px;
   background-color: var(--background-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .chat-input-wrapper {
@@ -254,33 +257,168 @@
   box-shadow: 0 0 0 2px rgba(88, 86, 214, 0.1);
 }
 
+/* Steer mode breathing border pulse */
+.chat-input-wrapper.is-streaming:focus-within {
+  border-color: #d97706; /* Amber color */
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15), 0 0 8px rgba(217, 119, 6, 0.25);
+  animation: steer-border-pulse 2s infinite ease-in-out;
+}
+
+@keyframes steer-border-pulse {
+  0% {
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15), 0 0 4px rgba(217, 119, 6, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.25), 0 0 10px rgba(217, 119, 6, 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15), 0 0 4px rgba(217, 119, 6, 0.15);
+  }
+}
+
 .chat-input {
   width: 100%;
   min-height: 38px;
-  max-height: 150px;
+  max-height: 180px;
   padding: 10px 40px 10px 12px;
   border: none;
   border-radius: 8px;
-  resize: none;
   font-family: var(--font-interface);
   font-size: 13px;
   line-height: 1.5;
   background-color: transparent;
   color: var(--text-normal);
   overflow-y: auto;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: height 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chat-input:focus {
   outline: none;
 }
 
-.chat-input::placeholder {
+/* Placeholder for ContentEditable empty state */
+.chat-input:empty::before {
+  content: attr(placeholder);
+  color: var(--text-faint);
+  pointer-events: none;
+  display: block;
+}
+
+/* Document Capsule/Pill inline elements */
+.mentat-doc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: var(--background-modifier-accent-subtle, rgba(88, 86, 214, 0.12));
+  color: var(--interactive-accent, #5856d6);
+  border: 1px solid rgba(88, 86, 214, 0.25);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin: 1px 2px;
+  font-size: 12.5px;
+  font-weight: 500;
+  user-select: none;
+  vertical-align: middle;
+}
+
+.mentat-doc-pill .remove-pill {
+  font-weight: bold;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.mentat-doc-pill .remove-pill:hover {
+  color: var(--text-error, #f43f5e);
+}
+
+/* Glassmorphism Autocomplete Dropdown list */
+.mentat-suggest-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  max-height: 220px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.mentat-suggest-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.mentat-suggest-item.is-selected,
+.mentat-suggest-item:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.mentat-suggest-item-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mentat-suggest-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mentat-suggest-item-desc {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-left: auto;
+}
+
+/* Input word counts & context badges */
+.chat-input-info-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px;
+  font-size: 10.5px;
   color: var(--text-faint);
 }
 
-.chat-input:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.chat-input-badges {
+  display: flex;
+  gap: 6px;
+}
+
+.chat-input-badge {
+  background-color: var(--background-secondary-alt);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
 }
 
 /* Send button (positioned inside input) */
@@ -299,7 +437,8 @@
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
   cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.15s ease, background-color 0.15s ease;
+  z-index: 10;
 }
 
 .chat-send-button:hover {
@@ -314,6 +453,17 @@
   opacity: 0.5;
   cursor: not-allowed;
   transform: scale(1);
+}
+
+/* Dynamic Steering mode sending style */
+.chat-send-button.is-steer-mode {
+  background-color: #d97706; /* Amber */
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.3);
+}
+
+.chat-send-button.is-steer-mode:hover {
+  background-color: #b45309;
 }
 
 .chat-send-button svg {
@@ -563,4 +713,54 @@
 .chat-warning-callout-header svg {
   width: 16px;
   height: 16px;
+}
+
+/* ===== HUMAN STEER TIMELINE CARD ===== */
+.chat-steer-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background-color: var(--background-secondary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-left: 4px solid #d97706; /* Amber border */
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 14px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.chat-steer-card .steer-card-icon {
+  width: 20px;
+  height: 20px;
+  color: #d97706;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-steer-card .steer-card-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.chat-steer-card .steer-card-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-steer-card .steer-card-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #d97706;
+}
+
+.chat-steer-card .steer-card-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-normal);
 }

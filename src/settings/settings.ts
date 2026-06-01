@@ -82,6 +82,9 @@ export interface PersonalAgentSettings {
 
   // Toggle for multi-agent cooperative Draft-Review loop
   draftReviewModeEnabled?: boolean;
+
+  // Input area send options
+  sendWithCmdEnter?: boolean;
 }
 
 export interface SkillConfig {
@@ -196,5 +199,6 @@ export const DEFAULT_SETTINGS: PersonalAgentSettings = {
   diagnosticsFolder: 'Mentat/Diagnostics',
   userSystemPromptPreferences: '',
   userConfigFolder: 'Mentat/Config',
-  draftReviewModeEnabled: true
+  draftReviewModeEnabled: true,
+  sendWithCmdEnter: false
 };

@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, Modal, setIcon } from 'obsidian';
 import PersonalAgentPlugin from '../main';
 import { AIProviderConfig } from './settings';
 import { ProviderEditModal } from './provider-edit-modal';
@@ -404,162 +404,7 @@ ${folderGuidelines}
         .setButtonText('Rebuild Knowledge Map')
         .setWarning()
         .onClick(() => {
-          new RebuildConfirmModal(
-            this.app,
-            // 1. Fast Local Rebuild Callback
-            async () => {
-              try {
-                const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
-                const mapPath = `${folderPath}/vault-map.md`;
-                const vault = this.plugin.app.vault;
-
-                // Auto-create folder paths if they do not exist
-                if (!(await vault.adapter.exists(folderPath))) {
-                  const folders = folderPath.split('/');
-                  let currentFolder = '';
-                  for (const folder of folders) {
-                    if (!folder) continue;
-                    currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
-                    if (!(await vault.adapter.exists(currentFolder))) {
-                      await vault.createFolder(currentFolder);
-                    }
-                  }
-                }
-
-                // Scan vault markdown files to identify top largest directories
-                const allFiles = vault.getMarkdownFiles();
-                const folderCounts = new Map<string, number>();
-                
-                allFiles.forEach(file => {
-                  if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
-                    const p = file.parent.path;
-                    folderCounts.set(p, (folderCounts.get(p) || 0) + 1);
-                  }
-                });
-
-                // Sort and pick top 3 largest folders
-                const topFolders = Array.from(folderCounts.entries())
-                  .sort((a, b) => b[1] - a[1])
-                  .slice(0, 3)
-                  .map(([p]) => p);
-
-                // If no folders found, fallback to standard guidelines
-                const folderGuidelines = topFolders.length > 0
-                  ? topFolders.map(folder => `- \`[[${folder}/]]\`: Describe what kind of notes should go here (e.g., academic research, active projects, daily journals).`).join('\n')
-                  : `- \`[[Research/]]\`: Used for deep-dives, academic papers, and study notes.\n- \`[[Projects/]]\`: Used for active work, tracking goals, and task plans.\n- \`[[Inbox/]]\`: Place for raw ideas, quick thoughts, and unprocessed inputs.`;
-
-                const defaultTemplate = `# 🗺️ Vault Knowledge Structure Map
-
-This document defines the high-level knowledge organization and directory roles of my Obsidian vault.
-
-> [!note]
-> Write your folder descriptions, naming rules, and category workflows below. Mentat dynamically reads this file to decide where to store new files, how concepts relate, and which directories to query first.
-
-## 📁 Core Folder Guidelines
-${folderGuidelines}
-
-## 🏷️ Category Workflows & Wiki-Linking
-- Define folder roles clearly so the agent knows exactly where new files belong.
-- Document naming conventions (e.g., prefixing research plans with \`Research_Plan_\`).
-- Outline relationships (e.g., notes in \`Inbox/\` should eventually be polished and moved to \`Research/\`).
-`;
-                // Overwrite existing file content or create it if missing
-                if (await vault.adapter.exists(mapPath)) {
-                  await vault.adapter.write(mapPath, defaultTemplate);
-                } else {
-                  await vault.create(mapPath, defaultTemplate);
-                }
-
-                // Open in active editor
-                const tFile = vault.getAbstractFileByPath(mapPath);
-                if (tFile) {
-                  const leaf = this.app.workspace.getLeaf(false);
-                  await leaf.openFile(tFile as any);
-                  new Notice('⚡ 知识地图本地快速重建成功！');
-                } else {
-                  new Notice('Failed to locate rebuilt vault map file');
-                }
-              } catch (err) {
-                new Notice(`Failed to rebuild vault map: ${err.message}`);
-              }
-            },
-            // 2. AI-Assisted Rebuild Callback
-            async () => {
-              const loadingNotice = new Notice('🧠 AI 正在深度分析您的知识库并规划知识地图，这可能需要 5-10 秒，请稍候...', 0);
-              try {
-                await this.plugin.chatOrchestrator.aiRebuildVaultMap();
-                loadingNotice.hide();
-
-                // Open in active editor
-                const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
-                const mapPath = `${folderPath}/vault-map.md`;
-                const tFile = this.plugin.app.vault.getAbstractFileByPath(mapPath);
-                if (tFile) {
-                  const leaf = this.app.workspace.getLeaf(false);
-                  await leaf.openFile(tFile as any);
-                  new Notice('🎉 知识地图 AI 智能重建成功！已为您定制最新的文件夹指南与工作流规则。');
-                }
-              } catch (err) {
-                loadingNotice.hide();
-                new Notice(`❌ AI 智能重建失败: ${err.message}\n正在自动为您切换至本地快速重建模式...`);
-                console.error('[SettingsTab] AI Rebuild failed:', err);
-                
-                // Fallback to local rebuild automatically
-                try {
-                  const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
-                  const mapPath = `${folderPath}/vault-map.md`;
-                  const vault = this.plugin.app.vault;
-
-                  // Overwrite with local template
-                  const allFiles = vault.getMarkdownFiles();
-                  const folderCounts = new Map<string, number>();
-                  allFiles.forEach(file => {
-                    if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
-                      const p = file.parent.path;
-                      folderCounts.set(p, (folderCounts.get(p) || 0) + 1);
-                    }
-                  });
-                  const topFolders = Array.from(folderCounts.entries())
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 3)
-                    .map(([p]) => p);
-                  const folderGuidelines = topFolders.length > 0
-                    ? topFolders.map(folder => `- \`[[${folder}/]]\`: Describe what kind of notes should go here (e.g., academic research, active projects, daily journals).`).join('\n')
-                    : `- \`[[Research/]]\`: Used for deep-dives, academic papers, and study notes.\n- \`[[Projects/]]\`: Used for active work, tracking goals, and task plans.\n- \`[[Inbox/]]\`: Place for raw ideas, quick thoughts, and unprocessed inputs.`;
-
-                  const defaultTemplate = `# 🗺️ Vault Knowledge Structure Map
-
-This document defines the high-level knowledge organization and directory roles of my Obsidian vault.
-
-> [!note]
-> Write your folder descriptions, naming rules, and category workflows below. Mentat dynamically reads this file to decide where to store new files, how concepts relate, and which directories to query first.
-
-## 📁 Core Folder Guidelines
-${folderGuidelines}
-
-## 🏷️ Category Workflows & Wiki-Linking
-- Define folder roles clearly so the agent knows exactly where new files belong.
-- Document naming conventions (e.g., prefixing research plans with \`Research_Plan_\`).
-- Outline relationships (e.g., notes in \`Inbox/\` should eventually be polished and moved to \`Research/\`).
-`;
-                  if (await vault.adapter.exists(mapPath)) {
-                    await vault.adapter.write(mapPath, defaultTemplate);
-                  } else {
-                    await vault.create(mapPath, defaultTemplate);
-                  }
-
-                  const tFile = vault.getAbstractFileByPath(mapPath);
-                  if (tFile) {
-                    const leaf = this.app.workspace.getLeaf(false);
-                    await leaf.openFile(tFile as any);
-                    new Notice('⚡ 自动回退：本地快速重建成功！');
-                  }
-                } catch (fallbackErr) {
-                  new Notice(`❌ 本地回退重建也失败了: ${fallbackErr.message}`);
-                }
-              }
-            }
-          ).open();
+          new RebuildConfirmModal(this.app, this.plugin).open();
         }));
   }
 
@@ -585,6 +430,16 @@ ${folderGuidelines}
             await this.plugin.saveSettings();
           }));
     });
+
+    new Setting(containerEl)
+      .setName('Use Cmd/Ctrl+Enter to Send')
+      .setDesc('Requires pressing Cmd/Ctrl+Enter to send chat messages, making Enter insert a newline instead.')
+      .addToggle(toggle => toggle
+        .setValue(!!this.plugin.settings.sendWithCmdEnter)
+        .onChange(async (value) => {
+          this.plugin.settings.sendWithCmdEnter = value;
+          await this.plugin.saveSettings();
+        }));
   }
 
   displayPerformanceSection(containerEl: HTMLElement): void {
@@ -630,32 +485,42 @@ ${folderGuidelines}
       .setName('Agent Max Turns')
       .setDesc('Maximum number of iterations the AI agent can perform when executing tasks (1-99). Default: 20. Higher values allow for more complex multi-step operations.');
 
+    let textCtrl: any = null;
+    let sliderCtrl: any = null;
+
     // Add text input for precise control
-    maxTurnsSetting.addText(text => text
-      .setPlaceholder('20')
-      .setValue(String(this.plugin.settings.maxTurns))
-      .onChange(async (value) => {
-        const numValue = parseInt(value);
-        if (!isNaN(numValue) && numValue >= 1 && numValue <= 99) {
-          this.plugin.settings.maxTurns = numValue;
-          await this.plugin.saveSettings();
-        }
-      }));
+    maxTurnsSetting.addText(text => {
+      textCtrl = text;
+      text
+        .setPlaceholder('20')
+        .setValue(String(this.plugin.settings.maxTurns))
+        .onChange(async (value) => {
+          const numValue = parseInt(value);
+          if (!isNaN(numValue) && numValue >= 1 && numValue <= 99) {
+            this.plugin.settings.maxTurns = numValue;
+            await this.plugin.saveSettings();
+            if (sliderCtrl) {
+              sliderCtrl.setValue(numValue);
+            }
+          }
+        });
+    });
 
     // Add slider for quick adjustment
-    maxTurnsSetting.addSlider(slider => slider
-      .setLimits(1, 99, 1)
-      .setValue(this.plugin.settings.maxTurns)
-      .setDynamicTooltip()
-      .onChange(async (value) => {
-        this.plugin.settings.maxTurns = value;
-        await this.plugin.saveSettings();
-        // Update text input
-        const textInput = containerEl.querySelector('.setting-item:last-child input[type="text"]') as HTMLInputElement;
-        if (textInput) {
-          textInput.value = String(value);
-        }
-      }));
+    maxTurnsSetting.addSlider(slider => {
+      sliderCtrl = slider;
+      slider
+        .setLimits(1, 99, 1)
+        .setValue(this.plugin.settings.maxTurns)
+        .setDynamicTooltip()
+        .onChange(async (value) => {
+          this.plugin.settings.maxTurns = value;
+          await this.plugin.saveSettings();
+          if (textCtrl) {
+            textCtrl.setValue(String(value));
+          }
+        });
+    });
 
     // Add reset button
     maxTurnsSetting.addExtraButton(button => button
@@ -936,53 +801,362 @@ ${folderGuidelines}
 }
 
 class RebuildConfirmModal extends Modal {
-  private onConfirmLocal: () => void;
-  private onConfirmAI: () => void;
+  private plugin: PersonalAgentPlugin;
+  private stage: 'confirm' | 'loading' | 'success' | 'error' = 'confirm';
+  private progressVal: number = 0;
+  private statusMsg: string = '';
+  private errorMsg: string = '';
+  private isCancelled: boolean = false;
 
-  constructor(app: App, onConfirmLocal: () => void, onConfirmAI: () => void) {
+  constructor(app: App, plugin: PersonalAgentPlugin) {
     super(app);
-    this.onConfirmLocal = onConfirmLocal;
-    this.onConfirmAI = onConfirmAI;
+    this.plugin = plugin;
   }
 
   onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl('h2', { text: '🗺️ 重建知识地图 (Rebuild Knowledge Map)' });
-    contentEl.createEl('p', {
-      text: '请选择如何重新构建 `vault-map.md` 文件。重建将扫描您当前的文件夹结构、最常使用的标签和最新笔记。您之前手动写入的自定义规则和配置将会被覆盖。'
-    });
-
-    const buttonContainer = contentEl.createDiv({ cls: 'modal-button-container' });
-    buttonContainer.style.display = 'flex';
-    buttonContainer.style.justifyContent = 'flex-end';
-    buttonContainer.style.gap = '10px';
-    buttonContainer.style.marginTop = '20px';
-
-    const cancelButton = buttonContainer.createEl('button', { text: '取消' });
-    cancelButton.addEventListener('click', () => this.close());
-
-    const localButton = buttonContainer.createEl('button', {
-      text: '⚡ 快速本地重建',
-      cls: 'mod-neutral'
-    });
-    localButton.style.marginRight = 'auto'; // push local button to the left
-    localButton.addEventListener('click', () => {
-      this.onConfirmLocal();
-      this.close();
-    });
-
-    const aiButton = buttonContainer.createEl('button', {
-      text: '🧠 AI 智能重建 (推荐)',
-      cls: 'mod-cta'
-    });
-    aiButton.addEventListener('click', () => {
-      this.onConfirmAI();
-      this.close();
-    });
+    this.updateUI();
   }
 
   onClose() {
     this.contentEl.empty();
+  }
+
+  async runLocalRebuild() {
+    try {
+      this.isCancelled = false;
+      this.stage = 'loading';
+      this.progressVal = 20;
+      this.statusMsg = '正在扫描本地库文件夹结构...';
+      this.updateUI();
+
+      const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+      const mapPath = `${folderPath}/vault-map.md`;
+      const vault = this.plugin.app.vault;
+
+      if (this.isCancelled) return;
+
+      // Ensure config folder exists
+      if (!(await vault.adapter.exists(folderPath))) {
+        const folders = folderPath.split('/');
+        let currentFolder = '';
+        for (const folder of folders) {
+          if (!folder) continue;
+          currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
+          if (!(await vault.adapter.exists(currentFolder))) {
+            await vault.createFolder(currentFolder);
+          }
+        }
+      }
+
+      if (this.isCancelled) return;
+      this.progressVal = 50;
+      this.statusMsg = '正在分析并统计最常使用的目录...';
+      this.updateUI();
+
+      const allFiles = vault.getMarkdownFiles();
+      const folderCounts = new Map<string, number>();
+
+      allFiles.forEach(file => {
+        if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
+          const p = file.parent.path;
+          folderCounts.set(p, (folderCounts.get(p) || 0) + 1);
+        }
+      });
+
+      const topFolders = Array.from(folderCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([p]) => p);
+
+      const folderGuidelines = topFolders.length > 0
+        ? topFolders.map(folder => `- \`[[${folder}/]]\`: 描述此目录中应放置的笔记类型（例如：学术研究、活跃项目、每日日志等）。`).join('\n')
+        : `- \`[[Research/]]\`: 用于深度探讨、学术论文和学习笔记。\n- \`[[Projects/]]\`: 用于正在进行的工作、跟踪目标和任务计划。\n- \`[[Inbox/]]\`: 用于存放原始想法、碎片化思考和未处理的输入。`;
+
+      const defaultTemplate = `# 🗺️ 库知识结构地图 (Vault Knowledge Structure Map)
+
+此文档定义了我的 Obsidian 库的高水平知识组织和目录角色。
+
+> [!note]
+> 请在下方编写您的文件夹描述、命名规则和分类工作流。Mentat 会动态读取此文件，以决定新文件的存储位置、概念关联方式以及优先查询哪些目录。
+
+## 📁 核心文件夹指南
+${folderGuidelines}
+
+## 🏷️ 类别工作流与百科双链关联 (Category Workflows & Wiki-Linking)
+- 清晰定义文件夹角色，使 AI 助手确切了解新文件归属。
+- 记录命名约定（例如，将研究计划前缀命名为 \`Research_Plan_\`）。
+- 规划关联关系（例如，\`Inbox/\` 中的粗糙笔记最终应整理并移至 \`Research/\` 或 \`Projects/\`）。
+`;
+
+      if (this.isCancelled) return;
+      this.progressVal = 80;
+      this.statusMsg = '正在将本地模板写入 vault-map.md...';
+      this.updateUI();
+
+      if (await vault.adapter.exists(mapPath)) {
+        await vault.adapter.write(mapPath, defaultTemplate);
+      } else {
+        await vault.create(mapPath, defaultTemplate);
+      }
+
+      if (this.isCancelled) return;
+      this.progressVal = 100;
+      this.statusMsg = '本地快速重建完成！';
+      this.stage = 'success';
+      this.updateUI();
+    } catch (err) {
+      if (this.isCancelled) return;
+      this.stage = 'error';
+      this.errorMsg = `本地重建失败: ${err.message}`;
+      this.updateUI();
+    }
+  }
+
+  async runAIRebuild() {
+    try {
+      this.isCancelled = false;
+      this.stage = 'loading';
+      this.progressVal = 5;
+      this.statusMsg = '正在启动 AI 智能重建分析器...';
+      this.updateUI();
+
+      await this.plugin.chatOrchestrator.aiRebuildVaultMap((stage, percent) => {
+        if (this.isCancelled) return;
+        this.progressVal = percent;
+        this.statusMsg = stage;
+        this.updateUI();
+      });
+
+      if (this.isCancelled) return;
+      this.stage = 'success';
+      this.progressVal = 100;
+      this.updateUI();
+    } catch (err) {
+      if (this.isCancelled) return;
+      this.stage = 'error';
+      this.errorMsg = err.message || String(err);
+      this.updateUI();
+    }
+  }
+
+  cancelRebuild() {
+    this.isCancelled = true;
+    this.close();
+  }
+
+  async openVaultMapFile() {
+    try {
+      const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+      const mapPath = `${folderPath}/vault-map.md`;
+      const tFile = this.plugin.app.vault.getAbstractFileByPath(mapPath);
+      if (tFile) {
+        const leaf = this.plugin.app.workspace.getLeaf(false);
+        await leaf.openFile(tFile as any);
+        new Notice('🎉 已为您打开知识地图！');
+      } else {
+        new Notice('❌ 找不到重建后的知识地图文件');
+      }
+    } catch (e) {
+      new Notice(`无法打开知识地图: ${e.message}`);
+    }
+  }
+
+  updateUI() {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    // 动态更新 Obsidian 弹窗的标准标题，达到极致的内置原生体验
+    let modalTitle = '🗺️ 重建知识地图';
+    if (this.stage === 'loading') {
+      modalTitle = '🗺️ 正在重建知识地图...';
+    } else if (this.stage === 'success') {
+      modalTitle = '🎉 知识地图重建成功';
+    } else if (this.stage === 'error') {
+      modalTitle = '❌ AI 智能重建失败';
+    }
+    this.titleEl.setText(modalTitle);
+
+    // 弹窗基础布局容器
+    const container = contentEl.createDiv({ cls: 'rebuild-modal-container' });
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    container.style.gap = '16px';
+    container.style.padding = '5px 0';
+
+    if (this.stage === 'confirm') {
+      // 1. 确认阶段描述
+      container.createEl('p', {
+        text: '重建将深度分析您当前的文件夹结构、高频标签和最新笔记。AI 智能重建会利用 LLM 自动规划适合您知识库的定制化目录指南与命名工作流。',
+        style: 'line-height: 1.6; color: var(--text-muted); font-size: 0.95em; margin: 0;'
+      });
+      
+      // 完全使用 Obsidian 内置原生 Callout 结构，自动适配用户安装的任意第三方主题
+      const callout = container.createDiv({ cls: 'callout' });
+      callout.setAttribute('data-callout', 'warning');
+      callout.style.margin = '0';
+      callout.style.padding = '12px 16px';
+      callout.style.borderRadius = 'var(--radius-s)';
+      
+      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px;' });
+      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' });
+      setIcon(calloutIcon, 'alert-triangle'); // 完美地道地渲染原生图标
+      calloutTitle.createDiv({ cls: 'callout-title-inner', text: '注意' });
+
+      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' });
+      calloutContent.createSpan({ text: '此操作将完全覆盖您目前在 ' });
+      calloutContent.createEl('code', { text: 'vault-map.md' });
+      calloutContent.createSpan({ text: ' 文件中手动修改或定制的所有内容，请在重建前做好备份。' });
+
+      // 按钮区域：利用 Obsidian 原生 modal-button-container 自动排版
+      const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
+      buttonContainer.style.display = 'flex';
+      buttonContainer.style.justifyContent = 'flex-end';
+      buttonContainer.style.gap = '10px';
+      buttonContainer.style.marginTop = '10px';
+
+      // ⚡ 快速本地重建按钮 (中性)
+      const localButton = buttonContainer.createEl('button', {
+        text: '⚡ 快速本地重建',
+        cls: 'mod-neutral'
+      });
+      localButton.addEventListener('click', () => this.runLocalRebuild());
+
+      // 🧠 AI 智能重建按钮 (推荐 CTA)
+      const aiButton = buttonContainer.createEl('button', {
+        text: '🧠 AI 智能重建 (推荐)',
+        cls: 'mod-cta'
+      });
+      aiButton.addEventListener('click', () => this.runAIRebuild());
+
+      // 取消按钮
+      const cancelButton = buttonContainer.createEl('button', { text: '取消' });
+      cancelButton.addEventListener('click', () => this.close());
+
+    } else if (this.stage === 'loading') {
+      // 2. 加载阶段
+      container.createEl('p', {
+        text: '我们正在分析您库中的笔记分布和组织结构，并为您量身定制最新的知识树规范与类别关联工作流。',
+        style: 'color: var(--text-muted); font-size: 0.95em; line-height: 1.5; margin: 0;'
+      });
+
+      // 极细简约自定义进度条设计
+      const progressWrapper = container.createDiv();
+      progressWrapper.style.margin = '10px 0';
+      progressWrapper.style.display = 'flex';
+      progressWrapper.style.flexDirection = 'column';
+      progressWrapper.style.gap = '8px';
+
+      // 自定义极细进度条背景槽
+      const progressContainer = progressWrapper.createDiv({
+        style: 'width: 100%; height: 6px; background-color: var(--background-modifier-border); border-radius: 3px; overflow: hidden;'
+      });
+
+      // 动态平滑进度条
+      progressContainer.createDiv({
+        style: `width: ${this.progressVal}%; height: 100%; background-color: var(--interactive-accent); border-radius: 3px; transition: width 0.3s ease;`
+      });
+
+      const progressInfo = progressWrapper.createDiv({
+        style: 'display: flex; justify-content: space-between; font-size: 0.85em; color: var(--text-muted); align-items: center;'
+      });
+
+      // 步骤文字
+      progressInfo.createSpan({ text: this.statusMsg, style: 'font-weight: 500;' });
+      // 百分比提示
+      progressInfo.createSpan({ text: `${this.progressVal}%`, style: 'font-weight: 600; color: var(--interactive-accent);' });
+
+      // 取消重建按钮容器
+      const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
+      buttonContainer.style.display = 'flex';
+      buttonContainer.style.justifyContent = 'flex-end';
+      buttonContainer.style.marginTop = '10px';
+
+      const cancelButton = buttonContainer.createEl('button', {
+        text: '取消重建',
+        cls: 'mod-warning'
+      });
+      cancelButton.addEventListener('click', () => this.cancelRebuild());
+
+    } else if (this.stage === 'success') {
+      // 3. 成功阶段
+      // 内置原生绿色 Alert/Callout 卡片表示成功，完美而克制
+      const callout = container.createDiv({ cls: 'callout' });
+      callout.setAttribute('data-callout', 'success');
+      callout.style.margin = '0';
+      callout.style.padding = '12px 16px';
+      callout.style.borderRadius = 'var(--radius-s)';
+      
+      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-success);' });
+      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' });
+      setIcon(calloutIcon, 'check-circle');
+      calloutTitle.createDiv({ cls: 'callout-title-inner', text: '重建成功！' });
+
+      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' });
+      calloutContent.createSpan({ text: 'Mentat 已经成功分析了您的整个知识库，并为您定制了最新的文件夹指南、命名规则和类别工作流。配置指南已保存在您的配置目录中。' });
+
+      const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
+      buttonContainer.style.display = 'flex';
+      buttonContainer.style.justifyContent = 'flex-end';
+      buttonContainer.style.gap = '10px';
+      buttonContainer.style.marginTop = '10px';
+
+      // 👁️ 立即查看按钮
+      const viewButton = buttonContainer.createEl('button', {
+        text: '👁️ 立即查看',
+        cls: 'mod-cta'
+      });
+      viewButton.addEventListener('click', async () => {
+        await this.openVaultMapFile();
+        this.close();
+      });
+
+      // 仅关闭按钮
+      const closeButton = buttonContainer.createEl('button', {
+        text: '仅关闭'
+      });
+      closeButton.addEventListener('click', () => this.close());
+
+    } else if (this.stage === 'error') {
+      // 4. 失败阶段
+      const callout = container.createDiv({ cls: 'callout' });
+      callout.setAttribute('data-callout', 'error');
+      callout.style.margin = '0';
+      callout.style.padding = '12px 16px';
+      callout.style.borderRadius = 'var(--radius-s)';
+      
+      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-error);' });
+      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' });
+      setIcon(calloutIcon, 'x-circle');
+      calloutTitle.createDiv({ cls: 'callout-title-inner', text: 'AI 智能重建遇到异常' });
+
+      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' });
+      calloutContent.createSpan({ text: '在通过 AI 生成知识地图时遇到了异常。这通常是因为未配置 AI 服务商、网络连接超时或 API 额度不足。' });
+
+      // 错误详情框
+      const errorBox = container.createEl('pre', {
+        style: 'background-color: var(--background-secondary); border: 1px solid var(--border-color); padding: 12px; border-radius: 4px; font-family: var(--font-monospace); font-size: 0.85em; color: var(--text-error); overflow-x: auto; max-height: 120px; white-space: pre-wrap; margin: 10px 0 0 0;'
+      });
+      errorBox.createSpan({ text: `错误详情：\n${this.errorMsg}` });
+
+      const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
+      buttonContainer.style.display = 'flex';
+      buttonContainer.style.justifyContent = 'flex-end';
+      buttonContainer.style.gap = '10px';
+      buttonContainer.style.marginTop = '10px';
+
+      // ⚡ 切换本地重建按钮 (在左侧)
+      const localButton = buttonContainer.createEl('button', {
+        text: '⚡ 切换本地快速重建',
+        cls: 'mod-neutral'
+      });
+      localButton.style.marginRight = 'auto'; // 按钮居左对齐
+      localButton.addEventListener('click', () => this.runLocalRebuild());
+
+      // 关闭按钮
+      const closeButton = buttonContainer.createEl('button', {
+        text: '关闭'
+      });
+      closeButton.addEventListener('click', () => this.close());
+    }
   }
 }

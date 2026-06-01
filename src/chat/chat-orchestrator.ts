@@ -21,6 +21,7 @@ export interface ChatQueryOptions {
   enableSkills?: boolean;
   maxTurns?: number;
   contextMessages?: ChatMessage[];
+  context?: AgentContext;
 }
 
 export interface ChatQueryResult {
@@ -152,7 +153,7 @@ export class ChatOrchestrator {
       throw new Error('ChatOrchestrator not initialized');
     }
 
-    const context: AgentContext = {
+    const context: AgentContext = options.context || {
       messages: options.contextMessages || [],
       sessionId: Date.now().toString(),
       metadata: {
@@ -339,6 +340,7 @@ RULES:
 - Use available skills to help the user manage their knowledge base
 - Be concise but thorough
 - When creating or editing Obsidian files, use proper Obsidian-Flavored Markdown syntax
+- **MANDATORY STREAMING FINAL ANSWER WRAPPING (CRITICAL)**: When you have finished all necessary tool calls and reasoning, and are ready to provide your final answer to the user, you MUST strictly wrap your final user-facing response inside \`<final_answer>\` and \`</final_answer>\` tags. Anything outside these tags (such as your intermediate explanations, thoughts, or plans) will be treated as internal reasoning chain and hidden from the user's primary chat bubble. Keep your final answer comprehensive and completely self-contained.
 
 OBSIDIAN SYNTAX CHEAT SHEET:
 - Internal Links: ALWAYS use Wikilinks \`[[Note Name]]\` or \`[[Note Name|Display Text]]\` instead of standard markdown links.
@@ -461,12 +463,13 @@ ${folderGuidelines}
    * Scans vault directories, collects note counts, popular tags, and recent file names,
    * then feeds this structural context to the active LLM to generate highly personalized guidelines.
    */
-  async aiRebuildVaultMap(): Promise<void> {
+  async aiRebuildVaultMap(onProgress?: (stage: string, percent: number) => void): Promise<void> {
     const configFolder = this.plugin.settings.userConfigFolder || 'Mentat/Config';
     const mapPath = `${configFolder}/vault-map.md`;
     const vault = this.plugin.app.vault;
 
     // 1. Gather all files in the vault to analyze folder structures, file names, and tag frequencies
+    onProgress?.('正在扫描库中的文件夹与笔记结构...', 15);
     const allFiles = vault.getMarkdownFiles();
     const folderStats = new Map<string, { noteCount: number; files: { name: string; mtime: number }[]; tags: Map<string, number> }>();
 
@@ -494,6 +497,7 @@ ${folderGuidelines}
     });
 
     // Process the stats to compile structured metadata for the LLM
+    onProgress?.('正在整理并分析热门标签与最新笔记样本...', 35);
     const analyzedFolders: any[] = [];
     folderStats.forEach((stat, folder) => {
       // Sort files by modification time descending and pick top 5
@@ -541,6 +545,7 @@ Guidelines for generating the "vault-map.md" file:
 Return the finalized markdown content:`;
 
     // 4. Call LLM to generate the content
+    onProgress?.('正在调用 AI 智能服务商规划知识库结构指南 (大约需要 5-10 秒)...', 65);
     const response = await provider.generate(prompt);
     if (!response || !response.trim()) {
       throw new Error('AI 生成了空内容，请重试。 (AI returned empty response)');
@@ -549,6 +554,7 @@ Return the finalized markdown content:`;
     const cleanMarkdown = response.replace(/^```markdown\n/i, '').replace(/```$/i, '').trim();
 
     // 5. Ensure config folder exists
+    onProgress?.('正在保存并写入本地地图配置文件...', 90);
     if (!(await vault.adapter.exists(configFolder))) {
       const folders = configFolder.split('/');
       let currentFolder = '';
