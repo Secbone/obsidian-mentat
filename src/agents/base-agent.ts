@@ -526,7 +526,8 @@ export class BaseAgent {
       });
     }
 
-    if (state.turnCount >= state.maxTurns) {
+    const isLimitReached = state.turnCount >= state.maxTurns;
+    if (isLimitReached) {
       console.warn('[BaseAgent] Reached maximum turns limit');
     }
 
@@ -538,6 +539,7 @@ export class BaseAgent {
       const lastMsg = assistantMsgs[assistantMsgs.length - 1];
       lastMsg.metadata = {
         ...lastMsg.metadata,
+        isMaxTurnsReached: isLimitReached || undefined,
         usage: {
           promptTokens,
           completionTokens,

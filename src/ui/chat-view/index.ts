@@ -975,11 +975,7 @@ export class ChatView extends ItemView {
     }, []);
 
     // Check if interrupted (limit reached)
-    const endedWithToolCalls = lastAssistantMsg && lastAssistantMsg.tool_calls && lastAssistantMsg.tool_calls.length > 0;
-    const hasUnrespondedToolCall = allToolCalls.some(tc => 
-      !turnMessages.some(m => m.role === 'tool' && m.tool_call_id === tc.id)
-    );
-    const isInterrupted = endedWithToolCalls || hasUnrespondedToolCall;
+    const isInterrupted = !!(lastAssistantMsg && lastAssistantMsg.metadata?.isMaxTurnsReached);
 
     // 1. Build TUI Console for Tool Calls if any
     if (allToolCalls.length > 0) {
