@@ -1140,9 +1140,10 @@ export class ChatView extends ItemView {
       // Render warning card
       const warningDiv = contentEl.createDiv('chat-warning-callout');
       const warningHeader = warningDiv.createDiv('chat-warning-callout-header');
+      const limit = this.plugin.settings.maxTurns || 20;
       warningHeader.innerHTML = `
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-        已达到最大运行迭代次数限制 (20 轮)
+        已达到最大运行迭代次数限制 (${limit} 轮)
       `;
       const warningText = warningDiv.createDiv();
       warningText.setText('智能体已被系统强制挂起，以防陷入无限循环。如果任务还未完成，您可以发送指令“继续”让其继续执行。');
