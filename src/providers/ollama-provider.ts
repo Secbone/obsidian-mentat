@@ -98,6 +98,7 @@ export class OllamaProvider implements AIProvider {
         headers: {
           'Content-Type': 'application/json'
         },
+        signal: options?.abortSignal,
         body: JSON.stringify({
           model: this.config.model,
           messages,

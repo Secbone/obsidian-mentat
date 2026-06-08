@@ -70,6 +70,8 @@ export class AnthropicProvider implements AIProvider {
             content: prompt
           }
         ]
+      }, {
+        signal: options?.abortSignal
       });
 
       for await (const event of stream) {
@@ -217,7 +219,9 @@ export class AnthropicProvider implements AIProvider {
         }
       }
 
-      const stream = await this.client.messages.stream(requestParams);
+      const stream = await this.client.messages.stream(requestParams, {
+        signal: options?.abortSignal
+      });
 
       let fullContent = '';
 

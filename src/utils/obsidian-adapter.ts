@@ -82,4 +82,24 @@ export class ObsidianAdapter implements IPlatformAdapter {
   async savePluginData(data: any): Promise<void> {
     await this.plugin.saveData(data);
   }
+
+  getApp(): any {
+    return this.app;
+  }
+
+  getVault(): any {
+    return this.app.vault;
+  }
+
+  getWorkspace(): any {
+    return this.app.workspace;
+  }
+
+  getMetadataCache(): any {
+    return this.app.metadataCache;
+  }
+
+  getPlugin(): any {
+    return this.plugin;
+  }
 }

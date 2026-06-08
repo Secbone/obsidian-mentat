@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ChatOrchestrator } from '../../src/chat/chat-orchestrator';
+import { VaultMapRebuilder } from '../../src/chat/vault-map-rebuilder';
 import { MemoryPlatformAdapter } from '../utils/memory-platform-adapter';
 
 describe('ChatOrchestrator - Semantic Vault Architecture (v2.4)', () => {
@@ -10,50 +11,46 @@ describe('ChatOrchestrator - Semantic Vault Architecture (v2.4)', () => {
   describe('getFileTags', () => {
     it('should extract and normalize tags from metadata cache tags array', () => {
       const platform = new MemoryPlatformAdapter();
-      const orchestrator = new ChatOrchestrator(platform, settings, {}, {});
 
       const mockFile = platform.addFile('Research/Paper.md', '', undefined, {
         tags: [{ tag: '#ai' }, { tag: 'deep-learning' }]
       });
 
-      const tags = (orchestrator as any).getFileTags(mockFile);
+      const tags = VaultMapRebuilder.getFileTags(mockFile, platform);
       expect(tags).toEqual(['ai', 'deep-learning']);
     });
 
     it('should extract and normalize tags from frontmatter array', () => {
       const platform = new MemoryPlatformAdapter();
-      const orchestrator = new ChatOrchestrator(platform, settings, {}, {});
 
       const mockFile = platform.addFile('Research/Paper.md', '', undefined, {
         frontmatter: { tags: ['rl', 'kto'] }
       });
 
-      const tags = (orchestrator as any).getFileTags(mockFile);
+      const tags = VaultMapRebuilder.getFileTags(mockFile, platform);
       expect(tags).toEqual(['rl', 'kto']);
     });
 
     it('should handle comma-separated string in frontmatter tags gracefully', () => {
       const platform = new MemoryPlatformAdapter();
-      const orchestrator = new ChatOrchestrator(platform, settings, {}, {});
 
       const mockFile = platform.addFile('Research/Paper.md', '', undefined, {
         frontmatter: { tags: 'dpo, sft, rlhf' }
       });
 
-      const tags = (orchestrator as any).getFileTags(mockFile);
+      const tags = VaultMapRebuilder.getFileTags(mockFile, platform);
       expect(tags).toEqual(['dpo', 'sft', 'rlhf']);
     });
 
     it('should deduplicate and clean tags correctly', () => {
       const platform = new MemoryPlatformAdapter();
-      const orchestrator = new ChatOrchestrator(platform, settings, {}, {});
 
       const mockFile = platform.addFile('Research/Paper.md', '', undefined, {
         tags: [{ tag: '#ai' }, { tag: 'AI' }],
         frontmatter: { tags: ['ai', 'nlp'] }
       });
 
-      const tags = (orchestrator as any).getFileTags(mockFile);
+      const tags = VaultMapRebuilder.getFileTags(mockFile, platform);
       expect(tags).toEqual(['ai', 'AI', 'nlp']);
     });
   });

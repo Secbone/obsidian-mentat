@@ -91,6 +91,8 @@ export class OpenAIProvider implements AIProvider {
         max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384,
         stream: true,
         stop: options?.stopSequences
+      }, {
+        signal: options?.abortSignal
       });
 
       for await (const chunk of stream) {
@@ -289,7 +291,9 @@ export class OpenAIProvider implements AIProvider {
         }
       }
 
-      const stream = await this.client.chat.completions.create(requestParams) as any;
+      const stream = await this.client.chat.completions.create(requestParams, {
+        signal: options?.abortSignal
+      }) as any;
 
       let fullContent = '';
       const toolCalls: ToolCall[] = [];

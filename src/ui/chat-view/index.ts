@@ -38,6 +38,8 @@ export class ChatView extends ItemView {
   private clearButton: HTMLButtonElement;
   private settingsButton: HTMLButtonElement;
   private exportDiagnosticsButton: HTMLButtonElement;
+  private stopButton: HTMLButtonElement;
+  private currentAbortController: AbortController | null = null;
   private documentPanel: HTMLElement;
   private documentList: HTMLElement;
   private addDocumentButton: HTMLButtonElement;
@@ -134,6 +136,11 @@ export class ChatView extends ItemView {
     this.exportDiagnosticsButton = actionsContainer.createEl('button', { cls: 'chat-icon-button' });
     setIcon(this.exportDiagnosticsButton, 'scroll');
     this.exportDiagnosticsButton.setAttribute('aria-label', 'Export Session Diagnostics');
+
+    this.stopButton = actionsContainer.createEl('button', { cls: 'chat-icon-button' });
+    setIcon(this.stopButton, 'square');
+    this.stopButton.setAttribute('aria-label', 'Stop generation');
+    this.stopButton.style.display = 'none';
 
     // Document panel (between header and messages)
     this.documentPanel = container.createDiv('document-panel');
@@ -395,6 +402,11 @@ export class ChatView extends ItemView {
     this.exportDiagnosticsButton.addEventListener('click', () => {
       DiagnosticsExporter.exportSession(this.plugin, this.chatManager);
     });
+
+    // Stop Generation
+    this.stopButton.addEventListener('click', () => {
+      this.handleCancel();
+    });
   }
 
   private async handleSteer(): Promise<void> {
@@ -523,6 +535,7 @@ export class ChatView extends ItemView {
     this.sendButton.addClass('is-steer-mode');
     setIcon(this.sendButton, 'lightbulb');
     this.sendButton.setAttribute('aria-label', 'Steer agent');
+    this.stopButton.style.display = 'inline-flex';
 
     try {
       const selectedPaths = this.chatManager.selectedFilesList;
@@ -539,6 +552,8 @@ export class ChatView extends ItemView {
       const activeTasks: ActiveTask[] = [];
       let currentStatus = '初始化智能体...';
 
+      this.currentAbortController = new AbortController();
+
       // Setup activeContext reference
       this.activeContext = {
         messages: contextMessages,
@@ -546,7 +561,8 @@ export class ChatView extends ItemView {
         metadata: {
           maxTurns: this.plugin.settings.maxTurns || 20
         },
-        pendingSteerMessages: []
+        pendingSteerMessages: [],
+        abortSignal: this.currentAbortController.signal
       };
 
       // Use ChatOrchestrator for skill support - RAGP event generator loop
@@ -687,7 +703,13 @@ export class ChatView extends ItemView {
           }
 
           this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
-          current = await stream.next({ approved });
+          
+          if (event.resolve) {
+            event.resolve({ approved });
+            current = await stream.next();
+          } else {
+            current = await stream.next({ approved });
+          }
           continue;
         }
 
@@ -736,25 +758,46 @@ export class ChatView extends ItemView {
     } catch (error) {
       console.error('Chat error:', error);
       const errMsg = (error as any).message || String(error);
+      const isAbort = (error instanceof DOMException && error.name === 'AbortError') || 
+                      ((error as any).name === 'AbortError') || 
+                      errMsg.toLowerCase().includes('aborted') || 
+                      errMsg.toLowerCase().includes('cancel');
+
       if (this.currentStreamingElement) {
         const answerContainer = this.currentStreamingElement.querySelector('.final-answer-container') as HTMLElement;
         if (answerContainer) {
-          const errorDiv = answerContainer.createDiv({ cls: 'chat-error-banner' });
-          errorDiv.setText(`Error: ${errMsg}. Please check your AI provider settings.`);
-          errorDiv.style.color = 'var(--text-error)';
-          errorDiv.style.marginTop = '10px';
-          errorDiv.style.padding = '8px';
-          errorDiv.style.borderRadius = '4px';
-          errorDiv.style.backgroundColor = 'var(--background-modifier-error)';
-          errorDiv.style.fontSize = 'var(--font-smaller)';
-          errorDiv.style.borderLeft = '3px solid var(--text-error)';
+          if (isAbort) {
+            const infoDiv = answerContainer.createDiv({ cls: 'chat-info-banner' });
+            infoDiv.setText('已终止生成');
+            infoDiv.style.color = 'var(--text-muted)';
+            infoDiv.style.marginTop = '10px';
+            infoDiv.style.padding = '8px';
+            infoDiv.style.borderRadius = '4px';
+            infoDiv.style.backgroundColor = 'var(--background-secondary)';
+            infoDiv.style.fontSize = 'var(--font-smaller)';
+            infoDiv.style.borderLeft = '3px solid var(--text-muted)';
+          } else {
+            const errorDiv = answerContainer.createDiv({ cls: 'chat-error-banner' });
+            errorDiv.setText(`Error: ${errMsg}. Please check your AI provider settings.`);
+            errorDiv.style.color = 'var(--text-error)';
+            errorDiv.style.marginTop = '10px';
+            errorDiv.style.padding = '8px';
+            errorDiv.style.borderRadius = '4px';
+            errorDiv.style.backgroundColor = 'var(--background-modifier-error)';
+            errorDiv.style.fontSize = 'var(--font-smaller)';
+            errorDiv.style.borderLeft = '3px solid var(--text-error)';
+          }
         } else {
           this.currentStreamingElement.setText(
-            `Error: ${errMsg}. Please check your AI provider settings.`
+            isAbort ? '已终止生成' : `Error: ${errMsg}. Please check your AI provider settings.`
           );
         }
       }
     } finally {
+      // Hide stop button and reset controller
+      this.stopButton.style.display = 'none';
+      this.currentAbortController = null;
+
       // Remove streaming indicator
       this.currentStreamingElement?.removeClass('streaming');
 
@@ -898,6 +941,13 @@ export class ChatView extends ItemView {
 
     // Clear history
     await this.chatManager.clearHistory();
+  }
+
+  private handleCancel(): void {
+    if (this.currentAbortController) {
+      this.currentAbortController.abort();
+      this.currentAbortController = null;
+    }
   }
 
   private async confirmClear(): Promise<boolean> {

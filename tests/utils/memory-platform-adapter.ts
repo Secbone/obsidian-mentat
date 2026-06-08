@@ -130,4 +130,53 @@ export class MemoryPlatformAdapter implements IPlatformAdapter {
   async savePluginData(data: any): Promise<void> {
     this.pluginData = data;
   }
+
+  getApp(): any {
+    return {
+      vault: this.getVault(),
+      workspace: this.getWorkspace(),
+      metadataCache: this.getMetadataCache()
+    };
+  }
+
+  getVault(): any {
+    return {
+      adapter: {},
+      getAbstractFileByPath: (path: string) => {
+        const file = this.getFileByPath(path);
+        return file;
+      },
+      read: async (file: any) => {
+        return this.read(file.path);
+      },
+      create: async (path: string, content: string) => {
+        this.addFile(path, content);
+      },
+      modify: async (file: any, content: string) => {
+        await this.write(file.path, content);
+      }
+    };
+  }
+
+  getWorkspace(): any {
+    return {
+      getActiveFile: () => this.getActiveFile()
+    };
+  }
+
+  getMetadataCache(): any {
+    return {
+      getFileCache: (file: any) => {
+        return this.getFileCache(file);
+      }
+    };
+  }
+
+  getPlugin(): any {
+    return {
+      loadData: () => this.loadPluginData(),
+      saveData: (data: any) => this.savePluginData(data),
+      app: this.getApp()
+    };
+  }
 }

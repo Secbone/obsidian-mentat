@@ -31,8 +31,8 @@ export class AgentOrchestrator {
         throw new Error('Circular dependency detected or no tasks ready');
       }
 
-      // Execute ready tasks sequentially in this tier and yield events
-      for (const task of readyTasks) {
+      // Execute ready tasks in parallel in this tier and yield events concurrently
+      const activeStreams = readyTasks.map(task => {
         const agent = this.agentManager.getAgent(task.agentId);
         if (!agent) {
           throw new Error(`Agent not found: ${task.agentId}`);
@@ -45,19 +45,66 @@ export class AgentOrchestrator {
           results
         );
 
-        const stream = agent.execute(task.prompt, enrichedContext);
-        let current = await stream.next();
+        return {
+          id: task.id,
+          context: enrichedContext,
+          stream: agent.execute(task.prompt, enrichedContext)
+        };
+      });
 
-        while (!current.done) {
-          const event = current.value as AgentEvent;
-          yield { ...event, taskId: task.id };
-          current = await stream.next();
+      const eventQueue: (AgentEvent & { taskId: string })[] = [];
+      let resolveNextEvent: (() => void) | null = null;
+      let activeTaskCount = activeStreams.length;
+      let hasError: any = null;
+
+      // Start background runners for each stream to collect events in parallel
+      activeStreams.forEach(async ({ id, context, stream }) => {
+        try {
+          let current = await stream.next();
+          while (!current.done) {
+            eventQueue.push({ ...(current.value as AgentEvent), taskId: id });
+            if (resolveNextEvent) {
+              resolveNextEvent();
+              resolveNextEvent = null;
+            }
+            if (context.abortSignal?.aborted) {
+              break;
+            }
+            current = await stream.next();
+          }
+          if (!context.abortSignal?.aborted && !hasError) {
+            const result = current.value as AgentResponse;
+            results.set(id, result);
+            completed.add(id);
+          }
+        } catch (err) {
+          hasError = err;
+        } finally {
+          activeTaskCount--;
+          if (resolveNextEvent) {
+            resolveNextEvent();
+            resolveNextEvent = null;
+          }
         }
+      });
 
-        const result = current.value as AgentResponse;
+      // Yield events as they are pushed to the queue
+      while (activeTaskCount > 0 || eventQueue.length > 0) {
+        if (hasError) {
+          throw hasError;
+        }
+        if (eventQueue.length === 0) {
+          await new Promise<void>((resolve) => {
+            resolveNextEvent = resolve;
+          });
+        }
+        while (eventQueue.length > 0) {
+          yield eventQueue.shift()!;
+        }
+      }
 
-        results.set(task.id, result);
-        completed.add(task.id);
+      if (hasError) {
+        throw hasError;
       }
     }
 
@@ -100,9 +147,20 @@ export class AgentOrchestrator {
 
       const response = current.value as AgentResponse;
 
+      // Clean context: filter out intermediate Tool Call messages to prevent context window bloat
+      const cleanedMessages = response.messages.filter(msg => {
+        if (msg.role === 'tool' || msg.role === 'function') {
+          return false;
+        }
+        if (msg.role === 'assistant' && (!msg.content && msg.tool_calls)) {
+          return false;
+        }
+        return true;
+      });
+
       currentContext = {
         ...currentContext,
-        messages: response.messages
+        messages: cleanedMessages
       };
       currentPrompt = response.content;
       finalResponse = response;

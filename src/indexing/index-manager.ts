@@ -90,9 +90,8 @@ export class IndexManager {
       size: file.stat.size
     });
 
-    // 8. Persist the individual file cache and global metadata
+    // 8. Persist the individual file cache
     await this.saveFileIndex(file.path, fullChunks);
-    await this.saveIndexMetadata();
 
     return {
       path: file.path,
@@ -132,6 +131,9 @@ export class IndexManager {
         console.error(`Failed to index ${file.path}:`, error);
       }
     }
+
+    // Persist global metadata once at the end of the batch
+    await this.saveIndexMetadata();
 
     return results;
   }
@@ -181,7 +183,7 @@ export class IndexManager {
     this.indexedFiles.delete(filePath);
     
     // Also delete the individual cache file
-    const filename = this.getCacheFilename(filePath);
+    const filename = await this.getCacheFilename(filePath);
     await this.storage.delete(filename);
     
     await this.saveIndexMetadata();
@@ -219,7 +221,7 @@ export class IndexManager {
    * Save individual file chunks
    */
   private async saveFileIndex(filePath: string, chunks: FileChunk[]): Promise<void> {
-    const filename = this.getCacheFilename(filePath);
+    const filename = await this.getCacheFilename(filePath);
     await this.storage.write(filename, JSON.stringify(chunks, null, 2));
   }
 
@@ -316,7 +318,7 @@ export class IndexManager {
       const batch = filePaths.slice(i, i + batchSize);
       await Promise.all(batch.map(async (filePath) => {
         try {
-          const filename = this.getCacheFilename(filePath);
+          const filename = await this.getCacheFilename(filePath);
           if (await this.storage.exists(filename)) {
             const content = await this.storage.read(filename);
             const chunks: FileChunk[] = JSON.parse(content);
@@ -347,16 +349,14 @@ export class IndexManager {
   }
 
   /**
-   * Map a file path in the vault to a unique alphanumeric cache filename
+   * Map a file path in the vault to a unique alphanumeric cache filename using Web Crypto API SHA-256
    */
-  private getCacheFilename(filePath: string): string {
-    let hash = 0;
-    for (let i = 0; i < filePath.length; i++) {
-      const char = filePath.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    const cleanHash = Math.abs(hash).toString(36);
-    return `cache/${cleanHash}.json`;
+  private async getCacheFilename(filePath: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(filePath);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return `cache/${hashHex}.json`;
   }
 }

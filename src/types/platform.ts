@@ -59,4 +59,11 @@ export interface IPlatformAdapter {
   // Plugin data storage APIs
   loadPluginData(): Promise<any>;
   savePluginData(data: any): Promise<void>;
+
+  // Safe typed wrappers for underlying host instances
+  getApp(): any;
+  getVault(): any;
+  getWorkspace(): any;
+  getMetadataCache(): any;
+  getPlugin(): any;
 }

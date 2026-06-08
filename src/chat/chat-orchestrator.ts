@@ -15,6 +15,7 @@ import { BaseAgent, AgentDependencies } from '../agents/base-agent';
 import { AgentManager } from '../agents/agent-manager';
 import { AgentConfig, AgentContext, AgentEvent, AgentResponse } from '../agents/agent-types';
 import { DraftReviewPipeline } from './draft-review-pipeline';
+import { VaultDiagnosticsLogger } from '../diagnostics/vault-diagnostics-logger';
 import { IPlatformAdapter, IPlatformFile } from '../types/platform';
 import { z } from 'zod';
 
@@ -37,6 +38,7 @@ export interface ChatQueryResult {
 export class ChatOrchestrator {
   private agentManager: AgentManager;
   private defaultAgent: BaseAgent | null = null;
+  private diagnosticsLogger: VaultDiagnosticsLogger;
   
   // Decoupled host & engine references
   private platform: IPlatformAdapter;
@@ -100,6 +102,7 @@ export class ChatOrchestrator {
     };
 
     this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext);
+    this.diagnosticsLogger = new VaultDiagnosticsLogger(platform.getVault());
   }
 
   /**
@@ -155,7 +158,8 @@ export class ChatOrchestrator {
     const dependencies: AgentDependencies = {
       skillRegistry: this.skillRegistry,
       skillExecutor: this.skillExecutor,
-      skillInvocationContext: this.skillInvocationContext
+      skillInvocationContext: this.skillInvocationContext,
+      diagnosticsLogger: this.diagnosticsLogger
     };
 
     this.defaultAgent = new BaseAgent(agentConfig, provider, dependencies);
@@ -759,7 +763,8 @@ Write your custom style instructions and preferences here. This file is dynamica
     const dependencies: AgentDependencies = {
       skillRegistry: this.skillRegistry,
       skillExecutor: this.skillExecutor,
-      skillInvocationContext: this.skillInvocationContext
+      skillInvocationContext: this.skillInvocationContext,
+      diagnosticsLogger: this.diagnosticsLogger
     };
 
     // 1. Register Default Writer Agent
@@ -899,8 +904,8 @@ OTHERWISE:
         prompt: z.string().describe('The instructions or prompt to execute')
       }),
       execute: async (input: { name: string; systemPrompt: string; prompt: string }) => {
+        const tempAgentId = `temp-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
         try {
-          const tempAgentId = `temp-${Date.now()}`;
           const tempConfig: AgentConfig = {
             id: tempAgentId,
             name: input.name,
@@ -928,9 +933,6 @@ OTHERWISE:
           
           const response = result.value as AgentResponse;
           
-          // Cleanup
-          this.agentManager.unregisterAgent(tempAgentId);
-          
           return {
             success: true,
             data: response.content,
@@ -941,6 +943,8 @@ OTHERWISE:
           };
         } catch (err: any) {
           return { success: false, error: `Spawning error: ${err.message}` };
+        } finally {
+          this.agentManager.unregisterAgent(tempAgentId);
         }
       }
     };

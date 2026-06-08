@@ -44,6 +44,7 @@ export interface GenerateOptions {
   // Skill support
   skills?: any[]; // OpenAI functions or Anthropic tools
   toolChoice?: 'auto' | 'none' | string;
+  abortSignal?: AbortSignal;
 }
 
 export interface GenerateResponse {

@@ -5,7 +5,7 @@ import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
 import { SkillInvocationContext } from '../skills/strategies/skill-invocation-strategy';
 import { SkillCall, isExecutableSkill } from '../skills/skill-types';
-import { AgentConfig, AgentContext, AgentResponse, AgentEvent } from './agent-types';
+import { AgentConfig, AgentContext, AgentResponse, AgentEvent, DiagnosticsLogger } from './agent-types';
 
 /**
  * Dependencies required by BaseAgent
@@ -14,6 +14,7 @@ export interface AgentDependencies {
   skillRegistry: SkillRegistry;
   skillExecutor: SkillExecutor;
   skillInvocationContext: SkillInvocationContext;
+  diagnosticsLogger?: DiagnosticsLogger;
 }
 
 /**
@@ -40,6 +41,7 @@ export class BaseAgent {
   protected skillRegistry: SkillRegistry;
   protected skillExecutor: SkillExecutor;
   protected skillInvocationContext: SkillInvocationContext;
+  protected diagnosticsLogger?: DiagnosticsLogger;
 
   constructor(
     config: AgentConfig,
@@ -51,8 +53,13 @@ export class BaseAgent {
     this.skillRegistry = dependencies.skillRegistry;
     this.skillExecutor = dependencies.skillExecutor;
     this.skillInvocationContext = dependencies.skillInvocationContext;
+    this.diagnosticsLogger = dependencies.diagnosticsLogger;
   }
 
+  /**
+   * Main entry point for RAGP event-driven execution.
+   * Returns an AsyncGenerator yielding AgentEvents and returning AgentResponse.
+   */
   /**
    * Main entry point for RAGP event-driven execution.
    * Returns an AsyncGenerator yielding AgentEvents and returning AgentResponse.
@@ -66,9 +73,17 @@ export class BaseAgent {
 
     yield { type: 'status', message: '初始化智能体...' };
 
+    if (context.abortSignal?.aborted) {
+      throw new DOMException('The user aborted a request.', 'AbortError');
+    }
+
     // If skills are disabled or not supported, run simple single-turn generation
     if (!this.config.enableSkills || !this.provider.supportsSkills?.()) {
       yield { type: 'status', message: '正在思考...' };
+
+      if (context.abortSignal?.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
 
       const messages: ChatMessage[] = [
         ...context.messages,
@@ -79,7 +94,8 @@ export class BaseAgent {
       try {
         responseContent = yield* this.streamModelSimple(prompt, {
           systemPrompt,
-          temperature: this.config.temperature || 0.7
+          temperature: this.config.temperature || 0.7,
+          abortSignal: context.abortSignal
         });
       } catch (err: any) {
         yield { type: 'error', message: `大模型执行异常: ${err.message}` };
@@ -110,6 +126,11 @@ export class BaseAgent {
     let cacheCreationTokens = 0;
 
     const executedKeysHistory: string[] = [];
+
+    // Configure cyclic loop detection parameters with safe defaults
+    const maxCycleLength = context.metadata?.maxCycleLength ?? 4;
+    const minRepeats = context.metadata?.minRepeats ?? 4;
+
     let state: AgentState = {
       messages: [
         ...context.messages,
@@ -128,6 +149,10 @@ export class BaseAgent {
     };
 
     while (state.turnCount < state.maxTurns) {
+      if (context.abortSignal?.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+
       state.turnCount++;
 
       // 运行时动态插嘴检测与上下文拼接 (Dynamic Steering)
@@ -157,7 +182,8 @@ export class BaseAgent {
           temperature: this.config.temperature || 0.7,
           systemPrompt: state.systemPrompt,
           skills: state.skills,
-          toolChoice: 'auto'
+          toolChoice: 'auto',
+          abortSignal: context.abortSignal
         });
 
         if (result.usage) {
@@ -171,8 +197,6 @@ export class BaseAgent {
         yield { type: 'error', message: `大模型决策异常: ${err.message}` };
         throw err;
       }
-
-
 
       // Update state with assistant response
       const assistantMessage: ChatMessage = {
@@ -197,14 +221,36 @@ export class BaseAgent {
       const newSkillCalls: SkillCall[] = [];
 
       for (const toolCall of result.toolCalls) {
+        if (context.abortSignal?.aborted) {
+          throw new DOMException('The user aborted a request.', 'AbortError');
+        }
+
         const callKey = `${toolCall.name}:${typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments)}`;
 
-        // Check if the last two executed keys are identical to the current one (consecutive 3x)
-        const isConsecutiveLoop = executedKeysHistory.length >= 2 &&
-                                  executedKeysHistory[executedKeysHistory.length - 1] === callKey &&
-                                  executedKeysHistory[executedKeysHistory.length - 2] === callKey;
+        // Cyclic pattern detection algorithm
+        const tempHistory = [...executedKeysHistory, callKey];
+        let isLoop = false;
+        for (let L = 1; L <= maxCycleLength; L++) {
+          if (tempHistory.length < L * minRepeats) continue;
+          let patternMatch = true;
+          const pattern = tempHistory.slice(tempHistory.length - L);
+          for (let r = 1; r < minRepeats; r++) {
+            const slice = tempHistory.slice(
+              tempHistory.length - L * (r + 1),
+              tempHistory.length - L * r
+            );
+            if (slice.join('|') !== pattern.join('|')) {
+              patternMatch = false;
+              break;
+            }
+          }
+          if (patternMatch) {
+            isLoop = true;
+            break;
+          }
+        }
 
-        if (isConsecutiveLoop) {
+        if (isLoop) {
           yield { type: 'status', message: `⚠️ 检测到工具调用 [${toolCall.name}] 陷入推理死循环，正在强制干预引导自愈...` };
           yield { type: 'skill_error', name: toolCall.name, error: 'Reasoning loop detected by AP6 Guard' };
 
@@ -334,14 +380,25 @@ export class BaseAgent {
             if (requiresConfirmation) {
               yield { type: 'status', message: `等待授权: ${skillName}` };
 
-              // Interactive prompt yielding (Human-in-the-loop)
-              const userFeedback: { approved: boolean; modifiedParams?: any } = yield {
+              let resolveConfirm!: (value: { approved: boolean; modifiedParams?: any }) => void;
+              const confirmPromise = new Promise<{ approved: boolean; modifiedParams?: any }>((resolve) => {
+                resolveConfirm = resolve;
+              });
+
+              // Interactive prompt yielding (Human-in-the-loop) with resolve callback
+              yield {
                 type: 'confirm_request',
                 skillName: skillName,
                 params: skillParams,
-                message: `智能体申请执行操作: 【${skill.description || skillName}】。是否批准？`
+                message: `智能体申请执行操作: 【${skill.description || skillName}】。是否批准？`,
+                resolve: resolveConfirm
               };
 
+              if (context.abortSignal?.aborted) {
+                throw new DOMException('The user aborted a request.', 'AbortError');
+              }
+
+              const userFeedback = await confirmPromise;
               executeApproved = userFeedback?.approved ?? true;
               if (userFeedback?.modifiedParams) {
                 args.params = userFeedback.modifiedParams;
@@ -421,14 +478,25 @@ export class BaseAgent {
           if (requiresConfirmation) {
             yield { type: 'status', message: `等待授权: ${toolCall.name}` };
 
-            // Interactive prompt yielding (Human-in-the-loop)
-            const userFeedback: { approved: boolean; modifiedParams?: any } = yield {
+            let resolveConfirm!: (value: { approved: boolean; modifiedParams?: any }) => void;
+            const confirmPromise = new Promise<{ approved: boolean; modifiedParams?: any }>((resolve) => {
+              resolveConfirm = resolve;
+            });
+
+            // Interactive prompt yielding (Human-in-the-loop) with resolve callback
+            yield {
               type: 'confirm_request',
               skillName: toolCall.name,
               params: toolCall.arguments,
-              message: `智能体申请执行操作: 【${skill.description || toolCall.name}】。是否批准？`
+              message: `智能体申请执行操作: 【${skill.description || toolCall.name}】。是否批准？`,
+              resolve: resolveConfirm
             };
 
+            if (context.abortSignal?.aborted) {
+              throw new DOMException('The user aborted a request.', 'AbortError');
+            }
+
+            const userFeedback = await confirmPromise;
             executeApproved = userFeedback?.approved ?? true;
             if (userFeedback?.modifiedParams) {
               toolCall.arguments = userFeedback.modifiedParams;
@@ -450,7 +518,7 @@ export class BaseAgent {
           yield { type: 'skill_call', name: toolCall.name, params: toolCall.arguments };
 
           try {
-            const runResult = await this.skillExecutor.executeFromToolCall(toolCall);
+            const runResult = await this.skillExecutor.executeFromToolCall(toolCall, { skipConfirmation: true });
             
             if (runResult.success) {
               yield { type: 'skill_success', name: toolCall.name, result: runResult.data };
@@ -570,7 +638,7 @@ export class BaseAgent {
 
   /**
    * Helper: Bridges callback-based LLM stream with skills into an async generator of AgentEvents.
-   * Utilizes a highly robust asynchronous queue bridge.
+   * Utilizes a highly robust asynchronous queue bridge with cooperative abort support.
    */
   private async *streamModel(
     messages: ChatMessage[],
@@ -581,6 +649,21 @@ export class BaseAgent {
     let completed = false;
     let finalResult: GenerateResponse | null = null;
     let error: any = null;
+
+    const onAbort = () => {
+      completed = true;
+      if (resolveNext) {
+        resolveNext();
+        resolveNext = null;
+      }
+    };
+
+    if (options?.abortSignal) {
+      if (options.abortSignal.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+      options.abortSignal.addEventListener('abort', onAbort);
+    }
 
     this.provider.generateStreamWithSkills!(
       messages,
@@ -609,14 +692,23 @@ export class BaseAgent {
       }
     });
 
-    while (!completed || queue.length > 0) {
-      if (queue.length === 0) {
-        await new Promise<void>((resolve) => {
-          resolveNext = resolve;
-        });
+    try {
+      while (!completed || queue.length > 0) {
+        if (options?.abortSignal?.aborted) {
+          throw new DOMException('The user aborted a request.', 'AbortError');
+        }
+        if (queue.length === 0) {
+          await new Promise<void>((resolve) => {
+            resolveNext = resolve;
+          });
+        }
+        while (queue.length > 0) {
+          yield queue.shift()!;
+        }
       }
-      while (queue.length > 0) {
-        yield queue.shift()!;
+    } finally {
+      if (options?.abortSignal) {
+        options.abortSignal.removeEventListener('abort', onAbort);
       }
     }
 
@@ -627,10 +719,6 @@ export class BaseAgent {
     return finalResult!;
   }
 
-  /**
-   * Helper: Bridges callback-based LLM simple stream into an async generator of AgentEvents.
-   * Utilizes a highly robust asynchronous queue bridge.
-   */
   private async *streamModelSimple(
     prompt: string,
     options: any
@@ -640,6 +728,21 @@ export class BaseAgent {
     let completed = false;
     let error: any = null;
     let fullResponse = '';
+
+    const onAbort = () => {
+      completed = true;
+      if (resolveNext) {
+        resolveNext();
+        resolveNext = null;
+      }
+    };
+
+    if (options?.abortSignal) {
+      if (options.abortSignal.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+      options.abortSignal.addEventListener('abort', onAbort);
+    }
 
     this.provider.generateStream(
       prompt,
@@ -667,14 +770,23 @@ export class BaseAgent {
       }
     });
 
-    while (!completed || queue.length > 0) {
-      if (queue.length === 0) {
-        await new Promise<void>((resolve) => {
-          resolveNext = resolve;
-        });
+    try {
+      while (!completed || queue.length > 0) {
+        if (options?.abortSignal?.aborted) {
+          throw new DOMException('The user aborted a request.', 'AbortError');
+        }
+        if (queue.length === 0) {
+          await new Promise<void>((resolve) => {
+            resolveNext = resolve;
+          });
+        }
+        while (queue.length > 0) {
+          yield queue.shift()!;
+        }
       }
-      while (queue.length > 0) {
-        yield queue.shift()!;
+    } finally {
+      if (options?.abortSignal) {
+        options.abortSignal.removeEventListener('abort', onAbort);
       }
     }
 
@@ -685,10 +797,6 @@ export class BaseAgent {
     return fullResponse;
   }
 
-  /**
-   * Reducer to cleanly merge state updates.
-   * Appends messages and skill calls to preserve history.
-   */
   private mergeState(current: AgentState, update: Partial<AgentState>): AgentState {
     return {
       ...current,
@@ -697,204 +805,6 @@ export class BaseAgent {
       skillCalls: update.skillCalls ? [...current.skillCalls, ...update.skillCalls] : current.skillCalls
     };
   }
-
-  /**
-   * Execute a tool call
-   */
-  private async executeToolCall(
-    toolCall: ToolCall,
-    onStream?: (chunk: string) => void
-  ): Promise<SkillCall> {
-    // Check if this is a meta-tool call (spec or invoke)
-    if (this.skillInvocationContext.isMetaToolCall(toolCall.name)) {
-      return await this.handleMetaToolCall(toolCall, onStream);
-    } else {
-      return await this.handleDirectSkillCall(toolCall, onStream);
-    }
-  }
-
-  /**
-   * Handle meta-tool calls (spec/invoke)
-   */
-  private async handleMetaToolCall(
-    toolCall: ToolCall,
-    onStream?: (chunk: string) => void
-  ): Promise<SkillCall> {
-    const args = this.safeParseToolArguments(toolCall);
-
-    const skillCall: SkillCall = {
-      id: toolCall.id,
-      skillName: toolCall.name,
-      namespace: 'meta' as any,
-      parameters: args,
-      status: 'executing',
-      timestamp: Date.now()
-    };
-
-    let resultContent: string;
-    let success = true;
-
-    if (toolCall.name === 'spec') {
-      // Handle spec: get skill specification
-      const skillName = args.skill_name;
-
-      if (!skillName) {
-        success = false;
-        resultContent = "Error: Missing required parameter 'skill_name' in spec tool call. You must specify which skill you want to see specification for.";
-        if (onStream) {
-          onStream(`✗ failed\n\n`);
-        }
-      } else {
-        if (onStream) {
-          onStream(`\n\n📖 Getting spec: ${skillName}\n`);
-        }
-
-        const details = this.skillRegistry.getSkillDetails(skillName, 'markdown');
-
-        if (details.startsWith('Error:')) {
-          success = false;
-          resultContent = details;
-          if (onStream) {
-            onStream(`✗ not found\n\n`);
-          }
-        } else {
-          resultContent = details;
-          if (onStream) {
-            onStream(`✓ loaded\n\n`);
-          }
-        }
-      }
-    } else if (toolCall.name === 'invoke') {
-      // Handle invoke: execute the actual skill
-      const skillName = args.skill_name;
-      const skillParams = args.params || {};
-
-      if (!skillName) {
-        success = false;
-        resultContent = "Error: Missing required parameter 'skill_name' in invoke tool call. You must specify the namespace and skill name (e.g., 'obsidian:edit_note') in 'skill_name'.";
-        if (onStream) {
-          onStream(`✗ failed\n\n`);
-        }
-      } else {
-        // Get skill for display purposes
-        const skill = this.skillRegistry.get(skillName);
-        const shortName = skillName.split(':').pop() || skillName;
-        const displayParam = this.getSkillDisplayParam(skillName, skillParams);
-        const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
-
-        // Notify about skill call
-        if (onStream) {
-          if (requiresConfirmation) {
-            const paramStr = displayParam ? `(${displayParam})` : '()';
-            onStream(`\n\n⚠️ ${shortName}${paramStr}\n`);
-          } else {
-            const paramStr = displayParam ? `(${displayParam})` : '()';
-            onStream(`\n\n${shortName}${paramStr}\n`);
-          }
-        }
-
-        // Parse skill name to get namespace and name
-        const { namespace, name } = this.skillRegistry.parseName(skillName);
-
-        // Execute the skill
-        const result = await this.skillExecutor.execute(namespace, name, skillParams);
-
-        success = result.success;
-        resultContent = result.success
-          ? JSON.stringify(result.data, null, 2)
-          : `Error: ${result.error}`;
-
-        // Notify about completion
-        if (onStream) {
-          if (result.success) {
-            onStream(`✓ success\n\n`);
-          } else if (result.error && result.error.includes('cancelled')) {
-            onStream(`✗ cancelled\n\n`);
-          } else {
-            onStream(`✗ failed\n\n`);
-          }
-        }
-      }
-    } else {
-      success = false;
-      resultContent = `Unknown meta-tool: ${toolCall.name}`;
-    }
-
-    skillCall.status = success ? 'success' : 'error';
-    skillCall.result = {
-      success,
-      data: success ? resultContent : undefined,
-      error: success ? undefined : resultContent
-    };
-    skillCall.executionTime = Date.now() - skillCall.timestamp;
-
-    return skillCall;
-  }
-
-  /**
-   * Handle direct skill calls
-   */
-  private async handleDirectSkillCall(
-    toolCall: ToolCall,
-    onStream?: (chunk: string) => void
-  ): Promise<SkillCall> {
-    const args = this.safeParseToolArguments(toolCall);
-
-    const skillCall: SkillCall = {
-      id: toolCall.id,
-      skillName: toolCall.name,
-      namespace: toolCall.name.startsWith('mcp:') ? 'mcp' : 'obsidian',
-      parameters: args,
-      status: 'executing',
-      timestamp: Date.now()
-    };
-
-    // Check if skill requires confirmation
-    const skill = this.skillRegistry.get(toolCall.name);
-    const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
-    const isAskUser = toolCall.name === 'obsidian:ask_user';
-
-    // Notify about skill call
-    if (onStream) {
-      const shortName = toolCall.name.split(':').pop() || toolCall.name;
-      const displayParam = this.getSkillDisplayParam(toolCall.name, args);
-
-      if (isAskUser) {
-        onStream(`\n\n${shortName}()\n`);
-      } else if (requiresConfirmation) {
-        const paramStr = displayParam ? `(${displayParam})` : '()';
-        onStream(`\n\n⚠️ ${shortName}${paramStr}\n`);
-      } else {
-        const paramStr = displayParam ? `(${displayParam})` : '()';
-        onStream(`\n\n${shortName}${paramStr}\n`);
-      }
-    }
-
-    // Execute the skill
-    const result = await this.skillExecutor.executeFromToolCall(toolCall);
-
-    skillCall.status = result.success ? 'success' : 'error';
-    skillCall.result = result;
-    skillCall.executionTime = Date.now() - skillCall.timestamp;
-
-    // Notify about completion
-    if (onStream) {
-      if (result.success) {
-        onStream(`✓ success\n\n`);
-      } else if (result.error && result.error.includes('cancelled')) {
-        onStream(`✗ cancelled\n\n`);
-      } else {
-        onStream(`✗ failed\n\n`);
-      }
-    }
-
-    return skillCall;
-  }
-
-  /**
-   * Scans a JSON string, identifies raw backslashes that do not form valid JSON
-   * escape sequences, and double-escapes them so they can be parsed successfully.
-   */
   private escapeLoneBackslashes(jsonStr: string): string {
     let result = '';
     for (let i = 0; i < jsonStr.length; i++) {
@@ -965,6 +875,9 @@ export class BaseAgent {
   /**
    * Appends a tool execution or parsing failure incident to the diagnostic log file
    */
+  /**
+   * Delegates a tool execution or parsing failure incident to the diagnostic logger
+   */
   private async logDiagnosticIncident(
     toolName: string,
     originalArgs: string,
@@ -973,203 +886,22 @@ export class BaseAgent {
     repairedArgs?: string
   ): Promise<void> {
     try {
-      const vault = this.skillExecutor.getContext().vault;
-      if (!vault) return;
-
-      const logDir = '.mentat';
-      const logPath = `${logDir}/diagnostics.jsonl`;
-
-      // Check if folder exists, if not, create it
-      if (!(await vault.adapter.exists(logDir))) {
-        await vault.adapter.mkdir(logDir);
+      if (this.diagnosticsLogger) {
+        await this.diagnosticsLogger.logIncident({
+          agentId: this.config.id,
+          agentName: this.config.name,
+          toolName,
+          originalArgs,
+          errorMessage,
+          strategy,
+          repairedArgs,
+          success: !!repairedArgs
+        });
       }
-
-      const logEntry = {
-        timestamp: Date.now(),
-        time: new Date().toISOString(),
-        agentId: this.config.id,
-        agentName: this.config.name,
-        toolName,
-        originalArgs,
-        errorMessage,
-        strategy,
-        repairedArgs,
-        success: !!repairedArgs
-      };
-
-      await vault.adapter.append(logPath, JSON.stringify(logEntry) + '\n');
     } catch (err) {
       console.error('[BaseAgent] Failed to write diagnostic log:', err);
     }
   }
-
-  /**
-   * Scans a JSON string to escape raw control characters and repair unescaped quotes inside string literals
-   */
-  private repairJsonString(json: string): string {
-    let output = '';
-    let inString = false;
-    let i = 0;
-
-    while (i < json.length) {
-      const char = json[i];
-
-      if (inString) {
-        if (char === '\\') {
-          // Skip escape sequence
-          output += char;
-          if (i + 1 < json.length) {
-            output += json[i + 1];
-            i += 2;
-          } else {
-            i++;
-          }
-          continue;
-        }
-
-        if (char === '\n') {
-          output += '\\n';
-          i++;
-          continue;
-        }
-
-        if (char === '\r') {
-          output += '\\r';
-          i++;
-          continue;
-        }
-
-        if (char === '"') {
-          // Look ahead to check if this is the actual closing quote of the string.
-          // In standard JSON, a closing quote must be followed by optional whitespace and then one of: , } ] or : (for keys) or end of string.
-          let j = i + 1;
-          while (j < json.length && /\s/.test(json[j])) {
-            j++;
-          }
-
-          const nextChar = json[j];
-          const isValidClosing =
-            j === json.length ||
-            nextChar === ',' ||
-            nextChar === '}' ||
-            nextChar === ']' ||
-            nextChar === ':';
-
-          if (isValidClosing) {
-            inString = false;
-            output += char;
-          } else {
-            // Unescaped quote! Escape it
-            output += '\\"';
-          }
-        } else {
-          output += char;
-        }
-        i++;
-      } else {
-        if (char === '"') {
-          inString = true;
-        }
-        output += char;
-        i++;
-      }
-    }
-
-    return output;
-  }
-
-  /**
-   * Scans a truncated or unterminated JSON string, closes any open string literals,
-   * and balances all open curly braces and square brackets in reverse nesting order.
-   */
-  private repairTruncatedJson(json: string): string {
-    let inString = false;
-    let escaped = false;
-    const stack: ('{' | '[')[] = [];
-    let i = 0;
-
-    while (i < json.length) {
-      const char = json[i];
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-        } else if (char === '\\') {
-          escaped = true;
-        } else if (char === '"') {
-          inString = false;
-        }
-      } else {
-        if (char === '"') {
-          inString = true;
-        } else if (char === '{') {
-          stack.push('{');
-        } else if (char === '[') {
-          stack.push('[');
-        } else if (char === '}') {
-          if (stack[stack.length - 1] === '{') {
-            stack.pop();
-          }
-        } else if (char === ']') {
-          if (stack[stack.length - 1] === '[') {
-            stack.pop();
-          }
-        }
-      }
-      i++;
-    }
-
-    let repaired = json;
-    if (inString) {
-      // If we ended with a trailing escape backslash, slice it off first
-      if (escaped && repaired.endsWith('\\')) {
-        repaired = repaired.slice(0, -1);
-      }
-      repaired += '"';
-    }
-
-    // Pop remaining open brackets/braces from the stack and append their closing matches
-    while (stack.length > 0) {
-      const open = stack.pop();
-      if (open === '{') {
-        repaired += '}';
-      } else if (open === '[') {
-        repaired += ']';
-      }
-    }
-
-    return repaired;
-  }
-
-  /**
-   * Get display parameter for skill execution messages
-   */
-  private getSkillDisplayParam(skillName: string, parameters: Record<string, any>): string {
-    // File operations - show filename only
-    if (parameters.path) {
-      const filename = parameters.path.split('/').pop() || parameters.path;
-      return filename;
-    }
-
-    // Query operations
-    if (parameters.query) {
-      return `"${parameters.query.substring(0, 30)}"`;
-    }
-
-    if (parameters.pattern) {
-      return parameters.pattern;
-    }
-
-    if (parameters.tags && Array.isArray(parameters.tags)) {
-      return `tags: [${parameters.tags.slice(0, 2).join(', ')}]`;
-    }
-
-    return '';
-  }
-
-  /**
-   * Build system prompt
-   */
   private buildSystemPrompt(): string {
     return this.config.systemPrompt || 'You are a helpful AI assistant.';
   }

@@ -1,6 +1,6 @@
 // Agent Types - Core type definitions for the Agent system
 
-import { ChatMessage, ToolCall } from '../types';
+import { ChatMessage } from '../types';
 import { SkillCall } from '../skills/skill-types';
 
 /**
@@ -24,6 +24,7 @@ export interface AgentContext {
   sessionId: string;
   metadata?: Record<string, any>;
   pendingSteerMessages?: string[];
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -46,9 +47,25 @@ export type AgentEvent =
   | { type: 'skill_call'; name: string; params: any }
   | { type: 'skill_success'; name: string; result: any }
   | { type: 'skill_error'; name: string; error: string }
-  | { type: 'confirm_request'; skillName: string; params: any; message: string }
+  | { type: 'confirm_request'; skillName: string; params: any; message: string; resolve?: (value: { approved: boolean; modifiedParams?: any }) => void }
   | { type: 'steer'; message: string }
   | { type: 'error'; message: string };
+
+/**
+ * DiagnosticsLogger - Decoupled interface for logging tool execution failures
+ */
+export interface DiagnosticsLogger {
+  logIncident(incident: {
+    agentId: string;
+    agentName: string;
+    toolName: string;
+    originalArgs: string;
+    errorMessage: string;
+    strategy: string;
+    repairedArgs?: string;
+    success: boolean;
+  }): Promise<void>;
+}
 
 /**
  * Agent task for orchestration
