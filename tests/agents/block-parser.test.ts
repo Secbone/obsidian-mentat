@@ -45,6 +45,24 @@ block 2 replace
       expect(blocks[1].replace).toBe('block 2 replace');
     });
 
+    it('should successfully parse blocks even if content has standard Markdown ======= underlines', () => {
+      const content = `
+<<<<<<< SEARCH
+old text
+=======
+new text
+>>>>>>> REPLACE
+
+My Heading
+=======
+Some details here.
+`;
+      const blocks = parseSearchReplaceBlocks(content);
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].search).toBe('old text');
+      expect(blocks[0].replace).toBe('new text');
+    });
+
     it('should throw an error on syntax issues (mismatched markers)', () => {
       const content = `
 <<<<<<< SEARCH

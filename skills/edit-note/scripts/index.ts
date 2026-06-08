@@ -743,13 +743,19 @@ export function parseSearchReplaceBlocks(content: string): SearchReplaceBlock[] 
     });
   }
   
-  const searchMarkers = (content.match(/<<<<<<< SEARCH/g) || []).length;
-  const replaceMarkers = (content.match(/>>>>>>> REPLACE/g) || []).length;
-  const dividerMarkers = (content.match(/=======/g) || []).length;
+  // Remove all successfully matched blocks from a copy to check for isolated markers
+  const cleanContent = content.replace(blockRegex, '');
 
-  if (searchMarkers > 0 && (blocks.length !== searchMarkers || replaceMarkers !== searchMarkers || dividerMarkers !== searchMarkers)) {
+  const hasIsolatedSearch = cleanContent.includes('<<<<<<< SEARCH');
+  const hasIsolatedReplace = cleanContent.includes('>>>>>>> REPLACE');
+
+  if (hasIsolatedSearch || hasIsolatedReplace) {
+    const searchMarkers = (content.match(/<<<<<<< SEARCH/g) || []).length;
+    const replaceMarkers = (content.match(/>>>>>>> REPLACE/g) || []).length;
+    const dividerMarkers = (content.match(/^=======\r?$/gm) || []).length;
+
     throw new Error(
-      `Failed to parse search-and-replace blocks. Found ${searchMarkers} SEARCH marker(s), ${dividerMarkers} divider(s) (=======), and ${replaceMarkers} REPLACE marker(s).\n` +
+      `Failed to parse search-and-replace blocks. Found isolated marker(s). Total in content: ${searchMarkers} SEARCH marker(s), ${dividerMarkers} potential divider(s) (=======), and ${replaceMarkers} REPLACE marker(s).\n` +
       `Please ensure all blocks follow the exact format:\n` +
       `<<<<<<< SEARCH\n` +
       `[exact text to find]\n` +
