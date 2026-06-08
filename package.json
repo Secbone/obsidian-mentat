@@ -23,7 +23,7 @@
     "mentat",
     "agentic"
   ],
-  "author": "Mentat Team",
+  "author": "Secbone <secbone@gmail.com>",
   "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
