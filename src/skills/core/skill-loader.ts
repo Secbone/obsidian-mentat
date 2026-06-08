@@ -2,7 +2,7 @@
 // Loads all skills from the skills/ directory according to Agent Skills specification
 
 import { App, TFile, FileSystemAdapter } from 'obsidian';
-import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDefinition } from '../skill-types';
+import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDefinition, isExecutableSkill, isDocumentationSkill } from '../skill-types';
 
 // Import all skill implementations (compile-time imports for TypeScript)
 import * as QueryNotesImpl from '../../../skills/query-notes/scripts';
@@ -52,7 +52,7 @@ export class SkillLoader {
     this.skillsBasePath = `.obsidian/plugins/${pluginId}/skills`;
 
     // Map skill names to their implementations (compile-time mapping)
-    this.implementationMap = new Map([
+    this.implementationMap = new Map<string, any>([
       ['query_notes', QueryNotesImpl],
       ['read_note', ReadNoteImpl],
       ['edit_note', EditNoteImpl],
@@ -346,16 +346,4 @@ export class SkillLoader {
   }
 }
 
-/**
- * Helper: Check if a skill is executable
- */
-export function isExecutableSkill(skill: AnySkillDefinition): skill is SkillDefinition {
-  return 'execute' in skill && typeof skill.execute === 'function';
-}
 
-/**
- * Helper: Check if a skill is documentation-only
- */
-export function isDocumentationSkill(skill: AnySkillDefinition): skill is DocumentationSkillDefinition {
-  return 'content' in skill && !('execute' in skill);
-}

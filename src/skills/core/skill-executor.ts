@@ -43,7 +43,7 @@ export class SkillExecutor {
   async execute(
     namespace: SkillNamespace | string,
     name: string,
-    parameters: Record,
+    parameters: Record<string, any>,
     options: ExecutionOptions = {}
   ): Promise<SkillResult> {
     const startTime = Date.now();
@@ -155,7 +155,7 @@ export class SkillExecutor {
 
       const result: SkillResult = {
         success: false,
-        error: error.message || 'Unknown error',
+        error: (error as any).message || 'Unknown error',
         metadata: { executionTime: Date.now() - startTime }
       };
 
@@ -271,7 +271,7 @@ export class SkillExecutor {
     calls: Array<{
       namespace: SkillNamespace;
       name: string;
-      parameters: Record;
+      parameters: Record<string, any>;
     }>,
     options: ExecutionOptions = {}
   ): Promise<SkillResult[]> {
@@ -285,7 +285,7 @@ export class SkillExecutor {
   /**
    * Validate skill input against schema
    */
-  private validateInput(skill: SkillDefinition, input: Record): any {
+  private validateInput(skill: SkillDefinition, input: Record<string, any>): any {
     try {
       return skill.schema.parse(input);
     } catch (error) {
@@ -305,9 +305,9 @@ export class SkillExecutor {
     input: any,
     timeoutMs: number
   ): Promise<SkillResult> {
-    return Promise.race([
+    return Promise.race<SkillResult>([
       skill.execute(input),
-      new Promise((_, reject) =>
+      new Promise<SkillResult>((_, reject) =>
         setTimeout(() => reject(new Error('Skill execution timeout')), timeoutMs)
       )
     ]);
@@ -318,7 +318,7 @@ export class SkillExecutor {
    */
   private async executeMCPSkill(
     fullName: string,
-    parameters: Record,
+    parameters: Record<string, any>,
     options: ExecutionOptions
   ): Promise<SkillResult> {
     // This will be implemented when MCP client is integrated
@@ -370,13 +370,13 @@ export class SkillExecutor {
     totalCalls: number;
     successRate: number;
     averageExecutionTime: number;
-    bySkill: Record;
+    bySkill: Record<string, any>;
   } {
     const total = this.executionHistory.length;
     const successful = this.executionHistory.filter(call => call.status === 'success').length;
     const avgTime = this.executionHistory.reduce((sum, call) => sum + (call.executionTime || 0), 0) / total;
 
-    const bySkill: Record = {};
+    const bySkill: Record<string, any> = {};
     this.executionHistory.forEach(call => {
       const fullName = `${call.namespace}:${call.skillName}`;
       if (!bySkill[fullName]) {
@@ -436,7 +436,7 @@ export class SkillExecutor {
   /**
    * Update execution context
    */
-  updateContext(updates: Partial): void {
+  updateContext(updates: Partial<SkillContext>): void {
     Object.assign(this.context, updates);
   }
 

@@ -1,8 +1,8 @@
 // Chat Manager - Handles chat history persistence and management
 
 import { ChatMessage } from '../types';
-import PersonalAgentPlugin from '../main';
 import { Context, Message, ContextOptions } from '../context';
+import { FileStorage } from '../utils/file-storage';
 
 interface ChatHistory {
   sessionId: string;
@@ -12,22 +12,38 @@ interface ChatHistory {
 }
 
 export class ChatManager {
-  private plugin: PersonalAgentPlugin;
+  private plugin: any;
+  private storage: FileStorage;
   private history: ChatMessage[] = [];
   private selectedFiles: Set<string> = new Set(); // Selected document paths
   private sessionId: string;
+  private initialized: Promise<void>;
   private readonly STORAGE_KEY = 'mentat-chat-history';
   private readonly MAX_HISTORY_SIZE = 100; // Keep last 100 messages
 
-  constructor(plugin: PersonalAgentPlugin) {
-    this.plugin = plugin;
-    this.sessionId = this.generateSessionId();
-  }
+  constructor(plugin: any) {
+     this.plugin = plugin;
+     // Fallback to a safe mock if platform is not yet initialized or present (e.g., in tests)
+     const platform = plugin.platform || {
+       getConfigDir: () => '.obsidian',
+       exists: async () => false,
+       read: async () => '',
+       write: async () => {},
+       delete: async () => {},
+       mkdir: async () => {},
+       list: async () => ({ files: [], folders: [] }),
+     } as any;
+     this.storage = new FileStorage(platform);
+     this.sessionId = this.generateSessionId();
+     this.initialized = this.loadHistory();
+   }
 
   /**
    * Add a message to history
    */
   async addMessage(role: 'user' | 'assistant', content: string): Promise<void> {
+    await this.initialized;
+
     const message: ChatMessage = {
       role,
       content,
@@ -50,6 +66,8 @@ export class ChatManager {
    * This replaces the old context messages with the new complete message array
    */
   async replaceMessages(messages: ChatMessage[]): Promise<void> {
+    await this.initialized;
+
     this.history = messages;
 
     // Trim history if too large
@@ -64,7 +82,7 @@ export class ChatManager {
    * Get all messages in current session
    */
   async getHistory(): Promise<ChatMessage[]> {
-    await this.loadHistory();
+    await this.initialized;
     return [...this.history];
   }
 
@@ -72,6 +90,7 @@ export class ChatManager {
    * Clear all chat history
    */
   async clearHistory(): Promise<void> {
+    await this.initialized;
     this.history = [];
     this.sessionId = this.generateSessionId();
     await this.saveHistory();
@@ -92,7 +111,7 @@ export class ChatManager {
    * Create a Context object from current chat history
    */
   async createContext(): Promise<Context> {
-    await this.loadHistory();
+    await this.initialized;
 
     // Convert ChatMessage[] to Message[]
     const messages = this.history.map(chatMsg => new Message({
@@ -137,7 +156,7 @@ export class ChatManager {
   }
 
   /**
-   * Save history to plugin data
+   * Save history to plugin storage
    */
   private async saveHistory(): Promise<void> {
     const data: ChatHistory = {
@@ -147,31 +166,44 @@ export class ChatManager {
       lastUpdated: Date.now()
     };
 
-    // Use Obsidian's data storage (stored in .obsidian/plugins/mentat/)
-    const pluginData = await this.plugin.loadData() || {};
-    pluginData[this.STORAGE_KEY] = data;
-    await this.plugin.saveData(pluginData);
+    await this.storage.write('chat_history.json', JSON.stringify(data, null, 2));
   }
 
   /**
-   * Load history from plugin data
+   * Load history from storage or migrate from legacy plugin data
    */
   private async loadHistory(): Promise<void> {
-    if (this.history.length > 0) return; // Already loaded
+    try {
+      if (await this.storage.exists('chat_history.json')) {
+        const content = await this.storage.read('chat_history.json');
+        const data: ChatHistory = JSON.parse(content);
 
-    const pluginData = await this.plugin.loadData();
-    if (!pluginData || !pluginData[this.STORAGE_KEY]) {
-      return;
-    }
-
-    const data: ChatHistory = pluginData[this.STORAGE_KEY];
-
-    // Only load if session is recent (within 7 days)
-    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-    if (data.lastUpdated > sevenDaysAgo) {
-      this.history = data.messages;
-      this.sessionId = data.sessionId;
-      this.selectedFiles = new Set(data.selectedFiles || []);
+        // Only load if session is recent (within 7 days)
+        const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+        if (data && data.lastUpdated > sevenDaysAgo) {
+          this.history = data.messages || [];
+          this.sessionId = data.sessionId || this.sessionId;
+          this.selectedFiles = new Set(data.selectedFiles || []);
+        }
+      } else {
+        // Migration from data.json
+        const pluginData = await this.plugin.loadData();
+        if (pluginData && pluginData[this.STORAGE_KEY]) {
+          const data: ChatHistory = pluginData[this.STORAGE_KEY];
+          const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+          if (data && data.lastUpdated > sevenDaysAgo) {
+            this.history = data.messages || [];
+            this.sessionId = data.sessionId || this.sessionId;
+            this.selectedFiles = new Set(data.selectedFiles || []);
+            await this.saveHistory(); // Save to new storage
+          }
+          // Remove old data to reduce data.json size
+          delete pluginData[this.STORAGE_KEY];
+          await this.plugin.saveData(pluginData);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load chat history:', error);
     }
   }
 
@@ -185,38 +217,53 @@ export class ChatManager {
   /**
    * Add a document to the selected files
    */
-  addDocument(filePath: string): void {
+  async addDocument(filePath: string): Promise<void> {
+    await this.initialized;
     this.selectedFiles.add(filePath);
-    this.saveHistory();
+    await this.saveHistory();
   }
 
   /**
    * Remove a document from the selected files
    */
-  removeDocument(filePath: string): void {
+  async removeDocument(filePath: string): Promise<void> {
+    await this.initialized;
     this.selectedFiles.delete(filePath);
-    this.saveHistory();
+    await this.saveHistory();
   }
 
   /**
    * Get all selected file paths
    */
-  getSelectedFiles(): string[] {
+  async getSelectedFiles(): Promise<string[]> {
+    await this.initialized;
     return Array.from(this.selectedFiles);
   }
 
   /**
+   * Get all selected file paths synchronously
+   * Note: Ensure initialization is complete before calling this (e.g., in UI rendering after loadHistory)
+   */
+  get selectedFilesList(): string[] {
+    return Array.from(this.selectedFiles);
+  }
+
+
+  /**
    * Clear all selected documents
    */
-  clearDocuments(): void {
+  async clearDocuments(): Promise<void> {
+    await this.initialized;
     this.selectedFiles.clear();
-    this.saveHistory();
+    await this.saveHistory();
   }
 
   /**
    * Export chat history as markdown
    */
   async exportAsMarkdown(): Promise<string> {
+    await this.initialized;
+
     let markdown = `# Chat History\n\n`;
     markdown += `Session: ${this.sessionId}\n\n`;
     markdown += `---\n\n`;

@@ -87,7 +87,17 @@ export class SuggestModal {
 }
 
 export class ItemView {
-  constructor(leaf: any) {}
+  containerEl: any;
+  app: any;
+  constructor(leaf: any) {
+    this.app = leaf?.app;
+    if (typeof document !== 'undefined') {
+      this.containerEl = document.createElement('div');
+      // Append two child divs so that this.containerEl.children[1] is valid
+      this.containerEl.appendChild(document.createElement('div'));
+      this.containerEl.appendChild(document.createElement('div'));
+    }
+  }
 }
 
 export class WorkspaceLeaf {}
@@ -95,3 +105,66 @@ export class WorkspaceLeaf {}
 export const setIcon = vi.fn();
 
 export class FileSystemAdapter {}
+
+// Inject Obsidian's HTML element extensions in JSDOM environment
+if (typeof window !== 'undefined') {
+  const proto = Element.prototype as any;
+  
+  proto.createEl = function(tag: string, o?: any) {
+    const el = document.createElement(tag);
+    if (o) {
+      if (typeof o === 'string') {
+        el.className = o;
+      } else {
+        if (o.cls) el.className = o.cls;
+        if (o.text) el.textContent = o.text;
+        if (o.attr) {
+          for (const k in o.attr) {
+            el.setAttribute(k, o.attr[k]);
+          }
+        }
+      }
+    }
+    this.appendChild(el);
+    return el;
+  };
+
+  proto.createDiv = function(o?: any) {
+    if (typeof o === 'string') {
+      return this.createEl('div', { cls: o });
+    }
+    return this.createEl('div', o);
+  };
+
+  proto.createSpan = function(o?: any) {
+    if (typeof o === 'string') {
+      return this.createEl('span', { cls: o });
+    }
+    return this.createEl('span', o);
+  };
+
+  proto.addClass = function(cls: string) {
+    this.classList.add(cls);
+    return this;
+  };
+
+  proto.removeClass = function(cls: string) {
+    this.classList.remove(cls);
+    return this;
+  };
+
+  proto.hasClass = function(cls: string) {
+    return this.classList.contains(cls);
+  };
+
+  proto.empty = function() {
+    this.innerHTML = '';
+    return this;
+  };
+
+  proto.setText = function(text: string) {
+    this.textContent = text;
+    return this;
+  };
+}
+

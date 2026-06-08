@@ -7,6 +7,8 @@ import { IndexManager } from './indexing/index-manager';
 import { ChatView, CHAT_VIEW_TYPE } from './ui/chat-view';
 import { ChatOrchestrator } from './chat/chat-orchestrator';
 import { AgentManager } from './agents/agent-manager';
+import { TaskType } from './types';
+import { ObsidianAdapter } from './utils/obsidian-adapter';
 
 export default class PersonalAgentPlugin extends Plugin {
   settings: PersonalAgentSettings;
@@ -15,6 +17,7 @@ export default class PersonalAgentPlugin extends Plugin {
   indexManager: IndexManager;
   chatOrchestrator: ChatOrchestrator;
   agentManager: AgentManager;
+  platform: ObsidianAdapter;
 
   async onload() {
     console.log('Loading Mentat plugin');
@@ -22,15 +25,19 @@ export default class PersonalAgentPlugin extends Plugin {
     // Load settings
     await this.loadSettings();
 
+    // Initialize platform adapter
+    this.platform = new ObsidianAdapter(this);
+    const platform = this.platform;
+
     // Initialize AI Router
     this.aiRouter = new AIRouter(this.settings);
 
     // Initialize Index Manager
-    this.indexManager = new IndexManager(this);
+    this.indexManager = new IndexManager(platform, () => this.aiRouter.getProvider(TaskType.EMBEDDING));
     await this.indexManager.initialize();
 
     // Initialize Chat Orchestrator
-    this.chatOrchestrator = new ChatOrchestrator(this);
+    this.chatOrchestrator = new ChatOrchestrator(platform, this.settings, this.aiRouter, this.indexManager);
     await this.chatOrchestrator.initialize();
 
     // Get AgentManager reference (for advanced usage)
@@ -103,7 +110,7 @@ export default class PersonalAgentPlugin extends Plugin {
 
           notice.hide();
           new Notice(`✓ Indexed ${processedCount} documents successfully`);
-        } catch (error) {
+        } catch (error: any) {
           notice.hide();
           new Notice(`✗ Indexing failed: ${error.message}`);
           console.error('Indexing error:', error);
@@ -133,7 +140,7 @@ export default class PersonalAgentPlugin extends Plugin {
           } else {
             new Notice('✓ Index is up to date');
           }
-        } catch (error) {
+        } catch (error: any) {
           notice.hide();
           new Notice(`✗ Update failed: ${error.message}`);
           console.error('Incremental indexing error:', error);
@@ -179,63 +186,11 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
           await this.indexManager.indexFile(activeFile);
           notice.hide();
           new Notice(`✓ Indexed ${activeFile.basename}`);
-        } catch (error) {
+        } catch (error: any) {
           notice.hide();
           new Notice(`✗ Failed to index: ${error.message}`);
           console.error('File indexing error:', error);
         }
-      }
-    });
-
-    // Classification command
-    this.addCommand({
-      id: 'classify-note',
-      name: '[Coming Soon] Classify current note',
-      callback: async () => {
-        if (!this.settings.autoClassificationEnabled) {
-          new Notice('Classification feature is disabled in settings');
-          return;
-        }
-        new Notice('Classification feature coming soon!');
-      }
-    });
-
-    // Link suggestion command
-    this.addCommand({
-      id: 'suggest-links',
-      name: '[Coming Soon] Suggest links for current note',
-      callback: () => {
-        if (!this.settings.linkSuggestionEnabled) {
-          new Notice('Link suggestion feature is disabled in settings');
-          return;
-        }
-        new Notice('Link suggestion feature coming soon!');
-      }
-    });
-
-    // Knowledge graph command
-    this.addCommand({
-      id: 'open-graph',
-      name: '[Coming Soon] Open Knowledge Graph',
-      callback: () => {
-        if (!this.settings.graphEnabled) {
-          new Notice('Graph feature is disabled in settings');
-          return;
-        }
-        new Notice('Graph feature coming soon!');
-      }
-    });
-
-    // Review command
-    this.addCommand({
-      id: 'start-review',
-      name: '[Coming Soon] Start review session',
-      callback: () => {
-        if (!this.settings.reviewEnabled) {
-          new Notice('Review feature is disabled in settings');
-          return;
-        }
-        new Notice('Review feature coming soon!');
       }
     });
 
@@ -267,7 +222,7 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
           await this.chatOrchestrator.reloadSkills();
           notice.hide();
           new Notice('✓ All skills reloaded');
-        } catch (error) {
+        } catch (error: any) {
           notice.hide();
           new Notice(`✗ Failed to reload skills: ${error.message}`);
           console.error('Skill reload error:', error);
@@ -392,7 +347,7 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
           } else {
             new Notice('Log compiled. Please open "Mentat Debug Log.md" in your vault root.');
           }
-        } catch (err) {
+        } catch (err: any) {
           new Notice(`Failed to load diagnostics: ${err.message}`);
         }
       }

@@ -1,6 +1,5 @@
 // Skill Invocation Strategy - Abstract strategy pattern for skill invocation
 
-import { App } from 'obsidian';
 import { AnySkillDefinition, OpenAIFunction, AnthropicTool, isExecutableSkill } from '../skill-types';
 import { SkillRegistry } from '../core/skill-registry';
 import { SkillListGenerator } from '../generators/skill-list-generator';
@@ -8,6 +7,7 @@ import { SkillDetailGenerator } from '../generators/skill-detail-generator';
 import { getSpecTool, getInvokeTool } from '../meta-tools';
 import { PromptLoader } from '../../prompts/prompt-loader';
 import { PROMPT_PATHS, FALLBACK_PROMPTS, TEMPLATE_VARS } from '../../prompts/prompt-templates';
+import { IPlatformAdapter } from '../../types/platform';
 
 /**
  * Skill invocation mode
@@ -57,7 +57,7 @@ export class NativeFunctionCallingStrategy implements SkillInvocationStrategy {
     }
   }
 
-  isMetaToolCall(toolName: string): boolean {
+  isMetaToolCall(_toolName: string): boolean {
     return false; // No meta-tools in native mode
   }
 
@@ -74,10 +74,12 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
   private listGenerator = new SkillListGenerator();
   private detailGenerator = new SkillDetailGenerator();
   private promptLoader: PromptLoader | null = null;
+  private platform?: IPlatformAdapter;
 
-  constructor(private app?: App) {
-    if (app) {
-      this.promptLoader = new PromptLoader(app, FALLBACK_PROMPTS);
+  constructor(platform?: IPlatformAdapter) {
+    this.platform = platform;
+    if (platform) {
+      this.promptLoader = new PromptLoader(platform, FALLBACK_PROMPTS);
     }
   }
 
@@ -88,7 +90,8 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
     content += registry.getDocumentationContent();
 
     // Filter enabled skills
-    const plugin = this.app ? (this.app as any).plugins?.plugins?.['mentat'] : null;
+    const app = this.platform ? (this.platform as any).app : undefined;
+    const plugin = app ? app.plugins?.plugins?.['mentat'] : null;
     const configurations = plugin?.settings?.skillConfigurations || {};
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
@@ -168,7 +171,7 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
     return content;
   }
 
-  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): any[] {
+  getToolDefinitions(_registry: SkillRegistry, format: 'openai' | 'anthropic'): any[] {
     // Return only the two meta-tools
     if (format === 'openai') {
       return [
@@ -208,11 +211,10 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
  */
 export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
   private listGenerator = new SkillListGenerator();
-  private detailGenerator = new SkillDetailGenerator();
-  private progressiveStrategy: ProgressiveDisclosureStrategy;
+  private platform?: IPlatformAdapter;
 
-  constructor(private app?: App, directCallSkills?: string[]) {
-    this.progressiveStrategy = new ProgressiveDisclosureStrategy(app);
+  constructor(platform?: IPlatformAdapter, _directCallSkills?: string[]) {
+    this.platform = platform;
   }
 
   private getCoreSkillsSet(): Set<string> {
@@ -229,8 +231,9 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
       'obsidian:web_fetch'
     ];
     
-    const plugin = this.app ? (this.app as any).plugins?.plugins?.['mentat'] : null;
-    const configurations = plugin?.settings?.skillConfigurations || {};
+    const app = this.platform ? (this.platform as any).app : undefined;
+    const plugin = app ? app.plugins?.plugins?.['mentat'] : null;
+    const configurations: Record<string, any> = plugin?.settings?.skillConfigurations || {};
     
     // Base defaults
     for (const name of defaultCore) {
@@ -258,7 +261,8 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     content += registry.getDocumentationContent();
 
     // Filter enabled skills
-    const plugin = this.app ? (this.app as any).plugins?.plugins?.['mentat'] : null;
+    const app = this.platform ? (this.platform as any).app : undefined;
+    const plugin = app ? app.plugins?.plugins?.['mentat'] : null;
     const configurations = plugin?.settings?.skillConfigurations || {};
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
@@ -308,7 +312,8 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     const tools: any[] = [];
 
     // Filter enabled skills
-    const plugin = this.app ? (this.app as any).plugins?.plugins?.['mentat'] : null;
+    const app = this.platform ? (this.platform as any).app : undefined;
+    const plugin = app ? app.plugins?.plugins?.['mentat'] : null;
     const configurations = plugin?.settings?.skillConfigurations || {};
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
@@ -356,12 +361,12 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
 export class SkillInvocationContext {
   private strategy: SkillInvocationStrategy;
   private mode: SkillInvocationMode;
-  private app?: App;
+  private platform?: IPlatformAdapter;
   private directCallSkills?: string[];
 
-  constructor(mode: SkillInvocationMode = 'progressive', app?: App, directCallSkills?: string[]) {
+  constructor(mode: SkillInvocationMode = 'progressive', platform?: IPlatformAdapter, directCallSkills?: string[]) {
     this.mode = mode;
-    this.app = app;
+    this.platform = platform;
     this.directCallSkills = directCallSkills;
     this.strategy = this.createStrategy(mode);
   }
@@ -371,11 +376,11 @@ export class SkillInvocationContext {
       case 'native':
         return new NativeFunctionCallingStrategy();
       case 'progressive':
-        return new ProgressiveDisclosureStrategy(this.app);
+        return new ProgressiveDisclosureStrategy(this.platform);
       case 'auto':
-        return new HybridSkillInvocationStrategy(this.app, this.directCallSkills);
+        return new HybridSkillInvocationStrategy(this.platform, this.directCallSkills);
       default:
-        return new HybridSkillInvocationStrategy(this.app, this.directCallSkills);
+        return new HybridSkillInvocationStrategy(this.platform, this.directCallSkills);
     }
   }
 

@@ -316,7 +316,7 @@ Write your custom style instructions and preferences here. This file is dynamica
               new Notice('Failed to locate preferences file in vault');
             }
           } catch (err) {
-            new Notice(`Failed to open/create preferences: ${err.message}`);
+            new Notice(`Failed to open/create preferences: ${(err as any).message}`);
           }
         }));
 
@@ -397,7 +397,7 @@ ${folderGuidelines}
               new Notice('Failed to locate vault map file');
             }
           } catch (err) {
-            new Notice(`Failed to open/create vault map: ${err.message}`);
+            new Notice(`Failed to open/create vault map: ${(err as any).message}`);
           }
         }))
       .addButton(button => button
@@ -556,7 +556,7 @@ ${folderGuidelines}
         }));
 
     if (this.plugin.settings.skillInvocationMode === 'auto') {
-      const config = this.plugin.settings.skillInvocationConfig || {};
+      const config = (this.plugin.settings.skillInvocationConfig || {}) as any;
       const directSkills = config.directCallSkills || [
         'obsidian:read_note',
         'obsidian:query_notes',
@@ -749,7 +749,7 @@ ${folderGuidelines}
       directSetting.settingEl.style.minWidth = '150px';
 
       // Toggle 3: Require Confirmation
-      const defaultConfirm = !!skill.metadata?.requiresConfirmation;
+      const defaultConfirm = !!(skill.metadata as any)?.requiresConfirmation;
       const confirmValue = skillConfig.requireConfirmation !== undefined ? skillConfig.requireConfirmation : defaultConfirm;
       
       const confirmSetting = new Setting(controls)
@@ -907,7 +907,7 @@ ${folderGuidelines}
     } catch (err) {
       if (this.isCancelled) return;
       this.stage = 'error';
-      this.errorMsg = `本地重建失败: ${err.message}`;
+      this.errorMsg = `本地重建失败: ${(err as any).message}`;
       this.updateUI();
     }
   }
@@ -934,7 +934,7 @@ ${folderGuidelines}
     } catch (err) {
       if (this.isCancelled) return;
       this.stage = 'error';
-      this.errorMsg = err.message || String(err);
+      this.errorMsg = (err as any).message || String(err);
       this.updateUI();
     }
   }
@@ -957,7 +957,7 @@ ${folderGuidelines}
         new Notice('❌ 找不到重建后的知识地图文件');
       }
     } catch (e) {
-      new Notice(`无法打开知识地图: ${e.message}`);
+      new Notice(`无法打开知识地图: ${(e as any).message}`);
     }
   }
 
@@ -968,15 +968,14 @@ ${folderGuidelines}
     // 动态更新 Obsidian 弹窗的标准标题，达到极致的内置原生体验
     let modalTitle = '🗺️ 重建知识地图';
     if (this.stage === 'loading') {
-      modalTitle = '🗺️ 正在重建知识地图...';
+      modalTitle = '⚙️ 正在重建地图...';
     } else if (this.stage === 'success') {
-      modalTitle = '🎉 知识地图重建成功';
+      modalTitle = '🎉 重建成功';
     } else if (this.stage === 'error') {
-      modalTitle = '❌ AI 智能重建失败';
+      modalTitle = '❌ 重建异常';
     }
     this.titleEl.setText(modalTitle);
 
-    // 弹窗基础布局容器
     const container = contentEl.createDiv({ cls: 'rebuild-modal-container' });
     container.style.display = 'flex';
     container.style.flexDirection = 'column';
@@ -988,7 +987,7 @@ ${folderGuidelines}
       container.createEl('p', {
         text: '重建将深度分析您当前的文件夹结构、高频标签和最新笔记。AI 智能重建会利用 LLM 自动规划适合您知识库的定制化目录指南与命名工作流。',
         style: 'line-height: 1.6; color: var(--text-muted); font-size: 0.95em; margin: 0;'
-      });
+      } as any);
       
       // 完全使用 Obsidian 内置原生 Callout 结构，自动适配用户安装的任意第三方主题
       const callout = container.createDiv({ cls: 'callout' });
@@ -997,12 +996,12 @@ ${folderGuidelines}
       callout.style.padding = '12px 16px';
       callout.style.borderRadius = 'var(--radius-s)';
       
-      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px;' });
-      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' });
+      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px;' } as any);
+      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' } as any);
       setIcon(calloutIcon, 'alert-triangle'); // 完美地道地渲染原生图标
       calloutTitle.createDiv({ cls: 'callout-title-inner', text: '注意' });
 
-      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' });
+      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' } as any);
       calloutContent.createSpan({ text: '此操作将完全覆盖您目前在 ' });
       calloutContent.createEl('code', { text: 'vault-map.md' });
       calloutContent.createSpan({ text: ' 文件中手动修改或定制的所有内容，请在重建前做好备份。' });
@@ -1014,19 +1013,18 @@ ${folderGuidelines}
       buttonContainer.style.gap = '10px';
       buttonContainer.style.marginTop = '10px';
 
-      // ⚡ 快速本地重建按钮 (中性)
-      const localButton = buttonContainer.createEl('button', {
-        text: '⚡ 快速本地重建',
-        cls: 'mod-neutral'
-      });
-      localButton.addEventListener('click', () => this.runLocalRebuild());
-
-      // 🧠 AI 智能重建按钮 (推荐 CTA)
+      // 🤖 智能重建按钮 (推荐)
       const aiButton = buttonContainer.createEl('button', {
-        text: '🧠 AI 智能重建 (推荐)',
+        text: '🤖 AI 智能规划重建 (推荐)',
         cls: 'mod-cta'
       });
       aiButton.addEventListener('click', () => this.runAIRebuild());
+
+      // ⚡ 本地快速重建按钮
+      const localButton = buttonContainer.createEl('button', {
+        text: '⚡ 本地快速重建'
+      });
+      localButton.addEventListener('click', () => this.runLocalRebuild());
 
       // 取消按钮
       const cancelButton = buttonContainer.createEl('button', { text: '取消' });
@@ -1037,7 +1035,7 @@ ${folderGuidelines}
       container.createEl('p', {
         text: '我们正在分析您库中的笔记分布和组织结构，并为您量身定制最新的知识树规范与类别关联工作流。',
         style: 'color: var(--text-muted); font-size: 0.95em; line-height: 1.5; margin: 0;'
-      });
+      } as any);
 
       // 极细简约自定义进度条设计
       const progressWrapper = container.createDiv();
@@ -1046,24 +1044,24 @@ ${folderGuidelines}
       progressWrapper.style.flexDirection = 'column';
       progressWrapper.style.gap = '8px';
 
-      // 自定义极细进度条背景槽
+      // 自定义极细进度条 background 槽
       const progressContainer = progressWrapper.createDiv({
         style: 'width: 100%; height: 6px; background-color: var(--background-modifier-border); border-radius: 3px; overflow: hidden;'
-      });
+      } as any);
 
       // 动态平滑进度条
       progressContainer.createDiv({
         style: `width: ${this.progressVal}%; height: 100%; background-color: var(--interactive-accent); border-radius: 3px; transition: width 0.3s ease;`
-      });
+      } as any);
 
       const progressInfo = progressWrapper.createDiv({
         style: 'display: flex; justify-content: space-between; font-size: 0.85em; color: var(--text-muted); align-items: center;'
-      });
+      } as any);
 
       // 步骤文字
-      progressInfo.createSpan({ text: this.statusMsg, style: 'font-weight: 500;' });
+      progressInfo.createSpan({ text: this.statusMsg, style: 'font-weight: 500;' } as any);
       // 百分比提示
-      progressInfo.createSpan({ text: `${this.progressVal}%`, style: 'font-weight: 600; color: var(--interactive-accent);' });
+      progressInfo.createSpan({ text: `${this.progressVal}%`, style: 'font-weight: 600; color: var(--interactive-accent);' } as any);
 
       // 取消重建按钮容器
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
@@ -1079,20 +1077,19 @@ ${folderGuidelines}
 
     } else if (this.stage === 'success') {
       // 3. 成功阶段
-      // 内置原生绿色 Alert/Callout 卡片表示成功，完美而克制
       const callout = container.createDiv({ cls: 'callout' });
       callout.setAttribute('data-callout', 'success');
       callout.style.margin = '0';
       callout.style.padding = '12px 16px';
       callout.style.borderRadius = 'var(--radius-s)';
       
-      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-success);' });
-      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' });
+      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-success);' } as any);
+      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' } as any);
       setIcon(calloutIcon, 'check-circle');
       calloutTitle.createDiv({ cls: 'callout-title-inner', text: '重建成功！' });
 
-      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' });
-      calloutContent.createSpan({ text: 'Mentat 已经成功分析了您的整个知识库，并为您定制了最新的文件夹指南、命名规则和类别工作流。配置指南已保存在您的配置目录中。' });
+      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' } as any);
+      calloutContent.createSpan({ text: 'Mentat 已经成功 analysis 了您的整个知识库，并为您定制了最新的文件夹指南、命名规则和类别工作流。配置指南已保存在您的配置目录中。' });
 
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
       buttonContainer.style.display = 'flex';
@@ -1124,18 +1121,18 @@ ${folderGuidelines}
       callout.style.padding = '12px 16px';
       callout.style.borderRadius = 'var(--radius-s)';
       
-      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-error);' });
-      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' });
+      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-error);' } as any);
+      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' } as any);
       setIcon(calloutIcon, 'x-circle');
       calloutTitle.createDiv({ cls: 'callout-title-inner', text: 'AI 智能重建遇到异常' });
 
-      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' });
+      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' } as any);
       calloutContent.createSpan({ text: '在通过 AI 生成知识地图时遇到了异常。这通常是因为未配置 AI 服务商、网络连接超时或 API 额度不足。' });
 
       // 错误详情框
       const errorBox = container.createEl('pre', {
         style: 'background-color: var(--background-secondary); border: 1px solid var(--border-color); padding: 12px; border-radius: 4px; font-family: var(--font-monospace); font-size: 0.85em; color: var(--text-error); overflow-x: auto; max-height: 120px; white-space: pre-wrap; margin: 10px 0 0 0;'
-      });
+      } as any);
       errorBox.createSpan({ text: `错误详情：\n${this.errorMsg}` });
 
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });

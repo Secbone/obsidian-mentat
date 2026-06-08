@@ -1,7 +1,6 @@
 // Chat View - Main sidebar UI component
 
-import { ItemView, WorkspaceLeaf, setIcon, TFile } from 'obsidian';
-import PersonalAgentPlugin from '../../main';
+import { ItemView, WorkspaceLeaf, setIcon, TFile, Notice } from 'obsidian';
 import { DiagnosticsExporter } from '../../diagnostics/diagnostics-exporter';
 import { ChatManager } from '../../chat/chat-manager';
 import { MessageRenderer } from '../message-renderer';
@@ -10,6 +9,7 @@ import { FileSelectorModal } from '../file-selector-modal';
 import { ConfirmationModal } from '../confirmation-modal';
 import { TaskType, ChatMessage, ToolCall } from '../../types';
 import { AgentEvent } from '../../agents/agent-types';
+import PersonalAgentPlugin from '../../main';
 
 export const CHAT_VIEW_TYPE = 'mentat-chat';
 
@@ -23,7 +23,7 @@ interface ActiveTask {
 }
 
 export class ChatView extends ItemView {
-  plugin: PersonalAgentPlugin;
+  plugin: any;
   chatManager: ChatManager;
   messageRenderer: MessageRenderer;
   chatOrchestrator: ChatOrchestrator;
@@ -59,6 +59,7 @@ export class ChatView extends ItemView {
   // Steerability & Autocomplete & Draft States
   private activeContext: any | null = null;
   private activeSuggestType: 'slash' | 'mention' | null = null;
+  private suggestTriggerIdx: number = -1;
   private suggestDropdown: HTMLDivElement | null = null;
   private suggestSelectedIndex: number = 0;
   private suggestFilteredItems: any[] = [];
@@ -70,7 +71,7 @@ export class ChatView extends ItemView {
   constructor(leaf: WorkspaceLeaf, plugin: PersonalAgentPlugin) {
     super(leaf);
     this.plugin = plugin;
-    this.chatManager = new ChatManager(plugin, plugin.settings.contextManager);
+    this.chatManager = new ChatManager(plugin);
     this.messageRenderer = new MessageRenderer();
     // Use shared ChatOrchestrator instance from plugin
     this.chatOrchestrator = plugin.chatOrchestrator;
@@ -201,7 +202,7 @@ export class ChatView extends ItemView {
   private renderDocumentList(): void {
     this.documentList.empty();
 
-    const selectedPaths = this.chatManager.getSelectedFiles();
+    const selectedPaths = this.chatManager.selectedFilesList;
     const selectedFiles = selectedPaths
       .map(path => this.app.vault.getAbstractFileByPath(path))
       .filter((f): f is TFile => f instanceof TFile);
@@ -383,8 +384,8 @@ export class ChatView extends ItemView {
 
     // Settings button
     this.settingsButton.addEventListener('click', () => {
-      this.app.setting.open();
-      this.app.setting.openTabById(this.plugin.manifest.id);
+      (this.app as any).setting.open();
+      (this.app as any).setting.openTabById(this.plugin.manifest.id);
     });
 
     // Clear conversation
@@ -435,8 +436,8 @@ export class ChatView extends ItemView {
         return;
       }
       if (cmd === '/settings') {
-        this.app.setting.open();
-        this.app.setting.openTabById(this.plugin.manifest.id);
+        (this.app as any).setting.open();
+        (this.app as any).setting.openTabById(this.plugin.manifest.id);
         return;
       }
       if (cmd === '/index') {
@@ -453,7 +454,7 @@ export class ChatView extends ItemView {
         const notice = new Notice(`正在重建 ${filesToSearch.length} 个文档的向量索引...`, 0);
         try {
           let processed = 0;
-          await this.plugin.indexManager.indexFiles(filesToSearch, (progress) => {
+          await this.plugin.indexManager.indexFiles(filesToSearch, (progress: any) => {
             processed = progress.current;
             notice.setMessage(`索引进度: ${progress.current}/${progress.total} - ${progress.currentFile}`);
           });
@@ -461,7 +462,7 @@ export class ChatView extends ItemView {
           new Notice(`✓ 成功索引了 ${processed} 个文档`);
         } catch (err) {
           notice.hide();
-          new Notice(`✗ 索引失败: ${err.message}`);
+          new Notice(`✗ 索引失败: ${(err as any).message}`);
         }
         return;
       }
@@ -524,7 +525,7 @@ export class ChatView extends ItemView {
     this.sendButton.setAttribute('aria-label', 'Steer agent');
 
     try {
-      const selectedPaths = this.chatManager.getSelectedFiles();
+      const selectedPaths = this.chatManager.selectedFilesList;
       const selectedFiles = selectedPaths
         .map(path => this.app.vault.getAbstractFileByPath(path))
         .filter((f): f is TFile => f instanceof TFile);
@@ -665,10 +666,13 @@ export class ChatView extends ItemView {
           const approved = await new Promise<boolean>((resolve) => {
             new ConfirmationModal(
               this.app,
-              `Approve tool execution: ${event.skillName}`,
-              event.message,
-              () => resolve(true),
-              () => resolve(false)
+              {
+                skillName: event.skillName,
+                description: event.message || '',
+                parameters: event.params || {},
+                operationType: 'write'
+              },
+              (confirmed) => resolve(confirmed)
             ).open();
           });
 
@@ -731,11 +735,12 @@ export class ChatView extends ItemView {
 
     } catch (error) {
       console.error('Chat error:', error);
+      const errMsg = (error as any).message || String(error);
       if (this.currentStreamingElement) {
         const answerContainer = this.currentStreamingElement.querySelector('.final-answer-container') as HTMLElement;
         if (answerContainer) {
           const errorDiv = answerContainer.createDiv({ cls: 'chat-error-banner' });
-          errorDiv.setText(`Error: ${error.message}. Please check your AI provider settings.`);
+          errorDiv.setText(`Error: ${errMsg}. Please check your AI provider settings.`);
           errorDiv.style.color = 'var(--text-error)';
           errorDiv.style.marginTop = '10px';
           errorDiv.style.padding = '8px';
@@ -745,7 +750,7 @@ export class ChatView extends ItemView {
           errorDiv.style.borderLeft = '3px solid var(--text-error)';
         } else {
           this.currentStreamingElement.setText(
-            `Error: ${error.message}. Please check your AI provider settings.`
+            `Error: ${errMsg}. Please check your AI provider settings.`
           );
         }
       }
@@ -806,10 +811,14 @@ export class ChatView extends ItemView {
   }
 
   private scrollToBottom(): void {
-    this.messagesContainer.scrollTo({
-      top: this.messagesContainer.scrollHeight,
-      behavior: 'smooth'
-    });
+    if (typeof this.messagesContainer.scrollTo === 'function') {
+      this.messagesContainer.scrollTo({
+        top: this.messagesContainer.scrollHeight,
+        behavior: 'smooth'
+      });
+    } else {
+      this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+    }
   }
 
   private autoResizeTextarea(): void {}
@@ -953,7 +962,7 @@ export class ChatView extends ItemView {
 
     const contentEl = msgWrapper.createDiv('message-content');
 
-    const assistantMsgs = turnMessages.filter(m => m.role === 'assistant');
+    const assistantMsgs = turnMessages.filter(m => m.role === 'assistant' && !m.metadata?.isSubagent);
     const lastAssistantMsg = assistantMsgs[assistantMsgs.length - 1];
 
     if (assistantMsgs.length === 0) return wrapper;
@@ -1023,7 +1032,7 @@ export class ChatView extends ItemView {
             if (rawContent.includes('<final_answer>')) {
               explanationPart = rawContent.split('<final_answer>')[0].trim();
             }
-            const cleanExplanation = this.stripBlockToolCalls(explanationPart);
+            const cleanExplanation = explanationPart;
             if (cleanExplanation.trim()) {
               const expDiv = consoleBody.createDiv('tui-explanation');
               expDiv.innerHTML = this.messageRenderer.render(cleanExplanation);
@@ -1080,6 +1089,34 @@ export class ChatView extends ItemView {
                   `${tc.id}-result`
                 );
               }
+
+              // Render subagent trace if present
+              const subAgentMsgs = turnMessages.filter(m => m.metadata?.parentToolCallId === tc.id);
+              if (subAgentMsgs.length > 0) {
+                const subDetails = detailsBody.createEl('details', { cls: 'subagent-trace-console' });
+                const subSummary = subDetails.createEl('summary', { cls: 'subagent-trace-summary' });
+                subSummary.setText('🤖 查看子智能体运行明细...');
+                const subBody = subDetails.createDiv('subagent-trace-body');
+                
+                subAgentMsgs.forEach(msg => {
+                  const roleClass = msg.role === 'user' ? 'user' : (msg.role === 'assistant' ? 'assistant' : 'system');
+                  const bubble = subBody.createDiv(`subagent-msg subagent-msg-${roleClass}`);
+                  bubble.createDiv('subagent-msg-role').setText(msg.role.toUpperCase());
+                  
+                  if (msg.tool_calls && msg.tool_calls.length > 0) {
+                    const toolInfo = bubble.createDiv('subagent-msg-tools');
+                    msg.tool_calls.forEach(stc => {
+                      const toolCallEl = toolInfo.createDiv('subagent-msg-tool-call');
+                      toolCallEl.setText(`调用工具: ${stc.name}(${typeof stc.arguments === 'string' ? stc.arguments : JSON.stringify(stc.arguments)})`);
+                    });
+                  }
+                  
+                  if (msg.content) {
+                    const contentDiv = bubble.createDiv('subagent-msg-content');
+                    contentDiv.innerHTML = this.messageRenderer.render(msg.content);
+                  }
+                });
+              }
             }
           }
         }
@@ -1111,13 +1148,13 @@ export class ChatView extends ItemView {
       warningText.setText('智能体已被系统强制挂起，以防陷入无限循环。如果任务还未完成，您可以发送指令“继续”让其继续执行。');
       
       // Render last partial text if any
-      const cleanAnswer = this.stripBlockToolCalls(parsedAnswer);
+      const cleanAnswer = parsedAnswer;
       if (cleanAnswer.trim()) {
         const answerEl = contentEl.createDiv('final-answer');
         answerEl.innerHTML = this.messageRenderer.render(cleanAnswer);
       }
     } else {
-      const cleanAnswer = this.stripBlockToolCalls(parsedAnswer);
+      const cleanAnswer = parsedAnswer;
       if (cleanAnswer.trim()) {
         const answerEl = contentEl.createDiv('final-answer');
         answerEl.innerHTML = this.messageRenderer.render(cleanAnswer);
@@ -1132,13 +1169,7 @@ export class ChatView extends ItemView {
     return wrapper;
   }
 
-  /**
-   * Strips large fenced markdown block tool calls (MBTC) from text explanations.
-   */
-  private stripBlockToolCalls(text: string): string {
-    if (!text) return '';
-    return text.replace(/```(?:obsidian:edit_note|obsidian:editnote|obsidian:create_note|obsidian:createnote)\s*[^\n]*\n[\s\S]*?```/g, '').trim();
-  }
+
 
   /**
    * Helper to render a code block with smart click-to-expand truncation
@@ -1268,7 +1299,7 @@ export class ChatView extends ItemView {
           summaryText = `⠋ 思考中 ↗ : ${statusMsg}`;
         } else if (cleanTurnResponse) {
           const cleanText = cleanTurnResponse.replace(/[\r\n]+/g, ' ');
-          const stripped = this.stripBlockToolCalls(cleanText);
+          const stripped = cleanText;
           const truncated = stripped.length > 30 ? stripped.slice(-30) + '...' : stripped;
           summaryText = `⠋ 思考中 ↘ : ${truncated}`;
         } else if (runningTools > 0) {
@@ -1296,7 +1327,7 @@ export class ChatView extends ItemView {
         for (const task of activeTasks) {
           // Render explanation chronologically outside the tool block
           if (task.explanation) {
-            const cleanExplanation = this.stripBlockToolCalls(task.explanation);
+            const cleanExplanation = task.explanation;
             if (cleanExplanation.trim()) {
               const expDiv = consoleBody.createDiv('tui-explanation');
               expDiv.innerHTML = this.messageRenderer.render(cleanExplanation);
@@ -1350,7 +1381,7 @@ export class ChatView extends ItemView {
         }
 
         // Render current active streaming explanation at the bottom of the console timeline
-        const cleanExplanationChunk = this.stripBlockToolCalls(cleanTurnResponse);
+        const cleanExplanationChunk = cleanTurnResponse;
         if (cleanExplanationChunk && activeTasks.length > 0 && !executingTask && !confirmTask) {
           const expDiv = consoleBody.createDiv('tui-explanation');
           expDiv.innerHTML = this.messageRenderer.render(cleanExplanationChunk) + '<span class="tui-spinner">⠋</span>';
@@ -1364,7 +1395,7 @@ export class ChatView extends ItemView {
 
     const performRenderText = () => {
       if (!answerContainer) return;
-      const cleanResponseText = this.stripBlockToolCalls(fullResponse);
+      const cleanResponseText = fullResponse;
       if (cleanResponseText) {
         answerContainer.empty();
         const answerEl = answerContainer.createDiv('final-answer');

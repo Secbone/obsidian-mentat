@@ -764,3 +764,78 @@
   line-height: 1.5;
   color: var(--text-normal);
 }
+
+/* ===== SUBAGENT TRACE SYSTEM ===== */
+.subagent-trace-console {
+  margin-top: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+  overflow: hidden;
+  font-family: var(--font-interface);
+}
+
+.subagent-trace-summary {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--interactive-accent);
+  cursor: pointer;
+  user-select: none;
+}
+
+.subagent-trace-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background-color: var(--background-primary-alt);
+  border-top: 1px solid var(--background-modifier-border);
+  max-height: 350px;
+  overflow-y: auto;
+}
+
+.subagent-msg {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  font-family: var(--font-interface);
+}
+
+.subagent-msg-user {
+  background-color: rgba(88, 86, 214, 0.05);
+  border-left: 3px solid var(--interactive-accent);
+}
+
+.subagent-msg-assistant {
+  background-color: rgba(0, 180, 0, 0.03);
+  border-left: 3px solid var(--text-success);
+}
+
+.subagent-msg-system {
+  background-color: var(--background-secondary);
+  border-left: 3px solid var(--text-muted);
+}
+
+.subagent-msg-role {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.subagent-msg-content {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-normal);
+}
+
+.subagent-msg-tools {
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  background-color: var(--background-secondary-alt);
+  border-radius: 4px;
+  font-family: var(--font-monospace);
+  font-size: 10.5px;
+  color: var(--text-accent);
+}

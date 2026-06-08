@@ -182,28 +182,83 @@ export class DiagnosticsExporter {
       };
 
       // Calculate turn-by-turn metrics
+      const getModelContextLimit = (model: string): number => {
+        const m = model.toLowerCase();
+        if (m.includes('claude-3-5') || m.includes('claude-3.5')) return 200000;
+        if (m.includes('gpt-4o') || m.includes('gpt-4-turbo')) return 128000;
+        if (m.includes('deepseek')) return 64000;
+        if (m.includes('llama3') || m.includes('qwen')) return 32000;
+        return 8000; // standard fallback limit
+      };
+      const contextLimit = getModelContextLimit(modelName);
+
       const turnsData: Array<{ turn: number; tokens: number; saturation: number; cacheHit: number }> = [];
       let cumulativeTokens = 0;
-      const contextLimit = 200000; // standard limit
       let turnCounter = 1;
 
-      for (let i = 0; i < history.length; i++) {
-        const msg = history[i];
-        const msgTokens = estimateMsgTokens(msg);
-        const prevTokens = cumulativeTokens;
-        cumulativeTokens += msgTokens;
+      // Group history into turns (each user message begins a turn)
+      interface TurnGroup {
+        userMsg: ChatMessage;
+        assistantMsgs: ChatMessage[];
+      }
+      const turnGroups: TurnGroup[] = [];
+      let currentGroup: TurnGroup | null = null;
 
+      for (const msg of history) {
         if (msg.role === 'user') {
-          const saturation = parseFloat(((cumulativeTokens / contextLimit) * 100).toFixed(2));
-          const cacheHit = turnCounter === 1 ? 0 : parseFloat(((prevTokens / cumulativeTokens) * 100).toFixed(2));
-
-          turnsData.push({
-            turn: turnCounter++,
-            tokens: cumulativeTokens,
-            saturation,
-            cacheHit
-          });
+          if (currentGroup) {
+            turnGroups.push(currentGroup);
+          }
+          currentGroup = { userMsg: msg, assistantMsgs: [] };
+        } else if (msg.role === 'assistant' && currentGroup) {
+          currentGroup.assistantMsgs.push(msg);
         }
+      }
+      if (currentGroup) {
+        turnGroups.push(currentGroup);
+      }
+
+      for (const group of turnGroups) {
+        let turnPromptTokens = 0;
+        let turnCacheReadTokens = 0;
+        let turnTotalTokens = 0;
+        let hasRealUsage = false;
+
+        // Sum up real usage
+        for (const assistantMsg of group.assistantMsgs) {
+          if (assistantMsg.metadata?.usage) {
+            const usage = assistantMsg.metadata.usage;
+            turnPromptTokens += usage.promptTokens;
+            turnCacheReadTokens += usage.cacheReadTokens ?? 0;
+            turnTotalTokens += usage.totalTokens;
+            hasRealUsage = true;
+          }
+        }
+
+        if (!hasRealUsage) {
+          // Fallback to estimation
+          const userEstimate = estimateMsgTokens(group.userMsg);
+          let assistantEstimate = 0;
+          for (const assistantMsg of group.assistantMsgs) {
+            assistantEstimate += estimateMsgTokens(assistantMsg);
+          }
+          turnPromptTokens = userEstimate;
+          turnCacheReadTokens = 0;
+          turnTotalTokens = userEstimate + assistantEstimate;
+        }
+
+        cumulativeTokens += turnTotalTokens;
+        const saturation = parseFloat(((cumulativeTokens / contextLimit) * 100).toFixed(2));
+        const cacheHit = turnPromptTokens > 0
+          ? parseFloat(((turnCacheReadTokens / turnPromptTokens) * 100).toFixed(2))
+          : 0;
+
+        turnsData.push({
+          turn: turnCounter++,
+          tokens: cumulativeTokens,
+          saturation,
+          cacheHit
+        });
       }
 
       const lastSaturation = turnsData.length > 0 ? turnsData[turnsData.length - 1].saturation : 0;

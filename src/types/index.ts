@@ -50,6 +50,13 @@ export interface GenerateResponse {
   content: string;
   toolCalls?: ToolCall[];
   finishReason?: 'stop' | 'tool_calls' | 'length';
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  };
 }
 
 export interface AIProvider {
@@ -81,6 +88,8 @@ export interface AIProvider {
   // Embedding methods
   generateEmbedding(text: string): Promise<{ embedding: number[]; tokens?: number }>;
   embed(text: string): Promise<number[]>;
+  generateEmbeddings?(texts: string[]): Promise<{ embeddings: number[][]; tokens?: number }>;
+  embeds?(texts: string[]): Promise<number[][]>;
 
   // Health check
   isAvailable(): Promise<boolean>;
@@ -116,6 +125,12 @@ export interface ChatMessage {
   name?: string; // For tool/function messages
   tool_call_id?: string; // For tool response messages
   tool_calls?: ToolCall[]; // For assistant messages with tool calls
+  metadata?: {
+    isSubagent?: boolean;
+    agentId?: string;
+    parentMessageId?: string;
+    [key: string]: any;
+  };
 }
 
 export interface ChatContext {

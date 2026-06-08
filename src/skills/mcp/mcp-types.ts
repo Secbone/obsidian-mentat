@@ -11,11 +11,11 @@ export interface MCPServerConfig {
   // For stdio transport
   command?: string;
   args?: string[];
-  env?: Record;
+  env?: Record<string, string>;
 
   // For HTTP transport
   url?: string;
-  headers?: Record;
+  headers?: Record<string, string>;
 
   enabled: boolean;
   autoConnect: boolean;
@@ -25,9 +25,10 @@ export interface MCPServerConfig {
  * MCP Transport interface
  */
 export interface MCPTransport {
-  send(message: MCPMessage): Promise;
-  receive(): Promise;
-  close(): Promise;
+  connect(): Promise<void>;
+  send(message: MCPMessage): Promise<any>;
+  receive(): Promise<MCPMessage>;
+  close(): Promise<void>;
   isConnected(): boolean;
 }
 
@@ -126,7 +127,7 @@ export interface MCPToolDefinition {
   description: string;
   inputSchema: {
     type: 'object';
-    properties?: Record;
+    properties?: Record<string, any>;
     required?: string[];
     [key: string]: any;
   };
@@ -149,7 +150,7 @@ export interface MCPToolCallRequest extends MCPMessage {
   method: 'tools/call';
   params: {
     name: string;
-    arguments: Record;
+    arguments: Record<string, any>;
   };
 }
 

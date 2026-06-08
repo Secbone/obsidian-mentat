@@ -2,15 +2,15 @@
 
 import { MCPClient } from './mcp-client';
 import { MCPServerConfig, MCPToolDefinition } from './mcp-types';
-import { SkillRegistry } from '../skill-registry';
+import { SkillRegistry } from '../core/skill-registry';
 import { SkillDefinition } from '../skill-types';
 
 /**
  * MCP Manager - Centralized management of MCP server connections
  */
 export class MCPManager {
-  private clients: Map = new Map();
-  private configs: Map = new Map();
+  private clients: Map<string, MCPClient> = new Map();
+  private configs: Map<string, MCPServerConfig> = new Map();
 
   constructor(private skillRegistry?: SkillRegistry) {}
 
@@ -25,7 +25,7 @@ export class MCPManager {
   /**
    * Remove a server configuration
    */
-  async removeServer(serverId: string): Promise {
+  async removeServer(serverId: string): Promise<void> {
     const client = this.clients.get(serverId);
     if (client) {
       await client.disconnect();
@@ -46,7 +46,7 @@ export class MCPManager {
   /**
    * Connect to a server
    */
-  async connect(serverId: string): Promise {
+  async connect(serverId: string): Promise<void> {
     const config = this.configs.get(serverId);
     if (!config) {
       throw new Error(`Server config not found: ${serverId}`);
@@ -87,7 +87,7 @@ export class MCPManager {
   /**
    * Disconnect from a server
    */
-  async disconnect(serverId: string): Promise {
+  async disconnect(serverId: string): Promise<void> {
     const client = this.clients.get(serverId);
     if (client) {
       await client.disconnect();
@@ -95,7 +95,7 @@ export class MCPManager {
       // Unregister skills
       if (this.skillRegistry) {
         const skills = client.toSkillDefinitions();
-        skills.forEach(skill => {
+        skills.forEach((skill: SkillDefinition) => {
           this.skillRegistry!.unregister('mcp', `${serverId}:${skill.name}`);
         });
       }
@@ -108,13 +108,13 @@ export class MCPManager {
   /**
    * Connect to all enabled servers with autoConnect
    */
-  async connectAll(): Promise {
+  async connectAll(): Promise<void> {
     const connectPromises: Promise<void>[] = [];
 
     for (const [serverId, config] of this.configs.entries()) {
       if (config.enabled && config.autoConnect) {
         connectPromises.push(
-          this.connect(serverId).catch(error => {
+          this.connect(serverId).catch((error: any) => {
             console.error(`[MCPManager] Auto-connect failed for ${serverId}:`, error);
             return error;
           })
@@ -128,7 +128,7 @@ export class MCPManager {
   /**
    * Disconnect from all servers
    */
-  async disconnectAll(): Promise {
+  async disconnectAll(): Promise<void> {
     const disconnectPromises = Array.from(this.clients.keys()).map(serverId =>
       this.disconnect(serverId)
     );
@@ -185,7 +185,7 @@ export class MCPManager {
 
     for (const [serverId, client] of this.clients.entries()) {
       const clientTools = client.getTools();
-      clientTools.forEach(tool => {
+      clientTools.forEach((tool: MCPToolDefinition) => {
         tools.push({ serverId, tool });
       });
     }
@@ -208,14 +208,14 @@ export class MCPManager {
 
       return { success: true, toolCount };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: (error as any).message };
     }
   }
 
   /**
    * Reload a server (disconnect and reconnect)
    */
-  async reloadServer(serverId: string): Promise {
+  async reloadServer(serverId: string): Promise<void> {
     await this.disconnect(serverId);
     await this.connect(serverId);
   }
@@ -255,7 +255,7 @@ export class MCPManager {
   /**
    * Update server config
    */
-  updateServerConfig(serverId: string, updates: Partial): void {
+  updateServerConfig(serverId: string, updates: Partial<MCPServerConfig>): void {
     const config = this.configs.get(serverId);
     if (!config) {
       throw new Error(`Server config not found: ${serverId}`);

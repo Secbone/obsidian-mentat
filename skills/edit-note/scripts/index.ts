@@ -85,7 +85,16 @@ export async function execute(
     let operation: string;
     let result: EditResult;
 
-    if (!fileExists) {
+    if (input.content && input.content.includes('<<<<<<< SEARCH')) {
+      if (!fileExists) {
+        return {
+          success: false,
+          error: `Cannot apply search-and-replace edits because the file does not exist: ${input.path}`
+        };
+      }
+      operation = 'search-replace';
+      result = await applySearchReplace(file as TFile, input.content, context);
+    } else if (!fileExists) {
       // CREATE: File doesn't exist
       operation = 'create';
       result = await createFile(input, context);
@@ -310,8 +319,8 @@ async function handleSectionOperation(
   if (newContent === currentContent) {
     const availableHeadings = currentContent
       .split('\n')
-      .filter(line => line.match(/^#+\s/))
-      .map(line => line.replace(/^#+\s+/, ''))
+      .filter((line: string) => line.match(/^#+\s/))
+      .map((line: string) => line.replace(/^#+\s+/, ''))
       .join(', ');
     throw new Error(
       `Heading "${input.heading}" not found in document. Available headings: ${availableHeadings || 'none'}`
@@ -710,5 +719,164 @@ export function createSkill(context: SkillContext) {
   return {
     schema,
     execute: (input: Input) => execute(input, context)
+  };
+}
+
+interface SearchReplaceBlock {
+  search: string;
+  replace: string;
+}
+
+/**
+ * Helper: Parse search-and-replace blocks from content
+ */
+export function parseSearchReplaceBlocks(content: string): SearchReplaceBlock[] {
+  const blocks: SearchReplaceBlock[] = [];
+  // Match <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE
+  const blockRegex = /<<<<<<< SEARCH\r?\n([\s\S]*?)\r?\n=======\r?\n([\s\S]*?)\r?\n>>>>>>> REPLACE/g;
+  
+  let match;
+  while ((match = blockRegex.exec(content)) !== null) {
+    blocks.push({
+      search: match[1],
+      replace: match[2]
+    });
+  }
+  
+  const searchMarkers = (content.match(/<<<<<<< SEARCH/g) || []).length;
+  const replaceMarkers = (content.match(/>>>>>>> REPLACE/g) || []).length;
+  const dividerMarkers = (content.match(/=======/g) || []).length;
+
+  if (searchMarkers > 0 && (blocks.length !== searchMarkers || replaceMarkers !== searchMarkers || dividerMarkers !== searchMarkers)) {
+    throw new Error(
+      `Failed to parse search-and-replace blocks. Found ${searchMarkers} SEARCH marker(s), ${dividerMarkers} divider(s) (=======), and ${replaceMarkers} REPLACE marker(s).\n` +
+      `Please ensure all blocks follow the exact format:\n` +
+      `<<<<<<< SEARCH\n` +
+      `[exact text to find]\n` +
+      `=======\n` +
+      `[replacement text]\n` +
+      `>>>>>>> REPLACE`
+    );
+  }
+
+  return blocks;
+}
+
+/**
+ * Helper: Apply search-and-replace blocks sequentially to target file content
+ */
+export async function applySearchReplace(
+  file: TFile,
+  content: string,
+  context: SkillContext
+): Promise<EditResult> {
+  const currentContent = await context.vault.read(file);
+  const previousLength = currentContent.length;
+
+  const blocks = parseSearchReplaceBlocks(content);
+  if (blocks.length === 0) {
+    throw new Error(
+      `No valid SEARCH/REPLACE blocks found in the content. Ensure your edits are enclosed within:\n` +
+      `<<<<<<< SEARCH\n...\n=======\n...\n>>>>>>> REPLACE`
+    );
+  }
+
+  let updatedContent = currentContent;
+
+  for (let i = 0; i < blocks.length; i++) {
+    const { search, replace } = blocks[i];
+    
+    // Phase 1: Exact Match
+    let occurrences: number[] = [];
+    let searchIndex = 0;
+    while (true) {
+      const foundIndex = updatedContent.indexOf(search, searchIndex);
+      if (foundIndex === -1) break;
+      occurrences.push(foundIndex);
+      searchIndex = foundIndex + search.length;
+    }
+
+    if (occurrences.length === 1) {
+      // Unique match found, perform replacement
+      updatedContent = updatedContent.substring(0, occurrences[0]) + replace + updatedContent.substring(occurrences[0] + search.length);
+      continue;
+    }
+
+    if (occurrences.length > 1) {
+      const locations = occurrences.map(pos => {
+        const textBefore = updatedContent.substring(0, pos);
+        const lineNum = textBefore.split('\n').length;
+        return `line ${lineNum}`;
+      }).join(', ');
+
+      throw new Error(
+        `Search block #${i + 1} is not unique. It appears ${occurrences.length} times in the file (at ${locations}).\n` +
+        `Please provide more surrounding lines in the SEARCH block to make it unique.`
+      );
+    }
+
+    // Phase 2: Elastic (Fuzzy) Matching Fallback
+    const normalizeText = (str: string) => str.replace(/\r\n/g, '\n').trim();
+    const cleanSearch = normalizeText(search);
+    
+    if (!cleanSearch) {
+      throw new Error(`Search block #${i + 1} is empty. Cannot search for empty text.`);
+    }
+
+    const escapedSearch = cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const flexiblePattern = escapedSearch.replace(/\s+/g, '\\s+');
+    
+    const flexibleRegex = new RegExp(flexiblePattern);
+    const flexibleGlobalRegex = new RegExp(flexiblePattern, 'g');
+
+    const matches = updatedContent.match(flexibleGlobalRegex);
+
+    if (matches && matches.length === 1) {
+      const matchResult = updatedContent.match(flexibleRegex);
+      if (matchResult && matchResult.index !== undefined) {
+        const start = matchResult.index;
+        const end = start + matchResult[0].length;
+        updatedContent = updatedContent.substring(0, start) + replace + updatedContent.substring(end);
+        continue;
+      }
+    } else if (matches && matches.length > 1) {
+      throw new Error(
+        `Search block #${i + 1} matches ${matches.length} different places in the file under flexible spacing.\n` +
+        `Please provide more unique surrounding context lines in the SEARCH block.`
+      );
+    }
+
+    throw new Error(
+      `Search block #${i + 1} not found in the file.\n` +
+      `=======[ EXPECTED SEARCH BLOCK ]=======\n` +
+      `${search}\n` +
+      `=======================================\n` +
+      `Tip: The text must match the target file content exactly (lines, indentation, and spacing). Check for typos or outdated context.`
+    );
+  }
+
+  // Write updated content
+  await context.vault.modify(file, updatedContent);
+
+  // Trigger reindex if requested
+  let reindexed = false;
+  if (context.indexManager) {
+    try {
+      await context.indexManager.indexFile(file);
+      reindexed = true;
+    } catch (error) {
+      console.warn('[EditNote] Failed to reindex:', error);
+    }
+  }
+
+  return {
+    path: file.path,
+    name: file.basename,
+    created: false,
+    updated: true,
+    operation: 'search-replace',
+    previousLength,
+    newLength: updatedContent.length,
+    reindexed
   };
 }

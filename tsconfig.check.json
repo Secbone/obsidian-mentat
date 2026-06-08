@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM"],
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "types": ["node"]
+  },
+  "include": [
+    "src/ui/**/*",
+    "src/chat/chat-manager.ts",
+    "src/indexing/**/*",
+    "src/utils/**/*",
+    "src/providers/openai-provider.ts",
+    "src/providers/ollama-provider.ts",
+    "src/types/platform.ts"
+  ]
+}

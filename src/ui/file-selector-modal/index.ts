@@ -1,7 +1,6 @@
 // File Selector Modal - Fuzzy search interface for selecting documents
 
 import { SuggestModal, TFile } from 'obsidian';
-import PersonalAgentPlugin from '../../../main';
 import Fuse from 'fuse.js';
 
 export class FileSelectorModal extends SuggestModal<TFile> {
@@ -10,7 +9,7 @@ export class FileSelectorModal extends SuggestModal<TFile> {
   private onSelect: (file: TFile) => void;
 
   constructor(
-    plugin: PersonalAgentPlugin,
+    plugin: any,
     onSelect: (file: TFile) => void
   ) {
     super(plugin.app);

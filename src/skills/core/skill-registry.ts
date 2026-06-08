@@ -11,6 +11,8 @@ import {
   isDocumentationSkill,
   isExecutableSkill
 } from '../skill-types';
+import { SkillListGenerator } from '../generators/skill-list-generator';
+import { SkillDetailGenerator } from '../generators/skill-detail-generator';
 
 /**
  * SkillRegistry manages all registered skills and provides format conversion
@@ -157,7 +159,7 @@ export class SkillRegistry {
    * Convert a single skill to OpenAI Function format
    */
   skillToOpenAIFunction(skill: SkillDefinition): OpenAIFunction {
-    const jsonSchema = zodToJsonSchema(skill.schema, {
+    const jsonSchema = zodToJsonSchema(skill.schema as any, {
       $refStrategy: 'none'
     }) as any;
 
@@ -176,7 +178,7 @@ export class SkillRegistry {
    * Convert a single skill to Anthropic Tool format
    */
   skillToAnthropicTool(skill: SkillDefinition): AnthropicTool {
-    const jsonSchema = zodToJsonSchema(skill.schema, {
+    const jsonSchema = zodToJsonSchema(skill.schema as any, {
       $refStrategy: 'none'
     }) as any;
 
@@ -196,10 +198,10 @@ export class SkillRegistry {
    */
   getStats(): {
     total: number;
-    byNamespace: Record;
+    byNamespace: Record<string, number>;
   } {
     const skills = this.getAll();
-    const byNamespace: Record = {};
+    const byNamespace: Record<string, number> = {};
 
     skills.forEach(skill => {
       byNamespace[skill.namespace] = (byNamespace[skill.namespace] || 0) + 1;
@@ -270,7 +272,6 @@ export class SkillRegistry {
    * Returns only skill names and brief descriptions
    */
   getSkillList(): string {
-    const { SkillListGenerator } = require('../generators/skill-list-generator');
     const generator = new SkillListGenerator();
     return generator.generateSkillList(this.getAll());
   }
@@ -286,7 +287,6 @@ export class SkillRegistry {
       return `Error: Skill "${skillName}" not found. Use the skill list to see available skills.`;
     }
 
-    const { SkillDetailGenerator } = require('../generators/skill-detail-generator');
     const generator = new SkillDetailGenerator();
     return generator.generateSkillDetails(skill, format);
   }

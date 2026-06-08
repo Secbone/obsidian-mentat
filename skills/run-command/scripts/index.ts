@@ -143,7 +143,6 @@ export async function execute(
         } else {
           resolve({
             success: true,
-            message: `Command executed successfully.`,
             data: {
               success: true,
               stdout: stdout.toString(),

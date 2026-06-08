@@ -26,11 +26,43 @@ export class VectorStore {
   }
 
   /**
+   * Add chunks for multiple files in bulk and rebuild the index once
+   */
+  addFileChunksBulk(fileChunksMap: Map<string, FileChunk[]>): void {
+    for (const [filePath, chunks] of fileChunksMap.entries()) {
+      this.chunks.set(filePath, chunks);
+    }
+    this.rebuildIndex();
+  }
+
+  /**
    * Remove a file from the store
    */
   removeFile(filePath: string): void {
     this.chunks.delete(filePath);
     this.rebuildIndex();
+  }
+
+  /**
+   * Get chunks for a specific file
+   */
+  getFileChunks(filePath: string): FileChunk[] | undefined {
+    return this.chunks.get(filePath);
+  }
+
+  /**
+   * Clear the vector store
+   */
+  clear(): void {
+    this.chunks.clear();
+    this.allChunks = [];
+  }
+
+  /**
+   * Get all indexed file paths
+   */
+  getFilePaths(): string[] {
+    return Array.from(this.chunks.keys());
   }
 
   /**
@@ -89,7 +121,7 @@ export class VectorStore {
   /**
    * Rebuild the flattened index
    */
-  private rebuildIndex(): void {
+  rebuildIndex(): void {
     this.allChunks = [];
     for (const chunks of this.chunks.values()) {
       this.allChunks.push(...chunks);
@@ -97,7 +129,7 @@ export class VectorStore {
   }
 
   /**
-   * Serialize the store for persistence
+   * Serialize the store for persistence (used for migration)
    */
   serialize(): string {
     const data = {

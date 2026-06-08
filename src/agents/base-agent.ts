@@ -103,6 +103,12 @@ export class BaseAgent {
     }
 
     // Otherwise, execute multi-turn loop with skills (RAGP)
+    let promptTokens = 0;
+    let completionTokens = 0;
+    let totalTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheCreationTokens = 0;
+
     const executedKeysHistory: string[] = [];
     let state: AgentState = {
       messages: [
@@ -153,18 +159,20 @@ export class BaseAgent {
           skills: state.skills,
           toolChoice: 'auto'
         });
+
+        if (result.usage) {
+          promptTokens += result.usage.promptTokens;
+          completionTokens += result.usage.completionTokens;
+          totalTokens += result.usage.totalTokens;
+          cacheReadTokens += result.usage.cacheReadTokens ?? 0;
+          cacheCreationTokens += result.usage.cacheCreationTokens ?? 0;
+        }
       } catch (err: any) {
         yield { type: 'error', message: `大模型决策异常: ${err.message}` };
         throw err;
       }
 
-      // Look for Markdown Block Tool Calls (MBTC)
-      if (!result.toolCalls || result.toolCalls.length === 0) {
-        const blockCalls = this.parseBlockToolCalls(result.content);
-        if (blockCalls.length > 0) {
-          result.toolCalls = blockCalls;
-        }
-      }
+
 
       // Update state with assistant response
       const assistantMessage: ChatMessage = {
@@ -211,7 +219,7 @@ export class BaseAgent {
           newSkillCalls.push({
             id: toolCall.id,
             skillName: toolCall.name,
-            namespace: 'guard',
+            namespace: 'guard' as any,
             parameters: typeof toolCall.arguments === 'string' ? { raw: toolCall.arguments } : toolCall.arguments,
             status: 'error',
             timestamp: Date.now(),
@@ -246,7 +254,7 @@ export class BaseAgent {
             newSkillCalls.push({
               id: toolCall.id,
               skillName: toolCall.name,
-              namespace: 'meta',
+              namespace: 'meta' as any,
               parameters: { raw_arguments: toolCall.arguments },
               status: 'error',
               timestamp: Date.now(),
@@ -286,7 +294,7 @@ export class BaseAgent {
               newSkillCalls.push({
                 id: toolCall.id,
                 skillName: toolCall.name,
-                namespace: 'meta',
+                namespace: 'meta' as any,
                 parameters: args,
                 status: isSuccess ? 'success' : 'error',
                 timestamp: Date.now(),
@@ -331,7 +339,7 @@ export class BaseAgent {
                 type: 'confirm_request',
                 skillName: skillName,
                 params: skillParams,
-                message: `智能体申请执行操作: 【${skill.metadata?.description || skillName}】。是否批准？`
+                message: `智能体申请执行操作: 【${skill.description || skillName}】。是否批准？`
               };
 
               executeApproved = userFeedback?.approved ?? true;
@@ -370,6 +378,7 @@ export class BaseAgent {
                   tool_call_id: toolCall.id,
                   name: toolCall.name
                 });
+                this.handleSubagentMessages(skillName, runResult, newMessages, toolCall.id);
               } else {
                 yield { type: 'status', message: `⚠️ 工具 [${skillName}] 运行失败，正在自动引导纠错...` };
                 yield { type: 'skill_error', name: `invoke:${skillName}`, error: runResult.error || '执行失败' };
@@ -385,7 +394,7 @@ export class BaseAgent {
               newSkillCalls.push({
                 id: toolCall.id,
                 skillName: toolCall.name,
-                namespace: 'meta',
+                namespace: 'meta' as any,
                 parameters: args,
                 status: runResult.success ? 'success' : 'error',
                 timestamp: Date.now(),
@@ -417,7 +426,7 @@ export class BaseAgent {
               type: 'confirm_request',
               skillName: toolCall.name,
               params: toolCall.arguments,
-              message: `智能体申请执行操作: 【${skill.metadata?.description || toolCall.name}】。是否批准？`
+              message: `智能体申请执行操作: 【${skill.description || toolCall.name}】。是否批准？`
             };
 
             executeApproved = userFeedback?.approved ?? true;
@@ -452,6 +461,7 @@ export class BaseAgent {
                 tool_call_id: toolCall.id,
                 name: toolCall.name
               });
+              this.handleSubagentMessages(toolCall.name, runResult, newMessages, toolCall.id);
             } else {
               yield { type: 'status', message: `⚠️ 工具 [${toolCall.name}] 运行失败，正在自动引导纠错...` };
               yield { type: 'skill_error', name: toolCall.name, error: runResult.error || '执行失败' };
@@ -522,13 +532,36 @@ export class BaseAgent {
 
     yield { type: 'status', message: '任务完成！' };
 
+    // Attach usage stats to the last assistant message
+    const assistantMsgs = state.messages.filter(m => m.role === 'assistant');
+    if (assistantMsgs.length > 0) {
+      const lastMsg = assistantMsgs[assistantMsgs.length - 1];
+      lastMsg.metadata = {
+        ...lastMsg.metadata,
+        usage: {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          cacheReadTokens,
+          cacheCreationTokens
+        }
+      };
+    }
+
     return {
       content: state.fullResponse,
       messages: state.messages,
       skillCalls: state.skillCalls,
       metadata: {
         turns: state.turnCount,
-        durationMs: Date.now() - startTime
+        durationMs: Date.now() - startTime,
+        usage: {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          cacheReadTokens,
+          cacheCreationTokens
+        }
       }
     };
   }
@@ -690,7 +723,7 @@ export class BaseAgent {
     const skillCall: SkillCall = {
       id: toolCall.id,
       skillName: toolCall.name,
-      namespace: 'meta',
+      namespace: 'meta' as any,
       parameters: args,
       status: 'executing',
       timestamp: Date.now()
@@ -889,50 +922,7 @@ export class BaseAgent {
     return result;
   }
 
-  /**
-   * Parses Markdown block-style tool calls (MBTC) from assistant response text.
-   * Format: ```obsidian:edit_note path="Research/KTO.md" heading="KTO" ...
-   * content inside block
-   * ```
-   */
-  private parseBlockToolCalls(text: string): ToolCall[] {
-    const toolCalls: ToolCall[] = [];
-    // Match obsidian:edit_note, obsidian:editnote, obsidian:create_note, or obsidian:createnote block syntax
-    const blockRegex = /```(obsidian:edit_note|obsidian:editnote|obsidian:create_note|obsidian:createnote)\s*([^\n]*)\n([\s\S]*?)```/g;
-    
-    let match;
-    let index = 1;
-    while ((match = blockRegex.exec(text)) !== null) {
-      const [_, skillName, attributesStr, bodyContent] = match;
-      
-      // Map to official registered skill names if underscores are omitted
-      let officialName = skillName;
-      if (officialName === 'obsidian:editnote') officialName = 'obsidian:edit_note';
-      else if (officialName === 'obsidian:createnote') officialName = 'obsidian:create_note';
-      
-      const params: Record<string, any> = { content: bodyContent.trim() };
-      
-      // Parse attributes in the header, e.g. path="Research/KTO.md" heading="KTO"
-      if (attributesStr) {
-        const attrRegex = /(\w+)\s*=\s*['"]([^'"]*)['"]/g;
-        let attrMatch;
-        while ((attrMatch = attrRegex.exec(attributesStr)) !== null) {
-          const [__, key, value] = attrMatch;
-          if (value === 'true') params[key] = true;
-          else if (value === 'false') params[key] = false;
-          else params[key] = value;
-        }
-      }
-      
-      toolCalls.push({
-        id: `block_call_${Date.now()}_${index++}`,
-        name: officialName,
-        arguments: params
-      });
-    }
-    
-    return toolCalls;
-  }
+
 
   /**
    * Safely parse tool call arguments
@@ -1197,5 +1187,25 @@ export class BaseAgent {
 
   getConfig(): AgentConfig {
     return { ...this.config };
+  }
+
+  /**
+   * Helper to extract subagent messages and tag them with subagent metadata
+   */
+  private handleSubagentMessages(skillName: string, runResult: any, targetArray: ChatMessage[], toolCallId?: string): void {
+    const isDelegate = skillName === 'obsidian:delegate_task' || skillName === 'obsidian:spawn_subagent' || 
+                       skillName === 'delegate_task' || skillName === 'spawn_subagent';
+    if (isDelegate && runResult.metadata?.subagentMessages) {
+      const subMessages = runResult.metadata.subagentMessages.map((m: any) => ({
+        ...m,
+        metadata: {
+          ...m.metadata,
+          isSubagent: true,
+          agentId: runResult.metadata.agentId || 'subagent',
+          parentToolCallId: toolCallId
+        }
+      }));
+      targetArray.push(...subMessages);
+    }
   }
 }

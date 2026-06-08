@@ -1,13 +1,12 @@
 // ChatOrchestrator - Orchestrates chat conversations with agent and skill support
 
-import { TFile } from 'obsidian';
-import PersonalAgentPlugin from '../main';
 import { TaskType, ChatMessage } from '../types';
+import { Notice } from 'obsidian';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
-import { SkillContext, SkillCall } from '../skills/skill-types';
+import { SkillContext, SkillCall, isExecutableSkill, isDocumentationSkill, SkillDefinition } from '../skills/skill-types';
 import { MCPManager } from '../skills/mcp';
-import { SkillLoader, isExecutableSkill, isDocumentationSkill } from '../skills/core/skill-loader';
+import { SkillLoader } from '../skills/core/skill-loader';
 import { SkillInvocationContext } from '../skills/strategies/skill-invocation-strategy';
 import { SkillLoadCache } from '../skills/core/skill-cache';
 import { PromptLoader } from '../prompts/prompt-loader';
@@ -16,6 +15,8 @@ import { BaseAgent, AgentDependencies } from '../agents/base-agent';
 import { AgentManager } from '../agents/agent-manager';
 import { AgentConfig, AgentContext, AgentEvent, AgentResponse } from '../agents/agent-types';
 import { DraftReviewPipeline } from './draft-review-pipeline';
+import { IPlatformAdapter, IPlatformFile } from '../types/platform';
+import { z } from 'zod';
 
 export interface ChatQueryOptions {
   enableSkills?: boolean;
@@ -36,7 +37,12 @@ export interface ChatQueryResult {
 export class ChatOrchestrator {
   private agentManager: AgentManager;
   private defaultAgent: BaseAgent | null = null;
-  private plugin: PersonalAgentPlugin;
+  
+  // Decoupled host & engine references
+  private platform: IPlatformAdapter;
+  private settings: any;
+  private aiRouter: any;
+  private indexManager: any;
 
   // Skill system components
   private skillRegistry: SkillRegistry;
@@ -47,40 +53,50 @@ export class ChatOrchestrator {
   private skillCache: SkillLoadCache;
   private promptLoader: PromptLoader;
 
-  constructor(plugin: PersonalAgentPlugin) {
-    this.plugin = plugin;
+  constructor(
+    platform: IPlatformAdapter,
+    settings: any,
+    aiRouter: any,
+    indexManager: any
+  ) {
+    this.platform = platform;
+    this.settings = settings;
+    this.aiRouter = aiRouter;
+    this.indexManager = indexManager;
     this.agentManager = new AgentManager();
+
+    const app = (platform as any).app;
 
     // Initialize Skill system
     this.skillRegistry = new SkillRegistry();
     this.mcpManager = new MCPManager(this.skillRegistry);
-    this.skillLoader = new SkillLoader(plugin.app, 'mentat');
+    this.skillLoader = new SkillLoader(app, 'mentat');
 
     // Initialize skill invocation strategy
-    const invocationMode = plugin.settings.skillInvocationMode || 'progressive';
+    const invocationMode = settings.skillInvocationMode || 'progressive';
     this.skillInvocationContext = new SkillInvocationContext(
       invocationMode,
-      plugin.app,
-      plugin.settings.skillInvocationConfig?.directCallSkills
+      platform,
+      settings.skillInvocationConfig?.directCallSkills
     );
 
     // Initialize skill cache
-    const cacheConfig = plugin.settings.skillInvocationConfig?.cacheConfig || {};
+    const cacheConfig = settings.skillInvocationConfig?.cacheConfig || {};
     this.skillCache = new SkillLoadCache(
       cacheConfig.ttl || 3600000,  // Default 1 hour
       cacheConfig.maxSize || 100    // Default 100 entries
     );
 
     // Initialize prompt loader
-    this.promptLoader = new PromptLoader(plugin.app, FALLBACK_PROMPTS);
+    this.promptLoader = new PromptLoader(platform, FALLBACK_PROMPTS);
 
     // Create skill context
     const skillContext: SkillContext = {
-      vault: plugin.app.vault,
-      metadataCache: plugin.app.metadataCache,
-      workspace: plugin.app.workspace,
-      indexManager: plugin.indexManager,
-      plugin: plugin
+      vault: app?.vault,
+      metadataCache: app?.metadataCache,
+      workspace: app?.workspace,
+      indexManager: indexManager,
+      plugin: (platform as any).plugin
     };
 
     this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext);
@@ -90,13 +106,15 @@ export class ChatOrchestrator {
    * Initialize the orchestrator (load skills and create default agent)
    */
   async initialize(): Promise<void> {
+    const app = (this.platform as any).app;
+    
     // Create skill context
     const skillContext: SkillContext = {
-      vault: this.plugin.app.vault,
-      metadataCache: this.plugin.app.metadataCache,
-      workspace: this.plugin.app.workspace,
-      indexManager: this.plugin.indexManager,
-      plugin: this.plugin
+      vault: app?.vault,
+      metadataCache: app?.metadataCache,
+      workspace: app?.workspace,
+      indexManager: this.indexManager,
+      plugin: (this.platform as any).plugin
     };
 
     // Load all skills from skills directory
@@ -108,6 +126,9 @@ export class ChatOrchestrator {
     // Create default agent
     await this.createDefaultAgent();
 
+    // Initialize subagents
+    await this.initializeSubagents();
+
     // Ensure vault-map.md exists (Cold-Start Engine)
     await this.ensureVaultMapExists();
   }
@@ -116,7 +137,7 @@ export class ChatOrchestrator {
    * Create default chat agent
    */
   private async createDefaultAgent(): Promise<void> {
-    const provider = await this.plugin.aiRouter.getProvider(TaskType.CHAT);
+    const provider = await this.aiRouter.getProvider(TaskType.CHAT);
 
     // Build system prompt with vault overview and skill information
     const systemPrompt = await this.buildSystemPrompt();
@@ -161,34 +182,10 @@ export class ChatOrchestrator {
       }
     };
 
-    const isWritingTask = /起草|写作|撰写|写笔记|新建笔记|研究报告|文章|draft|write|note|report|article/i.test(userQuery);
-    const useDraftReview = this.plugin.settings.draftReviewModeEnabled || (this.plugin.settings.draftReviewModeEnabled !== false && isWritingTask);
-
-    let response: AgentResponse;
-    if (useDraftReview) {
-      const provider = await this.plugin.aiRouter.getProvider(TaskType.CHAT);
-      const baseSystemPrompt = await this.buildSystemPrompt();
-      const dependencies: AgentDependencies = {
-        skillRegistry: this.skillRegistry,
-        skillExecutor: this.skillExecutor,
-        skillInvocationContext: this.skillInvocationContext
-      };
-
-      const pipeline = new DraftReviewPipeline(provider, dependencies, baseSystemPrompt);
-      const generator = pipeline.execute(userQuery, context);
-
-      let result = await generator.next();
-      while (!result.done) {
-        yield result.value as AgentEvent;
-        result = await generator.next();
-      }
-      response = result.value as AgentResponse;
-    } else {
-      response = yield* this.agentManager.executeWithCurrentAgent(
-        userQuery,
-        context
-      );
-    }
+    const response = yield* this.agentManager.executeWithCurrentAgent(
+      userQuery,
+      context
+    );
 
     return {
       response: response.content,
@@ -238,12 +235,14 @@ export class ChatOrchestrator {
    * Reload all skills (useful for development/debugging)
    */
   async reloadSkills(): Promise<void> {
+    const app = (this.platform as any).app;
+    
     const skillContext: SkillContext = {
-      vault: this.plugin.app.vault,
-      metadataCache: this.plugin.app.metadataCache,
-      workspace: this.plugin.app.workspace,
-      indexManager: this.plugin.indexManager,
-      plugin: this.plugin
+      vault: app?.vault,
+      metadataCache: app?.metadataCache,
+      workspace: app?.workspace,
+      indexManager: this.indexManager,
+      plugin: (this.platform as any).plugin
     };
 
     // Clear existing skills
@@ -261,7 +260,7 @@ export class ChatOrchestrator {
    * Initialize MCP servers
    */
   private async initializeMCP(): Promise<void> {
-    const mcpServers = this.plugin.settings.mcpServers || [];
+    const mcpServers = this.settings.mcpServers || [];
 
     for (const serverConfig of mcpServers) {
       this.mcpManager.addServer(serverConfig);
@@ -279,7 +278,7 @@ export class ChatOrchestrator {
    */
   private async buildSystemPrompt(): Promise<string> {
     // Collect vault statistics
-    const allFiles = this.plugin.app.vault.getMarkdownFiles();
+    const allFiles = this.platform.getMarkdownFiles();
     const totalFiles = allFiles.length;
 
     // Get folder list (deduplicated, sorted) - kept for backwards compatibility
@@ -294,7 +293,7 @@ export class ChatOrchestrator {
     // Get common tags (from metadata cache) - kept for backwards compatibility
     const tagCounts = new Map<string, number>();
     allFiles.forEach(file => {
-      const cache = this.plugin.app.metadataCache.getFileCache(file);
+      const cache = this.platform.getFileCache(file);
       const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
       const frontmatterTags = cache?.frontmatter?.tags || [];
       [...fileTags, ...frontmatterTags].forEach(tag => {
@@ -371,12 +370,11 @@ ${vaultMap}`;
    */
   async getVaultMap(): Promise<string> {
     try {
-      const configFolder = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+      const configFolder = this.settings.userConfigFolder || 'Mentat/Config';
       const mapPath = `${configFolder}/vault-map.md`;
-      const vault = this.plugin.app.vault;
 
-      if (await vault.adapter.exists(mapPath)) {
-        return await vault.adapter.read(mapPath);
+      if (await this.platform.exists(mapPath)) {
+        return await this.platform.read(mapPath);
       }
       return '*(None defined. Click "Open Vault Knowledge Map" in Settings to outline your vault structure.)*';
     } catch (error) {
@@ -390,29 +388,18 @@ ${vaultMap}`;
    */
   async ensureVaultMapExists(): Promise<void> {
     try {
-      const configFolder = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+      const configFolder = this.settings.userConfigFolder || 'Mentat/Config';
       const mapPath = `${configFolder}/vault-map.md`;
-      const vault = this.plugin.app.vault;
 
       // Auto-create folder paths recursively if they do not exist
-      if (!(await vault.adapter.exists(configFolder))) {
-        const folders = configFolder.split('/');
-        let currentFolder = '';
-        for (const folder of folders) {
-          if (!folder) continue;
-          currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
-          if (!(await vault.adapter.exists(currentFolder))) {
-            if (typeof vault.createFolder === 'function') {
-              await vault.createFolder(currentFolder);
-            }
-          }
-        }
+      if (!(await this.platform.exists(configFolder))) {
+        await this.platform.mkdir(configFolder);
       }
 
       // Create default template if file does not exist
-      if (!(await vault.adapter.exists(mapPath))) {
+      if (!(await this.platform.exists(mapPath))) {
         // Proactively scan actual folders in the vault to identify top largest directories
-        const allFiles = vault.getMarkdownFiles();
+        const allFiles = this.platform.getMarkdownFiles();
         const folderCounts = new Map<string, number>();
         
         allFiles.forEach(file => {
@@ -448,10 +435,8 @@ ${folderGuidelines}
 - Document naming conventions (e.g., prefixing research plans with \`Research_Plan_\`).
 - Outline relationships (e.g., notes in \`Inbox/\` should eventually be polished and moved to \`Research/\`).
 `;
-        if (typeof vault.create === 'function') {
-          await vault.create(mapPath, defaultTemplate);
-          console.log('[ChatOrchestrator] Automatically initialized vault-map.md successfully');
-        }
+        await this.platform.write(mapPath, defaultTemplate);
+        console.log('[ChatOrchestrator] Automatically initialized vault-map.md successfully');
       }
     } catch (error) {
       console.error('[ChatOrchestrator] Error initializing vault-map.md:', error);
@@ -464,13 +449,12 @@ ${folderGuidelines}
    * then feeds this structural context to the active LLM to generate highly personalized guidelines.
    */
   async aiRebuildVaultMap(onProgress?: (stage: string, percent: number) => void): Promise<void> {
-    const configFolder = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+    const configFolder = this.settings.userConfigFolder || 'Mentat/Config';
     const mapPath = `${configFolder}/vault-map.md`;
-    const vault = this.plugin.app.vault;
 
     // 1. Gather all files in the vault to analyze folder structures, file names, and tag frequencies
     onProgress?.('正在扫描库中的文件夹与笔记结构...', 15);
-    const allFiles = vault.getMarkdownFiles();
+    const allFiles = this.platform.getMarkdownFiles();
     const folderStats = new Map<string, { noteCount: number; files: { name: string; mtime: number }[]; tags: Map<string, number> }>();
 
     allFiles.forEach(file => {
@@ -521,7 +505,7 @@ ${folderGuidelines}
     });
 
     // 2. Fetch the active AI provider
-    const provider = await this.plugin.aiRouter.getProvider(TaskType.CHAT);
+    const provider = await this.aiRouter.getProvider(TaskType.CHAT);
     if (!provider) {
       throw new Error('未配置或未启用任何 AI 服务商，请先在设置中配置 API Key。 (No active AI provider configured)');
     }
@@ -536,7 +520,7 @@ ${vaultDataStr}
 
 Guidelines for generating the "vault-map.md" file:
 1. Provide a beautiful title: "# 🗺️ Vault Knowledge Structure Map".
-2. Create a "## 📁 Core Folder Guidelines" section. For EACH folder listed in the data, write a detailed, highly accurate description (in Chinese) of what kind of notes belong there based on the sample files and popular tags found. Format the folder names as double-bracket wiki-links (e.g. "- \`[[Research/ML/]]\`: 用于存放机器学习、最优化损失函数及研究计划的笔记与推导。").
+2. Create a "## 📁 Core Folder Guidelines" section. For EACH folder listed in the data, write a detailed, highly accurate description (in Chinese) of what kind of notes belong there based on the sample files and popular tags found. Format the folder names as double-bracket wiki-links (e.g. "- \`[[Research/ML/]]\`: 用于存放机器学习、最优化损失函数及研究计划 of 笔记与推导。").
 3. Create a "## 🏷️ Category Workflows & Wiki-Linking" section. Under it:
    - Identify naming conventions (e.g., prefixing, suffixing, or case formats) you detect from note titles in each directory.
    - Outline suggested workflows and relationships between these folders (e.g., rough notes and captured inputs in Inbox should be polished and moved to Research or Projects).
@@ -555,31 +539,19 @@ Return the finalized markdown content:`;
 
     // 5. Ensure config folder exists
     onProgress?.('正在保存并写入本地地图配置文件...', 90);
-    if (!(await vault.adapter.exists(configFolder))) {
-      const folders = configFolder.split('/');
-      let currentFolder = '';
-      for (const folder of folders) {
-        if (!folder) continue;
-        currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
-        if (!(await vault.adapter.exists(currentFolder))) {
-          await vault.createFolder(currentFolder);
-        }
-      }
+    if (!(await this.platform.exists(configFolder))) {
+      await this.platform.mkdir(configFolder);
     }
 
     // 6. Overwrite or create file
-    if (await vault.adapter.exists(mapPath)) {
-      await vault.adapter.write(mapPath, cleanMarkdown);
-    } else {
-      await vault.create(mapPath, cleanMarkdown);
-    }
+    await this.platform.write(mapPath, cleanMarkdown);
   }
 
   /**
    * Helper to extract tags safely from metadata cache of a single file
    */
-  private getFileTags(file: TFile): string[] {
-    const cache = this.plugin.app.metadataCache.getFileCache(file);
+  private getFileTags(file: IPlatformFile): string[] {
+    const cache = this.platform.getFileCache(file);
     const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
     const frontmatterTagsRaw = cache?.frontmatter?.tags;
     let frontmatterTags: string[] = [];
@@ -603,12 +575,12 @@ Return the finalized markdown content:`;
   /**
    * Build a dynamic, nested, semantic directory outline up to depth 3
    */
-  private buildSemanticDirectoryTree(allFiles: TFile[]): string {
+  private buildSemanticDirectoryTree(allFiles: IPlatformFile[]): string {
     interface FolderNode {
       name: string;
       path: string;
       depth: number;
-      directFiles: TFile[];
+      directFiles: IPlatformFile[];
       recursiveCount: number;
       tagCounts: Map<string, number>;
       children: Map<string, FolderNode>;
@@ -742,26 +714,17 @@ Return the finalized markdown content:`;
    */
   async getUserPreferences(): Promise<string> {
     try {
-      const configFolder = this.plugin.settings.userConfigFolder || 'Mentat/Config';
+      const configFolder = this.settings.userConfigFolder || 'Mentat/Config';
       const preferencesPath = `${configFolder}/user-preferences.md`;
-      const vault = this.plugin.app.vault;
 
       // 1. If preferences file exists, read and return it
-      if (await vault.adapter.exists(preferencesPath)) {
-        return await vault.adapter.read(preferencesPath);
+      if (await this.platform.exists(preferencesPath)) {
+        return await this.platform.read(preferencesPath);
       }
 
       // 2. If config folder doesn't exist, create it recursively
-      if (!(await vault.adapter.exists(configFolder))) {
-        const folders = configFolder.split('/');
-        let currentFolder = '';
-        for (const folder of folders) {
-          if (!folder) continue;
-          currentFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
-          if (!(await vault.adapter.exists(currentFolder))) {
-            await vault.createFolder(currentFolder);
-          }
-        }
+      if (!(await this.platform.exists(configFolder))) {
+        await this.platform.mkdir(configFolder);
       }
 
       // 3. Create the template file
@@ -779,12 +742,208 @@ Write your custom style instructions and preferences here. This file is dynamica
 
 - 
 `;
-      await vault.create(preferencesPath, defaultTemplate);
+      await this.platform.write(preferencesPath, defaultTemplate);
       return defaultTemplate;
     } catch (e) {
       console.error('[ChatOrchestrator] Error loading/initializing user prompt preferences:', e);
       // Absolute safety isolation: fall back to setting or 'None' rather than throwing/crashing
-      return this.plugin.settings.userSystemPromptPreferences || 'None';
+      return this.settings.userSystemPromptPreferences || 'None';
     }
+  }
+
+  /**
+   * Scan and register system + custom user-defined subagents
+   */
+  private async initializeSubagents(): Promise<void> {
+    const provider = await this.aiRouter.getProvider(TaskType.CHAT);
+    const dependencies: AgentDependencies = {
+      skillRegistry: this.skillRegistry,
+      skillExecutor: this.skillExecutor,
+      skillInvocationContext: this.skillInvocationContext
+    };
+
+    // 1. Register Default Writer Agent
+    const writerSystemPrompt = `${await this.buildSystemPrompt()}
+
+=======================================================
+WRITER ROLE INSTRUCTIONS (CRITICAL):
+You are an expert technical note writer. Your goal is to draft comprehensive, accurate, and high-density technical notes.
+- Use available skills/tools to gather information.
+- Structure your output elegantly using headers and bulleted lists.
+- Avoid generic filler text and boilerplate headers.
+- Always review your own outputs for LaTeX math and wikilink syntax.
+=======================================================`;
+
+    const writerConfig: AgentConfig = {
+      id: 'writer-agent',
+      name: 'Writer Agent',
+      description: 'Specialized technical content draft agent with skill capabilities',
+      enableSkills: true,
+      maxTurns: 20,
+      temperature: 0.7,
+      systemPrompt: writerSystemPrompt
+    };
+    const writerAgent = new BaseAgent(writerConfig, provider, dependencies);
+    this.agentManager.registerAgent(writerAgent);
+
+    // 2. Register Default Reviewer Agent
+    const reviewerSystemPrompt = `You are a strict, detail-oriented Obsidian note auditor.
+Your job is to critically review technical drafts for quality, syntax correctness, and structural integrity.
+
+CRITICAL INSTRUCTIONS:
+- Verify that all LaTeX block formulas '$$' and inline formulas '$' are balanced and closed.
+- Verify that code blocks are balanced and closed with triple backticks.
+- Verify that wikilinks '[[Note]]' are balanced.
+- Verify that there are no decorative emojis in headings.
+- Check if the technical content is deep enough and has concrete examples.
+
+IF the draft is of stellar quality and has NO structural or formatting errors:
+- Respond with exactly: APPROVED
+
+OTHERWISE:
+- Respond with a clear, concise bulleted list of specific criticisms and actions that the Writer MUST fix.
+- Do NOT include any other text besides the bulleted list.
+`;
+
+    const reviewerConfig: AgentConfig = {
+      id: 'reviewer-agent',
+      name: 'Reviewer Agent',
+      description: 'Obsidian note formatting and quality auditor',
+      enableSkills: false,
+      maxTurns: 5,
+      temperature: 0.2,
+      systemPrompt: reviewerSystemPrompt
+    };
+    const reviewerAgent = new BaseAgent(reviewerConfig, provider, dependencies);
+    this.agentManager.registerAgent(reviewerAgent);
+
+    // 3. Scan and Load Custom User Agents from Vault
+    try {
+      const configFolder = this.settings.userConfigFolder || 'Mentat/Config';
+      const agentsFolder = `${configFolder}/agents`;
+      if (await this.platform.exists(agentsFolder)) {
+        const listResult = await this.platform.list(agentsFolder);
+        for (const filePath of listResult.files) {
+          if (filePath.endsWith('.json')) {
+            try {
+              const fileContent = await this.platform.read(filePath);
+              const customConfig: AgentConfig = JSON.parse(fileContent);
+              if (customConfig.id && customConfig.name) {
+                const customAgent = new BaseAgent(customConfig, provider, dependencies);
+                this.agentManager.registerAgent(customAgent);
+                console.log(`[ChatOrchestrator] Successfully loaded custom agent: ${customConfig.id}`);
+              }
+            } catch (err) {
+              console.error(`[ChatOrchestrator] Failed to load custom agent config ${filePath}:`, err);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[ChatOrchestrator] Error loading custom user agents:', e);
+    }
+
+    // 4. Register delegate_task skill
+    const delegateTaskSkill: SkillDefinition = {
+      name: 'delegate_task',
+      namespace: 'obsidian',
+      description: 'Delegate a specific task or prompt to a specialized subagent (e.g. writer-agent, reviewer-agent) and get its output.',
+      schema: z.object({
+        agentId: z.string().describe('The ID of the agent to delegate to (e.g. "writer-agent", "reviewer-agent")'),
+        prompt: z.string().describe('The detailed instructions or content for the agent to process')
+      }),
+      execute: async (input: { agentId: string; prompt: string }) => {
+        try {
+          const agent = this.agentManager.getAgent(input.agentId);
+          if (!agent) {
+            return { success: false, error: `Agent not found: ${input.agentId}` };
+          }
+          
+          new Notice(`🤖 正在委派任务给 ${agent.getName()}...`);
+          
+          // Execute agent to completion
+          const stream = agent.execute(input.prompt, {
+            messages: [], // Isolated context
+            sessionId: `subagent-${Date.now()}`
+          });
+          
+          let result = await stream.next();
+          while (!result.done) {
+            result = await stream.next();
+          }
+          
+          const response = result.value as AgentResponse;
+          return {
+            success: true,
+            data: response.content,
+            metadata: {
+              subagentMessages: response.messages,
+              agentId: input.agentId
+            }
+          };
+        } catch (err: any) {
+          return { success: false, error: `Delegation error: ${err.message}` };
+        }
+      }
+    };
+    this.skillRegistry.register(delegateTaskSkill);
+
+    // 5. Register spawn_subagent skill
+    const spawnSubagentSkill: SkillDefinition = {
+      name: 'spawn_subagent',
+      namespace: 'obsidian',
+      description: 'Dynamically spawn a temporary subagent with custom roles and prompts to assist with a sub-task.',
+      schema: z.object({
+        name: z.string().describe('The name of the temporary subagent (e.g. "Translator", "Summarizer")'),
+        systemPrompt: z.string().describe('The system instructions defining the behavior and constraints of the subagent'),
+        prompt: z.string().describe('The instructions or prompt to execute')
+      }),
+      execute: async (input: { name: string; systemPrompt: string; prompt: string }) => {
+        try {
+          const tempAgentId = `temp-${Date.now()}`;
+          const tempConfig: AgentConfig = {
+            id: tempAgentId,
+            name: input.name,
+            description: 'Dynamically spawned subagent',
+            enableSkills: false, // Keep subagents simple by default
+            maxTurns: 5,
+            temperature: 0.5,
+            systemPrompt: input.systemPrompt
+          };
+          
+          const tempAgent = new BaseAgent(tempConfig, provider, dependencies);
+          this.agentManager.registerAgent(tempAgent);
+          
+          new Notice(`🤖 正在生成子智能体: ${input.name}...`);
+          
+          const stream = tempAgent.execute(input.prompt, {
+            messages: [],
+            sessionId: `subagent-${Date.now()}`
+          });
+          
+          let result = await stream.next();
+          while (!result.done) {
+            result = await stream.next();
+          }
+          
+          const response = result.value as AgentResponse;
+          
+          // Cleanup
+          this.agentManager.unregisterAgent(tempAgentId);
+          
+          return {
+            success: true,
+            data: response.content,
+            metadata: {
+              subagentMessages: response.messages,
+              agentId: tempAgentId
+            }
+          };
+        } catch (err: any) {
+          return { success: false, error: `Spawning error: ${err.message}` };
+        }
+      }
+    };
+    this.skillRegistry.register(spawnSubagentSkill);
   }
 }

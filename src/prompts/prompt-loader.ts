@@ -1,8 +1,6 @@
 // Prompt Loader - Loads and processes prompt templates from the prompts/ directory
 
-import { App, FileSystemAdapter } from 'obsidian';
-import * as path from 'path';
-import * as fs from 'fs';
+import { IPlatformAdapter } from '../types/platform';
 
 /**
  * Template variable replacement options
@@ -23,13 +21,11 @@ export class PromptLoader {
   private useCache: boolean = true;
 
   constructor(
-    private app: App,
+    private platform: IPlatformAdapter,
     private fallbackPrompts: Map<string, string>
   ) {
-    // Get the base path for prompts directory
-    const adapter = this.app.vault.adapter as FileSystemAdapter;
-    const basePath = adapter.getBasePath();
-    this.promptsBasePath = path.join(basePath, 'prompts');
+    // The prompts directory is relative to the vault root in Obsidian
+    this.promptsBasePath = 'prompts';
   }
 
   /**
@@ -53,10 +49,10 @@ export class PromptLoader {
       }
 
       // Construct full file path
-      const fullPath = path.join(this.promptsBasePath, promptPath);
+      const fullPath = this.promptsBasePath ? `${this.promptsBasePath}/${promptPath}` : promptPath;
 
       // Check if file exists
-      if (!fs.existsSync(fullPath)) {
+      if (!(await this.platform.exists(fullPath))) {
         if (useFallback) {
           console.warn(`[PromptLoader] Prompt file not found: ${fullPath}, using fallback`);
           return this.loadFallback(promptPath, variables);
@@ -66,7 +62,7 @@ export class PromptLoader {
       }
 
       // Read file content
-      const content = fs.readFileSync(fullPath, 'utf-8');
+      const content = await this.platform.read(fullPath);
 
       // Cache the template
       if (this.useCache) {
@@ -138,16 +134,16 @@ export class PromptLoader {
   /**
    * Check if a prompt file exists
    */
-  promptExists(promptPath: string): boolean {
-    const fullPath = path.join(this.promptsBasePath, promptPath);
-    return fs.existsSync(fullPath);
+  async promptExists(promptPath: string): Promise<boolean> {
+    const fullPath = this.promptsBasePath ? `${this.promptsBasePath}/${promptPath}` : promptPath;
+    return await this.platform.exists(fullPath);
   }
 
   /**
-   * Get the full path to a prompt file
+   * Get the path to a prompt file (relative to vault root)
    */
   getPromptPath(promptPath: string): string {
-    return path.join(this.promptsBasePath, promptPath);
+    return this.promptsBasePath ? `${this.promptsBasePath}/${promptPath}` : promptPath;
   }
 
   /**

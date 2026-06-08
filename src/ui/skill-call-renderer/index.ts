@@ -1,6 +1,6 @@
 // Skill Call Renderer - Renders skill execution status in chat
 
-import { SkillCall } from '../../../skills/skill-types';
+import { SkillCall } from '../../skills/skill-types';
 
 export class SkillCallRenderer {
   /**

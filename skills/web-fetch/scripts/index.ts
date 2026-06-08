@@ -283,7 +283,7 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
     // Get browserless API key from settings
     const browserlessApiKey = context.plugin.settings.browserlessApiKey || '';
 
-    if (strategy === 'jina' || (strategy === 'auto' && !input.useJavaScript)) {
+    if (strategy === 'jina') {
       result = await fetchWithJina(input.url, input.timeout);
       if (!result.success) {
         errors.push(`Jina: ${result.error}`);
@@ -372,7 +372,6 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
 
     return {
       success: true,
-      message: `Successfully fetched ${input.url} using ${result.metadata?.strategy} strategy`,
       data: {
         url: input.url,
         status: result.metadata?.status || 200,

@@ -1,6 +1,6 @@
 // Content Extractor - Extracts content and metadata from Obsidian files
 
-import { App, TFile, MetadataCache, CachedMetadata } from 'obsidian';
+import { IPlatformAdapter, IPlatformFile, IFileCache } from '../types/platform';
 
 export interface ExtractedContent {
   content: string;
@@ -20,19 +20,18 @@ export interface ExtractedContent {
 
 export class ContentExtractor {
   constructor(
-    private app: App,
-    private metadataCache: MetadataCache
+    private platform: IPlatformAdapter
   ) {}
 
   /**
    * Extract content and metadata from a file
    */
-  async extract(file: TFile): Promise<ExtractedContent> {
+  async extract(file: IPlatformFile): Promise<ExtractedContent> {
     // Read file content
-    const content = await this.app.vault.read(file);
+    const content = await this.platform.readFile(file);
 
     // Get cached metadata
-    const metadata = this.metadataCache.getFileCache(file);
+    const metadata = this.platform.getFileCache(file);
 
     // Extract frontmatter
     const frontmatter = metadata?.frontmatter || {};
@@ -40,7 +39,7 @@ export class ContentExtractor {
     // Extract tags (including frontmatter and inline tags)
     const tags = this.extractTags(content, metadata);
 
-    // Extract links
+    // Extract links (from frontmatter/body)
     const links = this.extractLinks(metadata);
 
     // Extract headings
@@ -59,7 +58,7 @@ export class ContentExtractor {
   /**
    * Extract tags from frontmatter and inline tags
    */
-  private extractTags(content: string, metadata: CachedMetadata | null): string[] {
+  private extractTags(content: string, metadata: IFileCache | null): string[] {
     const tags = new Set<string>();
 
     // Extract from frontmatter
@@ -85,23 +84,26 @@ export class ContentExtractor {
   /**
    * Extract internal links
    */
-  private extractLinks(metadata: CachedMetadata | null): string[] {
-    if (!metadata?.links) return [];
-    return metadata.links.map(link => link.link);
+  private extractLinks(metadata: IFileCache | null): string[] {
+    // Note: link extraction in Obsidian cache
+    // We try to grab internal links. If platform doesn't parse it fully, we return empty or extract what we can.
+    // In our mock, we assume metadata contains parsed links if they exist.
+    const rawLinks = (metadata as any)?.links || [];
+    return rawLinks.map((link: any) => link.link || link);
   }
 
   /**
    * Extract headings
    */
-  private extractHeadings(metadata: CachedMetadata | null): string[] {
-    if (!metadata?.headings) return [];
-    return metadata.headings.map(h => h.heading);
+  private extractHeadings(metadata: IFileCache | null): string[] {
+    const rawHeadings = (metadata as any)?.headings || [];
+    return rawHeadings.map((h: any) => h.heading || h);
   }
 
   /**
    * Calculate content statistics
    */
-  private calculateStats(content: string, file: TFile) {
+  private calculateStats(content: string, file: IPlatformFile) {
     return {
       wordCount: content.split(/\s+/).filter(w => w.length > 0).length,
       charCount: content.length,

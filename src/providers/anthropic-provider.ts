@@ -49,7 +49,7 @@ export class AnthropicProvider implements AIProvider {
       return textContent ? textContent.text : '';
     } catch (error) {
       console.error('AnthropicProvider generate error:', error);
-      throw new Error(`Anthropic API error: ${error.message}`);
+      throw new Error(`Anthropic API error: ${(error as any).message}`);
     }
   }
 
@@ -80,7 +80,7 @@ export class AnthropicProvider implements AIProvider {
       }
     } catch (error) {
       console.error('AnthropicProvider generateStream error:', error);
-      throw new Error(`Anthropic API error: ${error.message}`);
+      throw new Error(`Anthropic API error: ${(error as any).message}`);
     }
   }
 
@@ -162,7 +162,7 @@ export class AnthropicProvider implements AIProvider {
           toolCalls.push({
             id: block.id,
             name: block.name,
-            arguments: block.input
+            arguments: block.input as any
           });
         }
       }
@@ -170,11 +170,18 @@ export class AnthropicProvider implements AIProvider {
       return {
         content,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: response.stop_reason as any
+        finishReason: response.stop_reason as any,
+        usage: response.usage ? {
+          promptTokens: response.usage.input_tokens,
+          completionTokens: response.usage.output_tokens,
+          totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+          cacheReadTokens: (response.usage as any).cache_read_input_tokens ?? 0,
+          cacheCreationTokens: (response.usage as any).cache_creation_input_tokens ?? 0
+        } : undefined
       };
     } catch (error) {
       console.error('AnthropicProvider generateWithSkills error:', error);
-      throw new Error(`Anthropic API error: ${error.message}`);
+      throw new Error(`Anthropic API error: ${(error as any).message}`);
     }
   }
 
@@ -244,7 +251,7 @@ export class AnthropicProvider implements AIProvider {
             id: block.id,
             name: block.name,
             // Arguments can be either string or object - both are handled by downstream parsers
-            arguments: block.input
+            arguments: block.input as any
           };
           toolCalls.push(toolCall);
 
@@ -254,14 +261,21 @@ export class AnthropicProvider implements AIProvider {
         }
       }
 
-      return {
+       return {
         content: fullContent,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: finalMessage.stop_reason as any
+        finishReason: finalMessage.stop_reason as any,
+        usage: finalMessage.usage ? {
+          promptTokens: finalMessage.usage.input_tokens,
+          completionTokens: finalMessage.usage.output_tokens,
+          totalTokens: finalMessage.usage.input_tokens + finalMessage.usage.output_tokens,
+          cacheReadTokens: (finalMessage.usage as any).cache_read_input_tokens ?? 0,
+          cacheCreationTokens: (finalMessage.usage as any).cache_creation_input_tokens ?? 0
+        } : undefined
       };
     } catch (error) {
       console.error('AnthropicProvider generateStreamWithSkills error:', error);
-      throw new Error(`Anthropic API error: ${error.message}`);
+      throw new Error(`Anthropic API error: ${(error as any).message}`);
     }
   }
 

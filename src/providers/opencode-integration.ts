@@ -77,7 +77,7 @@ export class OpenCodeIntegration {
       console.error('OpenCode execution error:', error);
       return {
         success: false,
-        error: error.message
+        error: (error as any).message
       };
     }
   }

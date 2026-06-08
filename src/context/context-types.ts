@@ -18,6 +18,9 @@ export interface ContextOptions {
   includeToolCalls?: boolean;
   /** Custom filter function */
   filter?: (message: ChatMessage) => boolean;
+  /** Transform tool calls */
+  transformToolCalls?: boolean;
+  [key: string]: any;
 }
 
 /**

@@ -23,7 +23,7 @@ export class StdioTransport implements MCPTransport {
     }
   }
 
-  async connect(): Promise {
+  async connect(): Promise<void> {
     if (this.connected) {
       return;
     }
@@ -68,7 +68,7 @@ export class StdioTransport implements MCPTransport {
     }
   }
 
-  async send(message: MCPMessage): Promise {
+  async send(message: MCPMessage): Promise<any> {
     if (!this.connected || !this.process) {
       throw new Error('Not connected to MCP server');
     }
@@ -98,13 +98,13 @@ export class StdioTransport implements MCPTransport {
     return undefined;
   }
 
-  async receive(): Promise {
+  async receive(): Promise<any> {
     // Stdio transport uses event-driven model, not polling
     // This method is not used for stdio
     throw new Error('receive() not implemented for stdio transport');
   }
 
-  async close(): Promise {
+  async close(): Promise<void> {
     if (this.process) {
       this.process.kill();
       this.process = null;
@@ -162,7 +162,7 @@ export class HttpTransport implements MCPTransport {
     }
   }
 
-  async connect(): Promise {
+  async connect(): Promise<void> {
     if (this.connected) {
       return;
     }
@@ -194,7 +194,7 @@ export class HttpTransport implements MCPTransport {
     }
   }
 
-  async send(message: MCPMessage): Promise {
+  async send(message: MCPMessage): Promise<any> {
     if (!this.connected) {
       throw new Error('Not connected to MCP server');
     }
@@ -233,11 +233,11 @@ export class HttpTransport implements MCPTransport {
     }
   }
 
-  async receive(): Promise {
+  async receive(): Promise<any> {
     throw new Error('receive() not implemented for HTTP transport (request/response model)');
   }
 
-  async close(): Promise {
+  async close(): Promise<void> {
     this.connected = false;
     this.sessionId = undefined;
   }

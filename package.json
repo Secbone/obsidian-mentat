@@ -5,11 +5,12 @@
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --project tsconfig.check.json --noEmit",
+    "build": "npm run typecheck && node esbuild.config.mjs production",
     "lint": "eslint src --ext .ts",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:run": "vitest run",
+    "test:run": "npm run typecheck && vitest run",
     "test:coverage": "vitest run --coverage",
     "bump": "node scripts/bump-version.mjs"
   },
@@ -33,6 +34,7 @@
     "@vitest/ui": "^4.0.18",
     "esbuild": "^0.20.0",
     "eslint": "^8.56.0",
+    "jsdom": "^29.1.1",
     "obsidian": "latest",
     "typescript": "^5.3.3",
     "vitest": "^4.0.18"

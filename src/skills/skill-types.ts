@@ -66,6 +66,7 @@ export interface SkillDefinition<TInput = any, TOutput = any> {
       description: string;
     }>;
     requiresConfirmation?: boolean; // Whether to ask user before executing
+    documentation?: string;
   };
 }
 

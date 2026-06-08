@@ -67,7 +67,7 @@ export class OllamaProvider implements AIProvider {
 
       const data = await response.json();
       return data.message?.content || '';
-    } catch (error) {
+    } catch (error: any) {
       console.error('OllamaProvider generate error:', error);
       throw new Error(`Ollama error: ${error.message}`);
     }
@@ -137,7 +137,7 @@ export class OllamaProvider implements AIProvider {
           }
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('OllamaProvider generateStream error:', error);
       throw new Error(`Ollama error: ${error.message}`);
     }
@@ -167,7 +167,7 @@ export class OllamaProvider implements AIProvider {
         embedding: data.embedding || [],
         tokens: undefined // Ollama doesn't provide token count in response
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('OllamaProvider generateEmbedding error:', error);
       throw new Error(`Ollama embedding error: ${error.message}`);
     }
@@ -176,6 +176,57 @@ export class OllamaProvider implements AIProvider {
   async embed(text: string): Promise<number[]> {
     const result = await this.generateEmbedding(text);
     return result.embedding;
+  }
+
+  async generateEmbeddings(texts: string[]): Promise<{ embeddings: number[][]; tokens?: number }> {
+    try {
+      const embeddingModel = this.config.embeddingModel || 'nomic-embed-text';
+
+      const response = await fetch(`${this.config.baseURL}/api/embed`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: embeddingModel,
+          input: texts
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          embeddings: data.embeddings || [],
+          tokens: undefined
+        };
+      }
+      
+      // Fallback if /api/embed is not supported by older Ollama version
+      console.warn('Ollama /api/embed failed, falling back to sequential /api/embeddings:', response.statusText);
+      const embeddings: number[][] = [];
+      for (const text of texts) {
+        const res = await this.generateEmbedding(text);
+        embeddings.push(res.embedding);
+      }
+      return { embeddings };
+    } catch (error: any) {
+      console.error('OllamaProvider generateEmbeddings error, falling back to sequential:', error);
+      try {
+        const embeddings: number[][] = [];
+        for (const text of texts) {
+          const res = await this.generateEmbedding(text);
+          embeddings.push(res.embedding);
+        }
+        return { embeddings };
+      } catch (fallbackError: any) {
+        throw new Error(`Ollama batch embedding failed: ${fallbackError.message}`);
+      }
+    }
+  }
+
+  async embeds(texts: string[]): Promise<number[][]> {
+    const result = await this.generateEmbeddings(texts);
+    return result.embeddings;
   }
 
   async isAvailable(): Promise<boolean> {

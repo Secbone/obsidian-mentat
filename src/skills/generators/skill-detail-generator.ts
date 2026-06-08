@@ -94,7 +94,7 @@ class MarkdownFormatter implements SkillFormatter {
   }
 
   private getSchemaInfo(skill: SkillDefinition): any {
-    const jsonSchema = zodToJsonSchema(skill.schema, { $refStrategy: 'none' }) as any;
+    const jsonSchema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as any;
     return jsonSchema;
   }
 
@@ -116,7 +116,7 @@ class MarkdownFormatter implements SkillFormatter {
 class XMLFormatter implements SkillFormatter {
   format(skill: SkillDefinition): string {
     const fullName = `${skill.namespace}:${skill.name}`;
-    const schema = zodToJsonSchema(skill.schema, { $refStrategy: 'none' }) as any;
+    const schema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as any;
 
     let output = `<skill>\n`;
     output += `  <name>${fullName}</name>\n`;
@@ -157,7 +157,7 @@ class XMLFormatter implements SkillFormatter {
 class JSONFormatter implements SkillFormatter {
   format(skill: SkillDefinition): string {
     const fullName = `${skill.namespace}:${skill.name}`;
-    const schema = zodToJsonSchema(skill.schema, { $refStrategy: 'none' }) as any;
+    const schema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as any;
 
     const output = {
       name: fullName,

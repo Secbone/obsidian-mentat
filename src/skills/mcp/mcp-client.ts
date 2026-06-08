@@ -12,9 +12,10 @@ import {
   MCPToolCallRequest,
   MCPToolCallResponse,
   MCPConnectionStatus,
-  MCPErrorCode
+  MCPErrorCode,
+  MCPTransport
 } from './mcp-types';
-import { MCPTransport, createTransport } from './mcp-transport';
+import { createTransport } from './mcp-transport';
 import { SkillDefinition } from '../skill-types';
 
 /**
@@ -35,7 +36,7 @@ export class MCPClient {
   /**
    * Connect to the MCP server
    */
-  async connect(): Promise {
+  async connect(): Promise<void> {
     if (this.state.status === 'connected') {
       return;
     }
@@ -71,7 +72,11 @@ export class MCPClient {
       }
 
       this.state.serverInfo = initResponse.result.serverInfo;
-      this.state.capabilities = initResponse.result.capabilities;
+      this.state.capabilities = {
+        tools: !!initResponse.result.capabilities.tools,
+        resources: !!initResponse.result.capabilities.resources,
+        prompts: !!initResponse.result.capabilities.prompts
+      };
 
       // Send initialized notification
       await this.transport.send({
@@ -87,7 +92,7 @@ export class MCPClient {
     } catch (error) {
       console.error('[MCP] Connection failed:', error);
       this.state.status = 'error';
-      this.state.error = error.message;
+      this.state.error = (error as any).message;
       throw error;
     }
   }
@@ -95,7 +100,7 @@ export class MCPClient {
   /**
    * Disconnect from the MCP server
    */
-  async disconnect(): Promise {
+  async disconnect(): Promise<void> {
     if (this.transport) {
       await this.transport.close();
       this.transport = null;
@@ -107,7 +112,7 @@ export class MCPClient {
   /**
    * Discover available tools
    */
-  private async discoverTools(): Promise {
+  private async discoverTools(): Promise<void> {
     if (!this.transport) {
       throw new Error('Not connected');
     }
@@ -152,7 +157,7 @@ export class MCPClient {
   /**
    * Call a tool
    */
-  async callTool(toolName: string, args: Record): Promise {
+  async callTool(toolName: string, args: Record<string, any>): Promise<any> {
     if (!this.transport) {
       throw new Error('Not connected');
     }
@@ -236,7 +241,7 @@ export class MCPClient {
         } catch (error) {
           return {
             success: false,
-            error: error.message
+            error: (error as any).message
           };
         }
       },

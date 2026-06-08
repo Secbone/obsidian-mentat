@@ -317,7 +317,6 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
 
     return {
       success: true,
-      message: `Found ${result.data.results.length} results using ${result.data.engine}`,
       data: {
         ...result.data,
         totalExecutionTime

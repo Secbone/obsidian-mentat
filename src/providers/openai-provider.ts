@@ -58,7 +58,7 @@ export class OpenAIProvider implements AIProvider {
       });
 
       return response.choices[0]?.message?.content || '';
-    } catch (error) {
+    } catch (error: any) {
       console.error('OpenAIProvider generate error:', error);
       throw new Error(`OpenAI API error: ${error.message}`);
     }
@@ -99,7 +99,7 @@ export class OpenAIProvider implements AIProvider {
           onChunk(content);
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('OpenAIProvider generateStream error:', error);
       throw new Error(`OpenAI API error: ${error.message}`);
     }
@@ -120,7 +120,7 @@ export class OpenAIProvider implements AIProvider {
         embedding: response.data[0].embedding,
         tokens: response.usage?.total_tokens
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('OpenAIProvider generateEmbedding error:', error);
       throw new Error(`OpenAI Embedding error: ${error.message}`);
     }
@@ -129,6 +129,32 @@ export class OpenAIProvider implements AIProvider {
   async embed(text: string): Promise<number[]> {
     const result = await this.generateEmbedding(text);
     return result.embedding;
+  }
+
+  async generateEmbeddings(texts: string[]): Promise<{ embeddings: number[][]; tokens?: number }> {
+    try {
+      if (!this.config.embeddingModel) {
+        throw new Error('No embedding model configured for this provider');
+      }
+
+      const response = await this.client.embeddings.create({
+        model: this.config.embeddingModel,
+        input: texts
+      });
+
+      return {
+        embeddings: response.data.map(d => d.embedding),
+        tokens: response.usage?.total_tokens
+      };
+    } catch (error: any) {
+      console.error('OpenAIProvider generateEmbeddings error:', error);
+      throw new Error(`OpenAI Embeddings error: ${error.message}`);
+    }
+  }
+
+  async embeds(texts: string[]): Promise<number[][]> {
+    const result = await this.generateEmbeddings(texts);
+    return result.embeddings;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -140,7 +166,7 @@ export class OpenAIProvider implements AIProvider {
         max_tokens: 5
       });
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('OpenAIProvider availability check failed:', error);
       return false;
     }
@@ -207,9 +233,16 @@ export class OpenAIProvider implements AIProvider {
       return {
         content: message.content || '',
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: choice.finish_reason as any
+        finishReason: choice.finish_reason as any,
+        usage: response.usage ? {
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens,
+          cacheReadTokens: (response.usage as any).prompt_tokens_details?.cached_tokens ?? 0,
+          cacheCreationTokens: 0
+        } : undefined
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('OpenAIProvider generateWithSkills error:', error);
       throw new Error(`OpenAI API error: ${error.message}`);
     }
@@ -240,7 +273,8 @@ export class OpenAIProvider implements AIProvider {
         messages: openaiMessages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
         max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384,
-        stream: true
+        stream: true,
+        stream_options: { include_usage: true }
       };
 
       // Add tools if provided
@@ -255,14 +289,19 @@ export class OpenAIProvider implements AIProvider {
         }
       }
 
-      const stream = await this.client.chat.completions.create(requestParams);
+      const stream = await this.client.chat.completions.create(requestParams) as any;
 
       let fullContent = '';
       const toolCalls: ToolCall[] = [];
       const toolCallsInProgress: Map<number, { id: string; name: string; arguments: string }> = new Map();
       let finishReason: string | undefined;
+      let finalUsage: any = undefined;
 
       for await (const chunk of stream) {
+        if (chunk.usage) {
+          finalUsage = chunk.usage;
+        }
+
         const delta = chunk.choices[0]?.delta;
 
         // Handle content
@@ -316,9 +355,16 @@ export class OpenAIProvider implements AIProvider {
       return {
         content: fullContent,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: finishReason as any
+        finishReason: finishReason as any,
+        usage: finalUsage ? {
+          promptTokens: finalUsage.prompt_tokens,
+          completionTokens: finalUsage.completion_tokens,
+          totalTokens: finalUsage.total_tokens,
+          cacheReadTokens: finalUsage.prompt_tokens_details?.cached_tokens ?? 0,
+          cacheCreationTokens: 0
+        } : undefined
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('OpenAIProvider generateStreamWithSkills error:', error);
       throw new Error(`OpenAI API error: ${error.message}`);
     }
