@@ -43,8 +43,8 @@ try {
   console.log('🔄 Staging version files in Git...');
   execSync(`git add package.json manifest.json package-lock.json`, { stdio: 'inherit' });
   execSync(`git commit -m "chore: bump version to ${version}"`, { stdio: 'inherit' });
-  execSync(`git tag -a v${version} -m "Release v${version}"`, { stdio: 'inherit' });
-  console.log(`\n🎉 Success! Version bumped to v${version} locally.`);
+  execSync(`git tag -a ${version} -m "Release ${version}"`, { stdio: 'inherit' });
+  console.log(`\n🎉 Success! Version bumped to ${version} locally.`);
   console.log(`🚀 Next steps to publish:`);
   console.log(`   git push origin master --tags`);
 } catch (e) {
