@@ -244,8 +244,10 @@ export class ChatOrchestrator {
 
     const vaultHierarchy = this.buildSemanticDirectoryTree(allFiles);
     const vaultMap = await this.getVaultMap();
+    const formattedTime = new Date().toLocaleString('zh-CN', { hour12: false });
 
     return `[Vault Session Context]
+- Current Time: ${formattedTime}
 - Total documents: ${totalFiles}
 - Top Folders: ${topFolders || 'None'}
 - Top Tags: ${topTags || 'None'}
