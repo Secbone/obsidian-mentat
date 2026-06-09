@@ -343,9 +343,6 @@ export class Context {
 
     // Step 3: Process messages
     const formatted: any[] = [];
-    let consecutiveToolCount = 0;
-    let mergedToolContent: string[] = [];
-    let lastToolName: string | undefined;
 
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
@@ -353,50 +350,33 @@ export class Context {
 
       // Remove sources field (not needed by LLM)
       delete obj.sources;
+      // Remove timestamp field (not needed by LLM API)
+      delete obj.timestamp;
 
       // Truncate long messages (non-tool messages)
       if (!msg.isToolCall() && obj.content.length > 2000) {
         obj.content = obj.content.substring(0, 1900) + '\n[truncated]';
       }
 
-      // Handle tool messages
+      // Handle tool messages - each must keep its own tool_call_id (required by OpenAI API)
       if (msg.isToolCall()) {
         // Summarize old tool results if content > 200
         if (!recentToolIndices.has(i) && obj.content.length > 200) {
           obj.content = this.summarizeToolResult(obj.content);
         }
 
-        consecutiveToolCount++;
-        mergedToolContent.push(obj.content);
-        lastToolName = obj.name;
-
-        // Check if next message is also a tool call
-        const isLast = i === messages.length - 1;
-        const nextIsToolCall = !isLast && messages[i + 1].isToolCall();
-
-        // Flush if this is the last message or next is not a tool call
-        if (!nextIsToolCall) {
-          if (consecutiveToolCount > 2) {
-            // Merge multiple consecutive tool calls
-            formatted.push({
-              role: 'tool',
-              content: mergedToolContent.join('\n---\n'),
-              name: 'merged_tools'
-            });
-          } else {
-            // Don't merge if only 1-2 consecutive
-            for (const content of mergedToolContent) {
-              formatted.push({
-                role: 'tool',
-                content,
-                ...(lastToolName && { name: lastToolName })
-              });
-            }
-          }
-          consecutiveToolCount = 0;
-          mergedToolContent = [];
-          lastToolName = undefined;
+        // Build the tool message, always preserving tool_call_id
+        const toolMsg: any = {
+          role: 'tool',
+          content: obj.content,
+        };
+        if (obj.tool_call_id) {
+          toolMsg.tool_call_id = obj.tool_call_id;
         }
+        if (obj.name) {
+          toolMsg.name = obj.name;
+        }
+        formatted.push(toolMsg);
       } else {
         formatted.push(obj);
       }

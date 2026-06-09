@@ -380,20 +380,29 @@ export class OpenAIProvider implements AIProvider {
   /**
    * Convert ChatMessage[] to OpenAI format
    * Filters out system messages (defensive programming - system prompt should be passed via options)
+   * Ensures tool messages always have tool_call_id (required by OpenAI API)
    */
   private convertMessages(messages: ChatMessage[]): OpenAI.Chat.ChatCompletionMessageParam[] {
     return messages
       .filter(msg => msg.role !== 'system')  // Filter out system messages
       .map(msg => {
         if (msg.role === 'tool') {
+          // Defensive: if tool_call_id is missing, convert to user message to avoid API 400 error
+          if (!msg.tool_call_id) {
+            console.warn('OpenAIProvider: tool message missing tool_call_id, converting to user message');
+            return {
+              role: 'user' as const,
+              content: `[Tool Result${msg.name ? ` (${msg.name})` : ''}]: ${msg.content}`
+            };
+          }
           return {
-            role: 'tool',
+            role: 'tool' as const,
             content: msg.content,
-            tool_call_id: msg.tool_call_id!
+            tool_call_id: msg.tool_call_id
           };
         } else if (msg.role === 'assistant' && msg.tool_calls) {
           return {
-            role: 'assistant',
+            role: 'assistant' as const,
             content: msg.content || null,
             tool_calls: msg.tool_calls.map(tc => ({
               id: tc.id,
