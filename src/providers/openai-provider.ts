@@ -14,6 +14,9 @@ export interface OpenAIProviderConfig {
   maxTokens?: number;
 }
 
+// OpenAI API max_tokens upper limit
+const MAX_TOKENS_UPPER_LIMIT = 393216;
+
 export class OpenAIProvider implements AIProvider {
   id: string;
   name: string;
@@ -53,7 +56,7 @@ export class OpenAIProvider implements AIProvider {
         model: this.config.model,
         messages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384,
+        max_tokens: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT),
         stop: options?.stopSequences
       });
 
@@ -88,7 +91,7 @@ export class OpenAIProvider implements AIProvider {
         model: this.config.model,
         messages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384,
+        max_tokens: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT),
         stream: true,
         stop: options?.stopSequences
       }, {
@@ -200,7 +203,7 @@ export class OpenAIProvider implements AIProvider {
         model: this.config.model,
         messages: openaiMessages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384
+        max_tokens: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT)
       };
 
       // Add tools if provided
@@ -274,7 +277,7 @@ export class OpenAIProvider implements AIProvider {
         model: this.config.model,
         messages: openaiMessages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 16384,
+        max_tokens: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT),
         stream: true,
         stream_options: { include_usage: true }
       };
