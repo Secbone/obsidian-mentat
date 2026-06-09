@@ -146,10 +146,9 @@ describe('AgentOrchestrator Unit Tests', () => {
       next = await pipeline.next();
     }
 
-    // Verify tool calls and tool responses are filtered out from context messages passed to Agent 2
-    expect(passedContextMessages.length).toBe(2);
-    expect(passedContextMessages.some(m => m.role === 'tool')).toBe(false);
-    expect(passedContextMessages.some(m => m.role === 'assistant' && !m.content)).toBe(false);
+    // Verify tool calls and tool responses are preserved in context messages passed to Agent 2
+    expect(passedContextMessages.length).toBe(4);
+    expect(passedContextMessages.some(m => m.role === 'tool')).toBe(true);
     expect(passedContextMessages.some(m => m.role === 'user' && m.content === 'initial')).toBe(true);
     expect(passedContextMessages.some(m => m.role === 'assistant' && m.content === 'agent 1 output')).toBe(true);
   });

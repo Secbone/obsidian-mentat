@@ -25,6 +25,11 @@ export interface AgentContext {
   metadata?: Record<string, any>;
   pendingSteerMessages?: string[];
   abortSignal?: AbortSignal;
+  confirmHandler?: (
+    skillName: string,
+    params: any,
+    message: string
+  ) => Promise<{ approved: boolean; modifiedParams?: any }>;
 }
 
 /**
@@ -47,7 +52,7 @@ export type AgentEvent =
   | { type: 'skill_call'; name: string; params: any }
   | { type: 'skill_success'; name: string; result: any }
   | { type: 'skill_error'; name: string; error: string }
-  | { type: 'confirm_request'; skillName: string; params: any; message: string; resolve?: (value: { approved: boolean; modifiedParams?: any }) => void }
+  | { type: 'confirm_request'; skillName: string; params: any; message: string }
   | { type: 'steer'; message: string }
   | { type: 'error'; message: string };
 

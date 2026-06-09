@@ -267,25 +267,29 @@ describe('BaseAgent Unit Tests', () => {
       skillInvocationContext,
     });
 
+    let confirmCalled = false;
     const context: AgentContext = {
       messages: [],
       sessionId: 'session-123',
+      confirmHandler: async (skillName, params, message) => {
+        confirmCalled = true;
+        return { approved: true };
+      }
     };
 
     const generator = agent.execute('hi', context);
     
-    // Consume generator and resolve confirm_request promise asynchronously
+    // Consume generator and check confirm_request event
     const runGenerator = async () => {
       for await (const event of generator) {
         if (event.type === 'confirm_request') {
-          expect(event.resolve).toBeDefined();
-          // Simulate user approval
-          event.resolve!({ approved: true });
+          expect(event.skillName).toBe('obsidian:need_confirm');
         }
       }
     };
 
     await runGenerator();
+    expect(confirmCalled).toBe(true);
     expect(skillWasExecuted).toBe(true);
   });
 

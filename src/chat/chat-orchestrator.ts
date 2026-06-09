@@ -17,6 +17,7 @@ import { AgentConfig, AgentContext, AgentEvent, AgentResponse } from '../agents/
 import { DraftReviewPipeline } from './draft-review-pipeline';
 import { VaultDiagnosticsLogger } from '../diagnostics/vault-diagnostics-logger';
 import { IPlatformAdapter, IPlatformFile } from '../types/platform';
+import { ConfirmationModal } from '../ui/confirmation-modal';
 import { z } from 'zod';
 
 export interface ChatQueryOptions {
@@ -189,12 +190,27 @@ export class ChatOrchestrator {
       sessionContextPayload = await this.buildVaultSessionContextPayload();
     }
 
+    const app = (this.platform as any).app;
     const context: AgentContext = options.context || {
       messages: messages,
       sessionId: Date.now().toString(),
       metadata: {
         maxTurns: options.maxTurns,  // Pass maxTurns through context
         sessionContextPayload
+      },
+      confirmHandler: async (skillName, params, message) => {
+        return new Promise((resolve) => {
+          new ConfirmationModal(
+            app,
+            {
+              skillName,
+              description: message || '',
+              parameters: params || {},
+              operationType: 'write'
+            },
+            (confirmed) => resolve({ approved: confirmed })
+          ).open();
+        });
       }
     };
 

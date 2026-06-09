@@ -1,6 +1,6 @@
 // BaseAgent - Base class for all agents with skill support
 
-import JSON5 from 'json5';
+import { safeParseJson, normalizeJsonArguments } from '../utils/json-healer';
 import { AIProvider, ChatMessage, ToolCall, GenerateResponse } from '../types';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
@@ -251,7 +251,14 @@ export class BaseAgent {
           throw new DOMException('The user aborted a request.', 'AbortError');
         }
 
-        const callKey = `${toolCall.name}:${typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments)}`;
+        let normalizedArgs = '';
+        try {
+          const parsed = typeof toolCall.arguments === 'string' ? safeParseJson(toolCall.arguments) : toolCall.arguments;
+          normalizedArgs = normalizeJsonArguments(parsed);
+        } catch {
+          normalizedArgs = typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments);
+        }
+        const callKey = `${toolCall.name}:${normalizedArgs}`;
 
         // Cyclic pattern detection algorithm
         const tempHistory = [...executedKeysHistory, callKey];
@@ -303,315 +310,10 @@ export class BaseAgent {
         // Add to history
         executedKeysHistory.push(callKey);
 
-        if (this.skillInvocationContext.isMetaToolCall(toolCall.name)) {
-          // Handle meta-tool call (spec/invoke)
-          let args: Record<string, any>;
-          try {
-            args = this.safeParseToolArguments(toolCall);
-          } catch (err: any) {
-            // Parsing failed!
-            // Yield skill_call with raw arguments so it appears in the UI console
-            yield { type: 'skill_call', name: toolCall.name, params: toolCall.arguments };
-            yield { type: 'status', message: `⚠️ 工具 [${toolCall.name}] 参数解析失败，正在引导智能体自我纠错...` };
-            yield { type: 'skill_error', name: toolCall.name, error: err.message };
-
-            newMessages.push({
-              role: 'tool',
-              content: `Error: Failed to parse arguments for tool '${toolCall.name}'. Details: ${err.message}. Please regenerate the tool call with valid, balanced JSON formatting.`,
-              timestamp: Date.now(),
-              tool_call_id: toolCall.id,
-              name: toolCall.name
-            });
-
-            newSkillCalls.push({
-              id: toolCall.id,
-              skillName: toolCall.name,
-              namespace: 'meta' as any,
-              parameters: { raw_arguments: toolCall.arguments },
-              status: 'error',
-              timestamp: Date.now(),
-              result: { success: false, error: err.message }
-            });
-            continue;
-          }
-          
-          if (toolCall.name === 'spec') {
-            const skillName = args.skill_name;
-            yield { type: 'skill_call', name: `spec:${skillName}`, params: toolCall.arguments };
-
-            try {
-              const details = this.skillRegistry.getSkillDetails(skillName, 'markdown');
-              const isSuccess = !details.startsWith('Error:');
-
-              if (isSuccess) {
-                yield { type: 'skill_success', name: `spec:${skillName}`, result: details };
-                newMessages.push({
-                  role: 'tool',
-                  content: details,
-                  timestamp: Date.now(),
-                  tool_call_id: toolCall.id,
-                  name: toolCall.name
-                });
-              } else {
-                yield { type: 'skill_error', name: `spec:${skillName}`, error: details };
-                newMessages.push({
-                  role: 'tool',
-                  content: details,
-                  timestamp: Date.now(),
-                  tool_call_id: toolCall.id,
-                  name: toolCall.name
-                });
-              }
-
-              newSkillCalls.push({
-                id: toolCall.id,
-                skillName: toolCall.name,
-                namespace: 'meta' as any,
-                parameters: args,
-                status: isSuccess ? 'success' : 'error',
-                timestamp: Date.now(),
-                result: { success: isSuccess, data: isSuccess ? details : undefined, error: isSuccess ? undefined : details }
-              });
-            } catch (err: any) {
-              yield { type: 'skill_error', name: `spec:${skillName}`, error: err.message };
-              newMessages.push({
-                role: 'tool',
-                content: `Error: Exception during execution: ${err.message}`,
-                timestamp: Date.now(),
-                tool_call_id: toolCall.id,
-                name: toolCall.name
-              });
-            }
-          } else if (toolCall.name === 'invoke') {
-            const skillName = args.skill_name;
-            const skillParams = args.params || {};
-
-            if (!skillName) {
-              yield { type: 'status', message: `⚠️ 工具 [invoke] 缺少必填参数 skill_name` };
-              yield { type: 'skill_error', name: 'invoke:unknown', error: 'Missing required parameter "skill_name"' };
-              newMessages.push({
-                role: 'tool',
-                content: "Error: Missing required parameter 'skill_name' in invoke tool call. You must specify the namespace and skill name (e.g., 'obsidian:edit_note') in 'skill_name'.",
-                timestamp: Date.now(),
-                tool_call_id: toolCall.id,
-                name: toolCall.name
-              });
-              continue;
-            }
-
-            const skill = this.skillRegistry.get(skillName);
-            const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
-            let executeApproved = true;
-
-            if (requiresConfirmation) {
-              yield { type: 'status', message: `等待授权: ${skillName}` };
-
-              let resolveConfirm!: (value: { approved: boolean; modifiedParams?: any }) => void;
-              const confirmPromise = new Promise<{ approved: boolean; modifiedParams?: any }>((resolve) => {
-                resolveConfirm = resolve;
-              });
-
-              // Interactive prompt yielding (Human-in-the-loop) with resolve callback
-              yield {
-                type: 'confirm_request',
-                skillName: skillName,
-                params: skillParams,
-                message: `智能体申请执行操作: 【${skill.description || skillName}】。是否批准？`,
-                resolve: resolveConfirm
-              };
-
-              if (context.abortSignal?.aborted) {
-                throw new DOMException('The user aborted a request.', 'AbortError');
-              }
-
-              const userFeedback = await confirmPromise;
-              executeApproved = userFeedback?.approved ?? true;
-              if (userFeedback?.modifiedParams) {
-                args.params = userFeedback.modifiedParams;
-              }
-            }
-
-            if (!executeApproved) {
-              yield { type: 'status', message: `用户已拒绝: ${skillName}` };
-              newMessages.push({
-                role: 'tool',
-                content: 'Error: Execution cancelled by user.',
-                timestamp: Date.now(),
-                tool_call_id: toolCall.id,
-                name: toolCall.name
-              });
-              continue;
-            }
-
-            yield { type: 'skill_call', name: `invoke:${skillName}`, params: args.params };
-
-            try {
-              // Parse skill name to get namespace and name
-              const { namespace, name } = this.skillRegistry.parseName(skillName);
-
-              // Execute the skill
-              const runResult = await this.skillExecutor.execute(namespace, name, args.params, { abortSignal: context.abortSignal });
-
-              if (runResult.success) {
-                yield { type: 'skill_success', name: `invoke:${skillName}`, result: runResult.data };
-                newMessages.push({
-                  role: 'tool',
-                  content: JSON.stringify(runResult.data, null, 2),
-                  timestamp: Date.now(),
-                  tool_call_id: toolCall.id,
-                  name: toolCall.name
-                });
-                newMessages.push(...this.getSubagentMessages(skillName, runResult, toolCall.id));
-              } else {
-                yield { type: 'status', message: `⚠️ 工具 [${skillName}] 运行失败，正在自动引导纠错...` };
-                yield { type: 'skill_error', name: `invoke:${skillName}`, error: runResult.error || '执行失败' };
-                newMessages.push({
-                  role: 'tool',
-                  content: `Error: ${runResult.error || 'Unknown error'}`,
-                  timestamp: Date.now(),
-                  tool_call_id: toolCall.id,
-                  name: toolCall.name
-                });
-              }
-
-              newSkillCalls.push({
-                id: toolCall.id,
-                skillName: toolCall.name,
-                namespace: 'meta' as any,
-                parameters: args,
-                status: runResult.success ? 'success' : 'error',
-                timestamp: Date.now(),
-                result: runResult
-              });
-            } catch (err: any) {
-              yield { type: 'status', message: `⚠️ 工具 [${skillName}] 解析或调用异常，正在自动纠错...` };
-              yield { type: 'skill_error', name: `invoke:${skillName}`, error: err.message };
-              newMessages.push({
-                role: 'tool',
-                content: `Error: Exception during execution: ${err.message}`,
-                timestamp: Date.now(),
-                tool_call_id: toolCall.id,
-                name: toolCall.name
-              });
-            }
-          }
-        } else {
-          // Direct skill call
-          const skill = this.skillRegistry.get(toolCall.name);
-          const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
-          let executeApproved = true;
-
-          if (requiresConfirmation) {
-            yield { type: 'status', message: `等待授权: ${toolCall.name}` };
-
-            let resolveConfirm!: (value: { approved: boolean; modifiedParams?: any }) => void;
-            const confirmPromise = new Promise<{ approved: boolean; modifiedParams?: any }>((resolve) => {
-              resolveConfirm = resolve;
-            });
-
-            // Interactive prompt yielding (Human-in-the-loop) with resolve callback
-            yield {
-              type: 'confirm_request',
-              skillName: toolCall.name,
-              params: toolCall.arguments,
-              message: `智能体申请执行操作: 【${skill.description || toolCall.name}】。是否批准？`,
-              resolve: resolveConfirm
-            };
-
-            if (context.abortSignal?.aborted) {
-              throw new DOMException('The user aborted a request.', 'AbortError');
-            }
-
-            const userFeedback = await confirmPromise;
-            executeApproved = userFeedback?.approved ?? true;
-            if (userFeedback?.modifiedParams) {
-              toolCall.arguments = userFeedback.modifiedParams;
-            }
-          }
-
-          if (!executeApproved) {
-            yield { type: 'status', message: `用户已拒绝: ${toolCall.name}` };
-            newMessages.push({
-              role: 'tool',
-              content: 'Error: Execution cancelled by user.',
-              timestamp: Date.now(),
-              tool_call_id: toolCall.id,
-              name: toolCall.name
-            });
-            continue;
-          }
-
-          yield { type: 'skill_call', name: toolCall.name, params: toolCall.arguments };
-
-          try {
-            const runResult = await this.skillExecutor.executeFromToolCall(toolCall, { skipConfirmation: true, abortSignal: context.abortSignal });
-            
-            if (runResult.success) {
-              yield { type: 'skill_success', name: toolCall.name, result: runResult.data };
-              newMessages.push({
-                role: 'tool',
-                content: JSON.stringify(runResult.data, null, 2),
-                timestamp: Date.now(),
-                tool_call_id: toolCall.id,
-                name: toolCall.name
-              });
-              newMessages.push(...this.getSubagentMessages(toolCall.name, runResult, toolCall.id));
-            } else {
-              yield { type: 'status', message: `⚠️ 工具 [${toolCall.name}] 运行失败，正在自动引导纠错...` };
-              yield { type: 'skill_error', name: toolCall.name, error: runResult.error || '执行失败' };
-              newMessages.push({
-                role: 'tool',
-                content: `Error: ${runResult.error || 'Unknown error'}`,
-                timestamp: Date.now(),
-                tool_call_id: toolCall.id,
-                name: toolCall.name
-              });
-            }
-            
-            // Safe JSON parsing of parameters to avoid crashing the execute loop on malformed toolCall.arguments
-            let parsedParams = {};
-            try {
-              parsedParams = typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : toolCall.arguments;
-            } catch {
-              parsedParams = { raw_arguments: toolCall.arguments };
-            }
-
-            newSkillCalls.push({
-              id: toolCall.id,
-              skillName: toolCall.name,
-              namespace: toolCall.name.startsWith('mcp:') ? 'mcp' : 'obsidian',
-              parameters: parsedParams,
-              status: runResult.success ? 'success' : 'error',
-              timestamp: Date.now(),
-              result: runResult
-            });
-          } catch (execErr: any) {
-            yield { type: 'status', message: `⚠️ 工具 [${toolCall.name}] 参数解析或运行异常，正在自动纠错...` };
-            yield { type: 'skill_error', name: toolCall.name, error: execErr.message };
-            
-            // Avoid duplicate message if it was already pushed inside the try block before exception
-            const isAlreadyPushed = newMessages.some(m => m.tool_call_id === toolCall.id);
-            if (!isAlreadyPushed) {
-              newMessages.push({
-                role: 'tool',
-                content: `Error: Exception during execution: ${execErr.message}`,
-                timestamp: Date.now(),
-                tool_call_id: toolCall.id,
-                name: toolCall.name
-              });
-            }
-
-            newSkillCalls.push({
-              id: toolCall.id,
-              skillName: toolCall.name,
-              namespace: toolCall.name.startsWith('mcp:') ? 'mcp' : 'obsidian',
-              parameters: { raw_arguments: toolCall.arguments },
-              status: 'error',
-              timestamp: Date.now(),
-              result: { success: false, error: execErr.message }
-            });
-          }
-        }
+        // Execute tool call via unified helper
+        const runRes = yield* this.executeSingleToolCall(toolCall, context);
+        newMessages.push(...runRes.toolMessages);
+        newSkillCalls.push(...runRes.skillCalls);
       }
 
       state = this.mergeState(state, {
@@ -833,90 +535,269 @@ export class BaseAgent {
       skillCalls: update.skillCalls ? [...current.skillCalls, ...update.skillCalls] : current.skillCalls
     };
   }
-  private escapeLoneBackslashes(jsonStr: string): string {
-    let result = '';
-    for (let i = 0; i < jsonStr.length; i++) {
-      const char = jsonStr[i];
-      if (char === '\\') {
-        const nextChar = jsonStr[i + 1];
-        if (nextChar === undefined) {
-          result += '\\\\';
-        } else if (['"', '\\', '/', 'b', 'f', 'n', 'r', 't'].includes(nextChar)) {
-          result += '\\' + nextChar;
-          i++;
-        } else if (nextChar === 'u') {
-          const hex = jsonStr.substring(i + 2, i + 6);
-          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
-            result += '\\u' + hex;
-            i += 5;
+  private getNamespaceForTool(toolName: string): any {
+    if (toolName === 'spec' || toolName === 'invoke') {
+      return 'meta';
+    }
+    return toolName.startsWith('mcp:') ? 'mcp' : 'obsidian';
+  }
+
+  private async *executeSingleToolCall(
+    toolCall: ToolCall,
+    context: AgentContext
+  ): AsyncGenerator<AgentEvent, { toolMessages: ChatMessage[]; skillCalls: SkillCall[] }, any> {
+    const toolMessages: ChatMessage[] = [];
+    const skillCalls: SkillCall[] = [];
+    const toolName = toolCall.name;
+
+    // Parse arguments
+    let args: any;
+    try {
+      args = safeParseJson(
+        typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments),
+        (healedStr, errorMsg) => {
+          console.log(`[BaseAgent] JSON parse healed successfully for ${toolName}`);
+          this.logDiagnosticIncident(toolName, typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments), errorMsg, 'Healed (JSON Preprocessor)', healedStr);
+        },
+        (errorMsg) => {
+          this.logDiagnosticIncident(toolName, typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments), errorMsg, 'Failed (Strict Parsing)');
+        }
+      );
+    } catch (err: any) {
+      // Parsing failed
+      yield { type: 'skill_call', name: toolName, params: toolCall.arguments };
+      yield { type: 'status', message: `⚠️ 工具 [${toolName}] 参数解析失败，正在引导智能体自我纠错...` };
+      yield { type: 'skill_error', name: toolName, error: err.message };
+
+      return {
+        toolMessages: [{
+          role: 'tool',
+          content: `Error: Failed to parse arguments for tool '${toolName}'. Details: ${err.message}. Please regenerate the tool call with valid, balanced JSON formatting.`,
+          timestamp: Date.now(),
+          tool_call_id: toolCall.id,
+          name: toolName
+        }],
+        skillCalls: [{
+          id: toolCall.id,
+          skillName: toolName,
+          namespace: this.getNamespaceForTool(toolName),
+          parameters: typeof toolCall.arguments === 'string' ? { raw_arguments: toolCall.arguments } : toolCall.arguments,
+          status: 'error',
+          timestamp: Date.now(),
+          result: { success: false, error: err.message }
+        }]
+      };
+    }
+
+    let targetSkillName = toolName;
+    let targetParams = args;
+    let isMeta = false;
+    let isSpec = false;
+
+    if (toolName === 'spec') {
+      isMeta = true;
+      isSpec = true;
+      targetSkillName = args.skill_name;
+    } else if (toolName === 'invoke') {
+      isMeta = true;
+      targetSkillName = args.skill_name;
+      targetParams = args.params || {};
+    }
+
+    if (toolName === 'invoke' && !targetSkillName) {
+      yield { type: 'status', message: `⚠️ 工具 [invoke] 缺少必填参数 skill_name` };
+      yield { type: 'skill_error', name: 'invoke:unknown', error: 'Missing required parameter "skill_name"' };
+      return {
+        toolMessages: [{
+          role: 'tool',
+          content: "Error: Missing required parameter 'skill_name' in invoke tool call. You must specify the namespace and skill name (e.g., 'obsidian:edit_note') in 'skill_name'.",
+          timestamp: Date.now(),
+          tool_call_id: toolCall.id,
+          name: toolName
+        }],
+        skillCalls: []
+      };
+    }
+
+    let executeApproved = true;
+    const skill = this.skillRegistry.get(targetSkillName);
+    const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
+
+    if (requiresConfirmation && !isSpec) {
+      const displayName = skill.description || targetSkillName;
+      yield { type: 'status', message: `等待授权: ${targetSkillName}` };
+
+      // Yield confirm_request event as a pure data notice
+      yield {
+        type: 'confirm_request',
+        skillName: targetSkillName,
+        params: targetParams,
+        message: `智能体申请执行操作: 【${displayName}】。是否批准？`
+      };
+
+      if (context.confirmHandler) {
+        if (context.abortSignal?.aborted) {
+          throw new DOMException('The user aborted a request.', 'AbortError');
+        }
+        const userFeedback = await context.confirmHandler(
+          targetSkillName,
+          targetParams,
+          `智能体申请执行操作: 【${displayName}】。是否批准？`
+        );
+        executeApproved = userFeedback?.approved ?? true;
+        if (userFeedback?.modifiedParams) {
+          targetParams = userFeedback.modifiedParams;
+          if (toolName === 'invoke') {
+            args.params = userFeedback.modifiedParams;
           } else {
-            result += '\\\\';
+            args = userFeedback.modifiedParams;
           }
-        } else {
-          result += '\\\\';
         }
       } else {
-        result += char;
+        console.warn(`[BaseAgent] confirmHandler is not defined in AgentContext. Automatically approving.`);
       }
     }
-    return result;
-  }
 
-
-
-  /**
-   * Preprocesses JSON string literals to heal unescaped Windows paths.
-   */
-  private healWindowsPaths(jsonStr: string): string {
-    return jsonStr.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match, p1) => {
-      const looksLikeWindowsPath = /^[a-zA-Z]:\\/.test(p1) || 
-                                   /^[a-zA-Z]:\w/.test(p1) ||
-                                   /^\\[a-zA-Z0-9_.-]+\\[a-zA-Z0-9_.-]+/.test(p1);
-      if (looksLikeWindowsPath) {
-        const unescaped = p1.replace(/\\\\/g, '\\');
-        const reEscaped = unescaped.replace(/\\/g, '\\\\');
-        return `"${reEscaped}"`;
-      }
-      return match;
-    });
-  }
-
-  /**
-   * Safely parse tool call arguments
-   */
-  private safeParseToolArguments(toolCall: ToolCall): Record<string, any> {
-    if (typeof toolCall.arguments !== 'string') {
-      return toolCall.arguments;
+    if (!executeApproved) {
+      yield { type: 'status', message: `用户已拒绝: ${targetSkillName}` };
+      return {
+        toolMessages: [{
+          role: 'tool',
+          content: 'Error: Execution cancelled by user.',
+          timestamp: Date.now(),
+          tool_call_id: toolCall.id,
+          name: toolName
+        }],
+        skillCalls: []
+      };
     }
 
-    const argsString = toolCall.arguments as string;
-    const preHealedString = this.healWindowsPaths ? this.healWindowsPaths(argsString) : argsString;
+    if (isSpec) {
+      yield { type: 'skill_call', name: `spec:${targetSkillName}`, params: args };
+      try {
+        const details = this.skillRegistry.getSkillDetails(targetSkillName, 'markdown');
+        const isSuccess = !details.startsWith('Error:');
+
+        if (isSuccess) {
+          yield { type: 'skill_success', name: `spec:${targetSkillName}`, result: details };
+        } else {
+          yield { type: 'skill_error', name: `spec:${targetSkillName}`, error: details };
+        }
+
+        return {
+          toolMessages: [{
+            role: 'tool',
+            content: details,
+            timestamp: Date.now(),
+            tool_call_id: toolCall.id,
+            name: toolName
+          }],
+          skillCalls: [{
+            id: toolCall.id,
+            skillName: toolName,
+            namespace: 'meta',
+            parameters: args,
+            status: isSuccess ? 'success' : 'error',
+            timestamp: Date.now(),
+            result: { success: isSuccess, data: isSuccess ? details : undefined, error: isSuccess ? undefined : details }
+          }]
+        };
+      } catch (err: any) {
+        yield { type: 'skill_error', name: `spec:${targetSkillName}`, error: err.message };
+        return {
+          toolMessages: [{
+            role: 'tool',
+            content: `Error: Exception during execution: ${err.message}`,
+            timestamp: Date.now(),
+            tool_call_id: toolCall.id,
+            name: toolName
+          }],
+          skillCalls: []
+        };
+      }
+    }
+
+    const callNameForEvent = isMeta ? `invoke:${targetSkillName}` : toolName;
+    yield { type: 'skill_call', name: callNameForEvent, params: targetParams };
 
     try {
-      // Try strict JSON.parse first to detect any unescaped backslashes (like LaTeX) and trigger healing
-      return JSON.parse(preHealedString);
-    } catch (error: any) {
-      console.warn(`[BaseAgent] JSON strict parse failed for ${toolCall.name}, trying escape-healing...`);
-
-      try {
-        const healedArgsString = this.escapeLoneBackslashes(preHealedString);
-        // Use JSON5 as the lenient fallback parser for self-healing
-        const parsed = JSON5.parse(healedArgsString);
-        
-        console.log(`[BaseAgent] JSON parse healed successfully for ${toolCall.name}`);
-        this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Healed (JSON Preprocessor)', healedArgsString);
-        
-        return parsed;
-      } catch (healingError: any) {
-        console.error(`[BaseAgent] JSON escape-healing failed for ${toolCall.name}:`, healingError.message);
-        
-        // Log final failure strictly for diagnostics (using Failed (Strict Parsing) for compatibility)
-        this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Failed (Strict Parsing)');
-
-        throw new Error(
-          `Failed to parse tool call arguments for ${toolCall.name}: ${error.message}`
-        );
+      let runResult: any;
+      if (isMeta) {
+        const { namespace, name } = this.skillRegistry.parseName(targetSkillName);
+        runResult = await this.skillExecutor.execute(namespace, name, targetParams, { abortSignal: context.abortSignal });
+      } else {
+        const execToolCall = { ...toolCall, arguments: targetParams };
+        runResult = await this.skillExecutor.executeFromToolCall(execToolCall, { skipConfirmation: true, abortSignal: context.abortSignal });
       }
+
+      if (runResult.success) {
+        yield { type: 'skill_success', name: callNameForEvent, result: runResult.data };
+        const mainMessage: ChatMessage = {
+          role: 'tool',
+          content: JSON.stringify(runResult.data, null, 2),
+          timestamp: Date.now(),
+          tool_call_id: toolCall.id,
+          name: toolName
+        };
+        const subMessages = this.getSubagentMessages(targetSkillName, runResult, toolCall.id);
+
+        return {
+          toolMessages: [mainMessage, ...subMessages],
+          skillCalls: [{
+            id: toolCall.id,
+            skillName: toolName,
+            namespace: this.getNamespaceForTool(toolName),
+            parameters: args,
+            status: 'success',
+            timestamp: Date.now(),
+            result: runResult
+          }]
+        };
+      } else {
+        yield { type: 'status', message: `⚠️ 工具 [${targetSkillName}] 运行失败，正在自动引导纠错...` };
+        yield { type: 'skill_error', name: callNameForEvent, error: runResult.error || '执行失败' };
+        
+        return {
+          toolMessages: [{
+            role: 'tool',
+            content: `Error: ${runResult.error || 'Unknown error'}`,
+            timestamp: Date.now(),
+            tool_call_id: toolCall.id,
+            name: toolName
+          }],
+          skillCalls: [{
+            id: toolCall.id,
+            skillName: toolName,
+            namespace: this.getNamespaceForTool(toolName),
+            parameters: args,
+            status: 'error',
+            timestamp: Date.now(),
+            result: runResult
+          }]
+        };
+      }
+    } catch (err: any) {
+      yield { type: 'status', message: `⚠️ 工具 [${targetSkillName}] 参数解析或运行异常，正在自动纠错...` };
+      yield { type: 'skill_error', name: callNameForEvent, error: err.message };
+
+      return {
+        toolMessages: [{
+          role: 'tool',
+          content: `Error: Exception during execution: ${err.message}`,
+          timestamp: Date.now(),
+          tool_call_id: toolCall.id,
+          name: toolName
+        }],
+        skillCalls: [{
+          id: toolCall.id,
+          skillName: toolCall.name,
+          namespace: this.getNamespaceForTool(toolName),
+          parameters: args,
+          status: 'error',
+          timestamp: Date.now(),
+          result: { success: false, error: err.message }
+        }]
+      };
     }
   }
 

@@ -623,13 +623,22 @@ export class ChatView extends ItemView {
           this.lastExecutedToolName = shortName;
           this.lastExecutedToolStatus = 'pending';
 
-          activeTasks.push({
-            id: event.name + Date.now(),
-            name: event.name,
-            status: 'executing',
-            params: event.params,
-            explanation: currentTurnResponse.trim() // Capture intermediate explanation
-          });
+          const existingConfirmTask = activeTasks.find(t => 
+            t.status === 'confirm' && 
+            (t.name === event.name || `invoke:${t.name}` === event.name)
+          );
+          if (existingConfirmTask) {
+            existingConfirmTask.status = 'executing';
+            existingConfirmTask.params = event.params;
+          } else {
+            activeTasks.push({
+              id: event.name + Date.now(),
+              name: event.name,
+              status: 'executing',
+              params: event.params,
+              explanation: currentTurnResponse.trim() // Capture intermediate explanation
+            });
+          }
           currentTurnResponse = ''; // Reset for next turn
           currentStatus = `执行工具: ${shortName}`;
           this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true); // force update console immediately
@@ -639,7 +648,10 @@ export class ChatView extends ItemView {
             this.lastExecutedToolStatus = 'success';
           }
 
-          const task = activeTasks.find(t => t.name === event.name && t.status === 'executing');
+          const task = activeTasks.find(t => 
+            (t.name === event.name || `invoke:${t.name}` === event.name) && 
+            t.status === 'executing'
+          );
           if (task) {
             task.status = 'success';
             task.result = event.result;
@@ -652,7 +664,10 @@ export class ChatView extends ItemView {
             this.lastExecutedToolStatus = 'error';
           }
 
-          const task = activeTasks.find(t => t.name === event.name && t.status === 'executing');
+          const task = activeTasks.find(t => 
+            (t.name === event.name || `invoke:${t.name}` === event.name) && 
+            (t.status === 'executing' || t.status === 'confirm')
+          );
           if (task) {
             task.status = 'error';
             task.result = event.error;
@@ -678,38 +693,7 @@ export class ChatView extends ItemView {
           currentStatus = `等待授权: ${shortName}`;
           this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
 
-          // Wait for Obsidian modal feedback asynchronously
-          const approved = await new Promise<boolean>((resolve) => {
-            new ConfirmationModal(
-              this.app,
-              {
-                skillName: event.skillName,
-                description: event.message || '',
-                parameters: event.params || {},
-                operationType: 'write'
-              },
-              (confirmed) => resolve(confirmed)
-            ).open();
-          });
-
-          // Feed approved response back to generator
-          if (approved) {
-            task.status = 'executing';
-            this.lastExecutedToolStatus = 'pending';
-          } else {
-            task.status = 'error';
-            task.result = 'User cancelled execution';
-            this.lastExecutedToolStatus = 'error';
-          }
-
-          this.updateStreamingUI(currentStatus, activeTasks, finalAnswer, currentTurnResponse, true);
-          
-          if (event.resolve) {
-            event.resolve({ approved });
-            current = await stream.next();
-          } else {
-            current = await stream.next({ approved });
-          }
+          current = await stream.next();
           continue;
         }
 
