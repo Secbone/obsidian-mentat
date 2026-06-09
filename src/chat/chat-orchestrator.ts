@@ -211,52 +211,29 @@ export class ChatOrchestrator {
     };
   }
 
-  /**
-   * Builds dynamic Vault session context payload containing folder structures, tags, and map.
-   */
   private async buildVaultSessionContextPayload(): Promise<string> {
     const allFiles = this.platform.getMarkdownFiles();
     const totalFiles = allFiles.length;
 
-    const folders = new Set<string>();
-    allFiles.forEach(file => {
-      if (file.parent && file.parent.path !== '/') {
-        folders.add(file.parent.path);
-      }
-    });
-    const topFolders = Array.from(folders).slice(0, 5).join(', ');
-
-    const tagCounts = new Map<string, number>();
-    allFiles.forEach(file => {
-      const cache = this.platform.getFileCache(file);
-      const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
-      const frontmatterTags = cache?.frontmatter?.tags || [];
-      [...fileTags, ...frontmatterTags].forEach(tag => {
-        const tagStr = typeof tag === 'string' ? tag : String(tag);
-        tagCounts.set(tagStr, (tagCounts.get(tagStr) || 0) + 1);
-      });
-    });
-    const topTags = Array.from(tagCounts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([tag]) => tag)
-      .join(', ');
-
     const vaultHierarchy = this.buildSemanticDirectoryTree(allFiles);
-    const vaultMap = await this.getVaultMap();
+    const dynamicVaultMap = await this.generateSemanticVaultMap(allFiles);
+    const userVaultMap = await this.getVaultMap();
     const formattedTime = new Date().toLocaleString('zh-CN', { hour12: false });
+
+    // Determine if the user-defined map is customized or is just the default placeholder
+    const hasCustomMap = userVaultMap && 
+                         !userVaultMap.includes('*(None defined') && 
+                         userVaultMap.trim() !== dynamicVaultMap.trim();
 
     return `[Vault Session Context]
 - Current Time: ${formattedTime}
 - Total documents: ${totalFiles}
-- Top Folders: ${topFolders || 'None'}
-- Top Tags: ${topTags || 'None'}
 
 Semantic Directory Hierarchy:
 ${vaultHierarchy}
 
-User-Defined Knowledge Map:
-${vaultMap}`;
+Vault Knowledge Map (Folders, Tags & Note Summaries):
+${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-map.md):\n${userVaultMap}` : ''}`;
   }
 
   /**
@@ -417,6 +394,94 @@ OBSIDIAN SYNTAX CHEAT SHEET:
   /**
    * Automatically creates the vault-map.md with default templates and scanned vault directories if it does not exist.
    */
+  /**
+   * Generates a high-density Knowledge Structure Map from the vault files locally.
+   */
+  private async generateSemanticVaultMap(allFiles: any[]): Promise<string> {
+    const folderDataMap = new Map<string, {
+      files: any[];
+      tags: Map<string, number>;
+      directCount: number;
+    }>();
+
+    // Group files by folder
+    for (const file of allFiles) {
+      if (!file.parent) continue;
+      const folderPath = file.parent.path === '/' || file.parent.path === '.' || !file.parent.path ? 'Root' : file.parent.path;
+      
+      if (!folderDataMap.has(folderPath)) {
+        folderDataMap.set(folderPath, {
+          files: [],
+          tags: new Map<string, number>(),
+          directCount: 0
+        });
+      }
+      
+      const folderData = folderDataMap.get(folderPath)!;
+      folderData.files.push(file);
+      folderData.directCount++;
+
+      // Count tags in this file
+      const fileTags = this.getFileTags(file);
+      for (const tag of fileTags) {
+        if (tag) {
+          folderData.tags.set(tag, (folderData.tags.get(tag) || 0) + 1);
+        }
+      }
+    }
+
+    let mapContent = `# 🗺️ Vault Knowledge Structure Map\n\n`;
+    mapContent += `This document maps the directory roles, core tags, and primary notes of this Obsidian vault. Mentat reads this structure to contextualize its actions.\n\n`;
+    mapContent += `> [!note]\n`;
+    mapContent += `> This map is automatically generated. You can customize the folder descriptions below to guide Mentat's filing system.\n\n`;
+    mapContent += `## 📁 Core Folder Guidelines\n\n`;
+
+    // Sort folders alphabetically
+    const sortedFolders = Array.from(folderDataMap.keys()).sort((a, b) => {
+      if (a === 'Root') return -1;
+      if (b === 'Root') return 1;
+      return a.localeCompare(b);
+    });
+
+    for (const folder of sortedFolders) {
+      const data = folderDataMap.get(folder)!;
+      
+      // Get top 5 tags
+      const topTags = Array.from(data.tags.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([tag]) => `#${tag}`)
+        .join(', ');
+
+      // Sort files by modification time or size (we can use stat.mtime to list newest first)
+      const sortedFiles = [...data.files].sort((a, b) => (b.stat?.mtime || 0) - (a.stat?.mtime || 0));
+      const keyNotes = sortedFiles
+        .slice(0, 5)
+        .map(f => {
+          const cleanPath = f.path.replace(/\.md$/, '');
+          const cleanName = f.name.replace(/\.md$/, '');
+          return `[[${cleanPath}|${cleanName}]]`;
+        })
+        .join(', ');
+
+      const displayName = folder === 'Root' ? 'Root Directory' : `${folder}/`;
+      mapContent += `### 📂 \`[[${displayName}]]\`\n`;
+      mapContent += `- **Role/Theme**: Filing notes and documents relating to ${folder === 'Root' ? 'general vault home' : folder.split('/').pop()}.\n`;
+      if (keyNotes) {
+        mapContent += `- **Sample Notes**: ${keyNotes}\n`;
+      }
+      if (topTags) {
+        mapContent += `- **Frequent Tags**: ${topTags}\n`;
+      }
+      mapContent += `- **Stats**: ${data.directCount} documents\n\n`;
+    }
+
+    return mapContent;
+  }
+
+  /**
+   * Automatically creates the vault-map.md with default templates and scanned vault directories if it does not exist.
+   */
   async ensureVaultMapExists(): Promise<void> {
     try {
       const configFolder = this.settings.userConfigFolder || 'Mentat/Config';
@@ -429,45 +494,10 @@ OBSIDIAN SYNTAX CHEAT SHEET:
 
       // Create default template if file does not exist
       if (!(await this.platform.exists(mapPath))) {
-        // Proactively scan actual folders in the vault to identify top largest directories
         const allFiles = this.platform.getMarkdownFiles();
-        const folderCounts = new Map<string, number>();
-        
-        allFiles.forEach(file => {
-          if (file.parent && file.parent.path !== '/' && file.parent.path !== '.') {
-            const p = file.parent.path;
-            folderCounts.set(p, (folderCounts.get(p) || 0) + 1);
-          }
-        });
-
-        // Sort and pick top 3 largest folders
-        const topFolders = Array.from(folderCounts.entries())
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 3)
-          .map(([p]) => p);
-
-        // If no folders found, fallback to standard guidelines
-        const folderGuidelines = topFolders.length > 0
-          ? topFolders.map(folder => `- \`[[${folder}/]]\`: Describe what kind of notes should go here (e.g., academic research, active projects, daily journals).`).join('\n')
-          : `- \`[[Research/]]\`: Used for deep-dives, academic papers, and study notes.\n- \`[[Projects/]]\`: Used for active work, tracking goals, and task plans.\n- \`[[Inbox/]]\`: Place for raw ideas, quick thoughts, and unprocessed inputs.`;
-
-        const defaultTemplate = `# 🗺️ Vault Knowledge Structure Map
-
-This document defines the high-level knowledge organization and directory roles of my Obsidian vault.
-
-> [!note]
-> Write your folder descriptions, naming rules, and category workflows below. Mentat dynamically reads this file to decide where to store new files, how concepts relate, and which directories to query first.
-
-## 📁 Core Folder Guidelines
-${folderGuidelines}
-
-## 🏷️ Category Workflows & Wiki-Linking
-- Define folder roles clearly so the agent knows exactly where new files belong.
-- Document naming conventions (e.g., prefixing research plans with \`Research_Plan_\`).
-- Outline relationships (e.g., notes in \`Inbox/\` should eventually be polished and moved to \`Research/\`).
-`;
+        const defaultTemplate = await this.generateSemanticVaultMap(allFiles);
         await this.platform.write(mapPath, defaultTemplate);
-        console.log('[ChatOrchestrator] Automatically initialized vault-map.md successfully');
+        console.log('[ChatOrchestrator] Generated rich semantic vault-map.md successfully');
       }
     } catch (error) {
       console.error('[ChatOrchestrator] Error initializing vault-map.md:', error);
