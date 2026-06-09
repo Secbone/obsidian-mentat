@@ -178,15 +178,28 @@ export class ChatOrchestrator {
       throw new Error('ChatOrchestrator not initialized');
     }
 
+    const messages = options.contextMessages || [];
+    
+    // Find if we already have a session context in the history
+    const firstUserMsg = messages.find(m => m.role === 'user');
+    let sessionContextPayload = firstUserMsg?.metadata?.sessionContextPayload;
+
+    if (!sessionContextPayload) {
+      // Generate it once for the session
+      sessionContextPayload = await this.buildVaultSessionContextPayload();
+    }
+
     const context: AgentContext = options.context || {
-      messages: options.contextMessages || [],
+      messages: messages,
       sessionId: Date.now().toString(),
       metadata: {
-        maxTurns: options.maxTurns  // Pass maxTurns through context
+        maxTurns: options.maxTurns,  // Pass maxTurns through context
+        sessionContextPayload
       }
     };
 
-    const response = yield* this.agentManager.executeWithCurrentAgent(
+    const response = yield* this.agentManager.execute(
+      this.defaultAgent.getId(),
       userQuery,
       context
     );
@@ -196,6 +209,52 @@ export class ChatOrchestrator {
       messages: response.messages,
       skillCalls: response.skillCalls
     };
+  }
+
+  /**
+   * Builds dynamic Vault session context payload containing folder structures, tags, and map.
+   */
+  private async buildVaultSessionContextPayload(): Promise<string> {
+    const allFiles = this.platform.getMarkdownFiles();
+    const totalFiles = allFiles.length;
+
+    const folders = new Set<string>();
+    allFiles.forEach(file => {
+      if (file.parent && file.parent.path !== '/') {
+        folders.add(file.parent.path);
+      }
+    });
+    const topFolders = Array.from(folders).slice(0, 5).join(', ');
+
+    const tagCounts = new Map<string, number>();
+    allFiles.forEach(file => {
+      const cache = this.platform.getFileCache(file);
+      const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
+      const frontmatterTags = cache?.frontmatter?.tags || [];
+      [...fileTags, ...frontmatterTags].forEach(tag => {
+        const tagStr = typeof tag === 'string' ? tag : String(tag);
+        tagCounts.set(tagStr, (tagCounts.get(tagStr) || 0) + 1);
+      });
+    });
+    const topTags = Array.from(tagCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([tag]) => tag)
+      .join(', ');
+
+    const vaultHierarchy = this.buildSemanticDirectoryTree(allFiles);
+    const vaultMap = await this.getVaultMap();
+
+    return `[Vault Session Context]
+- Total documents: ${totalFiles}
+- Top Folders: ${topFolders || 'None'}
+- Top Tags: ${topTags || 'None'}
+
+Semantic Directory Hierarchy:
+${vaultHierarchy}
+
+User-Defined Knowledge Map:
+${vaultMap}`;
   }
 
   /**
@@ -281,40 +340,6 @@ export class ChatOrchestrator {
    * Build system prompt with vault overview and skill information
    */
   private async buildSystemPrompt(): Promise<string> {
-    // Collect vault statistics
-    const allFiles = this.platform.getMarkdownFiles();
-    const totalFiles = allFiles.length;
-
-    // Get folder list (deduplicated, sorted) - kept for backwards compatibility
-    const folders = new Set<string>();
-    allFiles.forEach(file => {
-      if (file.parent && file.parent.path !== '/') {
-        folders.add(file.parent.path);
-      }
-    });
-    const topFolders = Array.from(folders).slice(0, 5).join(', ');
-
-    // Get common tags (from metadata cache) - kept for backwards compatibility
-    const tagCounts = new Map<string, number>();
-    allFiles.forEach(file => {
-      const cache = this.platform.getFileCache(file);
-      const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
-      const frontmatterTags = cache?.frontmatter?.tags || [];
-      [...fileTags, ...frontmatterTags].forEach(tag => {
-        const tagStr = typeof tag === 'string' ? tag : String(tag);
-        tagCounts.set(tagStr, (tagCounts.get(tagStr) || 0) + 1);
-      });
-    });
-    const topTags = Array.from(tagCounts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([tag]) => tag)
-      .join(', ');
-
-    // Generate Stage 4 dynamic semantic structures
-    const vaultHierarchy = this.buildSemanticDirectoryTree(allFiles);
-    const vaultMap = await this.getVaultMap();
-
     // Use skill invocation strategy to prepare system prompt content
     const skillContent = this.skillInvocationContext.prepareSystemPrompt(this.skillRegistry);
 
@@ -322,13 +347,13 @@ export class ChatOrchestrator {
     try {
       const userPreferences = await this.getUserPreferences();
       return await this.promptLoader.loadPrompt(PROMPT_PATHS.SYSTEM_PROMPT, {
-        [TEMPLATE_VARS.TOTAL_FILES]: totalFiles.toString(),
-        [TEMPLATE_VARS.TOP_FOLDERS]: topFolders || 'None',
-        [TEMPLATE_VARS.TOP_TAGS]: topTags || 'None',
+        [TEMPLATE_VARS.TOTAL_FILES]: "(Refer to the Vault Session Context in the message history)",
+        [TEMPLATE_VARS.TOP_FOLDERS]: "(Refer to the Vault Session Context in the message history)",
+        [TEMPLATE_VARS.TOP_TAGS]: "(Refer to the Vault Session Context in the message history)",
         [TEMPLATE_VARS.SKILL_CONTENT]: skillContent,
         [TEMPLATE_VARS.USER_PREFERENCES]: userPreferences,
-        [(TEMPLATE_VARS as any).VAULT_HIERARCHY || 'vaultHierarchy']: vaultHierarchy,
-        [(TEMPLATE_VARS as any).VAULT_MAP || 'vaultMap']: vaultMap
+        [(TEMPLATE_VARS as any).VAULT_HIERARCHY || 'vaultHierarchy']: "(Refer to the Vault Session Context in the message history)",
+        [(TEMPLATE_VARS as any).VAULT_MAP || 'vaultMap']: "(Refer to the Vault Session Context in the message history)"
       });
     } catch (error) {
       console.error('[ChatOrchestrator] Error building system prompt, using inline fallback:', error);
@@ -353,19 +378,19 @@ OBSIDIAN SYNTAX CHEAT SHEET:
 - Tags: Use \`#nested/tag\` or \`#tag-name\` for hierarchical categorization.
 - Block References: Reference paragraphs by appending \`^block-id\` to the block and linking via \`![[Note#^block-id]]\`.
 
-USER-SPECIFIC CUSTOM PREFERENCES & STYLE (CRITICAL):
-${userPreferences}
-
-Use your skills proactively to help the user manage their knowledge base.
-
-VAULT OVERVIEW & STRUCTURE:
-- Total documents: ${totalFiles}
-
-SEMANTIC DIRECTORY HIERARCHY:
-${vaultHierarchy}
-
-USER-DEFINED KNOWLEDGE MAP:
-${vaultMap}`;
+    USER-SPECIFIC CUSTOM PREFERENCES & STYLE (CRITICAL):
+    ${userPreferences}
+    
+    Use your skills proactively to help the user manage their knowledge base.
+    
+    VAULT OVERVIEW & STRUCTURE:
+    - Total documents: (Refer to the Vault Session Context in the message history)
+    
+    SEMANTIC DIRECTORY HIERARCHY:
+    (Refer to the Vault Session Context in the message history)
+    
+    USER-DEFINED KNOWLEDGE MAP:
+    (Refer to the Vault Session Context in the message history)`;
     }
   }
 

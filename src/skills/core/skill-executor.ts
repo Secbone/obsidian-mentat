@@ -23,6 +23,7 @@ export interface ExecutionOptions {
   dryRun?: boolean;           // If true, validate but don't execute
   timeout?: number;            // Execution timeout in ms
   skipConfirmation?: boolean;  // Skip user confirmation even if required
+  abortSignal?: AbortSignal;   // Abort signal for execution cancellation
 }
 
 /**
@@ -139,7 +140,8 @@ export class SkillExecutor {
       const result = await this.executeWithTimeout(
         skill,
         validatedInput,
-        timeoutMs
+        timeoutMs,
+        options
       );
 
       // Update call record
@@ -301,16 +303,37 @@ export class SkillExecutor {
    * Execute skill with timeout
    */
   private async executeWithTimeout(
-    skill: SkillDefinition,
+    skill: any,
     input: any,
-    timeoutMs: number
+    timeoutMs: number,
+    options: ExecutionOptions = {}
   ): Promise<SkillResult> {
-    return Promise.race<SkillResult>([
-      skill.execute(input),
+    const promises: Promise<SkillResult>[] = [
+      skill.execute(input)
+    ];
+
+    if (options.abortSignal) {
+      if (options.abortSignal.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+      promises.push(
+        new Promise<SkillResult>((_, reject) => {
+          const onAbort = () => {
+            options.abortSignal?.removeEventListener('abort', onAbort);
+            reject(new DOMException('The user aborted a request.', 'AbortError'));
+          };
+          options.abortSignal?.addEventListener('abort', onAbort);
+        })
+      );
+    }
+
+    promises.push(
       new Promise<SkillResult>((_, reject) =>
         setTimeout(() => reject(new Error('Skill execution timeout')), timeoutMs)
       )
-    ]);
+    );
+
+    return Promise.race<SkillResult>(promises);
   }
 
   /**

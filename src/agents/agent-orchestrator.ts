@@ -31,6 +31,9 @@ export class AgentOrchestrator {
         throw new Error('Circular dependency detected or no tasks ready');
       }
 
+      // Create a local AbortController for this tier execution
+      const tierAbortController = new AbortController();
+
       // Execute ready tasks in parallel in this tier and yield events concurrently
       const activeStreams = readyTasks.map(task => {
         const agent = this.agentManager.getAgent(task.agentId);
@@ -45,10 +48,28 @@ export class AgentOrchestrator {
           results
         );
 
+        // Link abort signals: task context abortSignal OR tierAbortController
+        let linkedSignal: AbortSignal;
+        if (task.context.abortSignal) {
+          const controller = new AbortController();
+          const onParentAbort = () => controller.abort();
+          const onTierAbort = () => controller.abort();
+          task.context.abortSignal.addEventListener('abort', onParentAbort);
+          tierAbortController.signal.addEventListener('abort', onTierAbort);
+          linkedSignal = controller.signal;
+        } else {
+          linkedSignal = tierAbortController.signal;
+        }
+
+        const taskContextWithSignal = {
+          ...enrichedContext,
+          abortSignal: linkedSignal
+        };
+
         return {
           id: task.id,
-          context: enrichedContext,
-          stream: agent.execute(task.prompt, enrichedContext)
+          context: taskContextWithSignal,
+          stream: agent.execute(task.prompt, taskContextWithSignal)
         };
       });
 
@@ -79,6 +100,8 @@ export class AgentOrchestrator {
           }
         } catch (err) {
           hasError = err;
+          // Abort all other tasks in this tier immediately on error to prevent resource leaks
+          tierAbortController.abort();
         } finally {
           activeTaskCount--;
           if (resolveNextEvent) {
@@ -89,18 +112,23 @@ export class AgentOrchestrator {
       });
 
       // Yield events as they are pushed to the queue
-      while (activeTaskCount > 0 || eventQueue.length > 0) {
-        if (hasError) {
-          throw hasError;
+      try {
+        while (activeTaskCount > 0 || eventQueue.length > 0) {
+          if (hasError) {
+            throw hasError;
+          }
+          if (eventQueue.length === 0) {
+            await new Promise<void>((resolve) => {
+              resolveNextEvent = resolve;
+            });
+          }
+          while (eventQueue.length > 0) {
+            yield eventQueue.shift()!;
+          }
         }
-        if (eventQueue.length === 0) {
-          await new Promise<void>((resolve) => {
-            resolveNextEvent = resolve;
-          });
-        }
-        while (eventQueue.length > 0) {
-          yield eventQueue.shift()!;
-        }
+      } catch (err) {
+        tierAbortController.abort();
+        throw err;
       }
 
       if (hasError) {
@@ -131,6 +159,10 @@ export class AgentOrchestrator {
     let finalResponse: AgentResponse | null = null;
 
     for (const agentId of agentIds) {
+      if (currentContext.abortSignal?.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+
       const agent = this.agentManager.getAgent(agentId);
       if (!agent) {
         throw new Error(`Agent not found: ${agentId}`);
@@ -148,15 +180,25 @@ export class AgentOrchestrator {
       const response = current.value as AgentResponse;
 
       // Clean context: filter out intermediate Tool Call messages to prevent context window bloat
-      const cleanedMessages = response.messages.filter(msg => {
-        if (msg.role === 'tool' || msg.role === 'function') {
-          return false;
-        }
-        if (msg.role === 'assistant' && (!msg.content && msg.tool_calls)) {
-          return false;
-        }
-        return true;
-      });
+      // And safely strip tool_calls from kept assistant messages to maintain API protocol validity
+      const cleanedMessages = response.messages
+        .filter(msg => {
+          if (msg.role === 'tool' || msg.role === 'function') {
+            return false;
+          }
+          if (msg.role === 'assistant' && (!msg.content && msg.tool_calls)) {
+            return false;
+          }
+          return true;
+        })
+        .map(msg => {
+          if (msg.role === 'assistant' && msg.tool_calls) {
+            const copy = { ...msg };
+            delete copy.tool_calls;
+            return copy;
+          }
+          return msg;
+        });
 
       currentContext = {
         ...currentContext,
@@ -171,6 +213,7 @@ export class AgentOrchestrator {
 
   /**
    * Enrich context with dependency results
+   * Simulates dependency outputs as Tool Call responses so they do not impersonate assistant role
    */
   private enrichContext(
     baseContext: AgentContext,
@@ -182,9 +225,31 @@ export class AgentOrchestrator {
     for (const depId of dependencies) {
       const depResult = results.get(depId);
       if (depResult) {
+        const mockCallId = `dep-${depId}-${Date.now()}`;
+        
+        // Push mock assistant tool call message
         enrichedMessages.push({
           role: 'assistant',
-          content: `[Dependency ${depId}]: ${depResult.content}`,
+          content: null as any,
+          timestamp: Date.now(),
+          tool_calls: [
+            {
+              id: mockCallId,
+              type: 'function',
+              function: {
+                name: 'get_task_result',
+                arguments: JSON.stringify({ task_id: depId })
+              }
+            } as any
+          ]
+        });
+
+        // Push corresponding tool response message containing the dependency content
+        enrichedMessages.push({
+          role: 'tool',
+          name: 'get_task_result',
+          tool_call_id: mockCallId,
+          content: depResult.content,
           timestamp: Date.now()
         });
       }

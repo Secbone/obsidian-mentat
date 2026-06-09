@@ -43,6 +43,7 @@ export class AgentManager {
 
   /**
    * Set the current active agent
+   * @deprecated Use stateless execute(agentId, prompt, context) instead.
    */
   setCurrentAgent(agentId: string): void {
     const agent = this.agents.get(agentId);
@@ -54,6 +55,7 @@ export class AgentManager {
 
   /**
    * Get the current active agent
+   * @deprecated Use stateless execute(agentId, prompt, context) instead.
    */
   getCurrentAgent(): BaseAgent | null {
     return this.currentAgent;
@@ -61,6 +63,7 @@ export class AgentManager {
 
   /**
    * Execute with the current agent
+   * @deprecated Use stateless execute(agentId, prompt, context) instead.
    */
   async *executeWithCurrentAgent(
     prompt: string,
@@ -70,5 +73,20 @@ export class AgentManager {
       throw new Error('No current agent set');
     }
     return yield* this.currentAgent.execute(prompt, context);
+  }
+
+  /**
+   * Execute with a specific agent by ID (Stateless)
+   */
+  async *execute(
+    agentId: string,
+    prompt: string,
+    context: AgentContext
+  ): AsyncGenerator<AgentEvent, AgentResponse, any> {
+    const agent = this.agents.get(agentId);
+    if (!agent) {
+      throw new Error(`Agent not found: ${agentId}`);
+    }
+    return yield* agent.execute(prompt, context);
   }
 }

@@ -1,5 +1,6 @@
 // BaseAgent - Base class for all agents with skill support
 
+import JSON5 from 'json5';
 import { AIProvider, ChatMessage, ToolCall, GenerateResponse } from '../types';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
@@ -131,10 +132,23 @@ export class BaseAgent {
     const maxCycleLength = context.metadata?.maxCycleLength ?? 4;
     const minRepeats = context.metadata?.minRepeats ?? 4;
 
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: prompt,
+      timestamp: Date.now()
+    };
+
+    if (context.metadata?.sessionContextPayload) {
+      userMessage.metadata = {
+        ...userMessage.metadata,
+        sessionContextPayload: context.metadata.sessionContextPayload
+      };
+    }
+
     let state: AgentState = {
       messages: [
         ...context.messages,
-        { role: 'user', content: prompt, timestamp: Date.now() }
+        userMessage
       ],
       systemPrompt,
       maxTurns: Math.max(1, Math.min(99, context.metadata?.maxTurns ?? this.config.maxTurns ?? 20)),
@@ -164,7 +178,7 @@ export class BaseAgent {
           // 产生一个人类引导的事件，推送给前端 UI 记录
           yield { type: 'steer', message: steerText };
 
-          // 强行将这一步的人类干预追加到大模型当前轮的 context messages 中！
+          // 强行将这一步的人类干预追加到大模型当前轮 of context messages 中！
           state.messages.push({
             role: 'user',
             content: `[HUMAN DYNAMIC INTERVENTION]: ${steerText}`,
@@ -178,7 +192,19 @@ export class BaseAgent {
       // Node A: Stream Model
       let result: GenerateResponse;
       try {
-        result = yield* this.streamModel(state.messages, {
+        const modelMessages = state.messages.map((m, idx) => {
+          const isFirstUser = idx === state.messages.findIndex(msg => msg.role === 'user');
+          const payload = m.metadata?.sessionContextPayload || context.metadata?.sessionContextPayload;
+          if (isFirstUser && payload) {
+            return {
+              ...m,
+              content: `${payload}\n\n[User Query]\n${m.content}`
+            };
+          }
+          return m;
+        });
+
+        result = yield* this.streamModel(modelMessages, {
           temperature: this.config.temperature || 0.7,
           systemPrompt: state.systemPrompt,
           skills: state.skills,
@@ -424,7 +450,7 @@ export class BaseAgent {
               const { namespace, name } = this.skillRegistry.parseName(skillName);
 
               // Execute the skill
-              const runResult = await this.skillExecutor.execute(namespace, name, args.params);
+              const runResult = await this.skillExecutor.execute(namespace, name, args.params, { abortSignal: context.abortSignal });
 
               if (runResult.success) {
                 yield { type: 'skill_success', name: `invoke:${skillName}`, result: runResult.data };
@@ -435,7 +461,7 @@ export class BaseAgent {
                   tool_call_id: toolCall.id,
                   name: toolCall.name
                 });
-                this.handleSubagentMessages(skillName, runResult, newMessages, toolCall.id);
+                newMessages.push(...this.getSubagentMessages(skillName, runResult, toolCall.id));
               } else {
                 yield { type: 'status', message: `⚠️ 工具 [${skillName}] 运行失败，正在自动引导纠错...` };
                 yield { type: 'skill_error', name: `invoke:${skillName}`, error: runResult.error || '执行失败' };
@@ -518,7 +544,7 @@ export class BaseAgent {
           yield { type: 'skill_call', name: toolCall.name, params: toolCall.arguments };
 
           try {
-            const runResult = await this.skillExecutor.executeFromToolCall(toolCall, { skipConfirmation: true });
+            const runResult = await this.skillExecutor.executeFromToolCall(toolCall, { skipConfirmation: true, abortSignal: context.abortSignal });
             
             if (runResult.success) {
               yield { type: 'skill_success', name: toolCall.name, result: runResult.data };
@@ -529,7 +555,7 @@ export class BaseAgent {
                 tool_call_id: toolCall.id,
                 name: toolCall.name
               });
-              this.handleSubagentMessages(toolCall.name, runResult, newMessages, toolCall.id);
+              newMessages.push(...this.getSubagentMessages(toolCall.name, runResult, toolCall.id));
             } else {
               yield { type: 'status', message: `⚠️ 工具 [${toolCall.name}] 运行失败，正在自动引导纠错...` };
               yield { type: 'skill_error', name: toolCall.name, error: runResult.error || '执行失败' };
@@ -597,6 +623,7 @@ export class BaseAgent {
     const isLimitReached = state.turnCount >= state.maxTurns;
     if (isLimitReached) {
       console.warn('[BaseAgent] Reached maximum turns limit');
+      yield { type: 'error', message: '⚠️ 智能体执行已达到最大轮数限制，已被强制熔断。' };
     }
 
     yield { type: 'status', message: '任务完成！' };
@@ -623,6 +650,7 @@ export class BaseAgent {
       messages: state.messages,
       skillCalls: state.skillCalls,
       metadata: {
+        status: isLimitReached ? 'max_turns_exceeded' : 'completed',
         turns: state.turnCount,
         durationMs: Date.now() - startTime,
         usage: {
@@ -837,6 +865,23 @@ export class BaseAgent {
 
 
   /**
+   * Preprocesses JSON string literals to heal unescaped Windows paths.
+   */
+  private healWindowsPaths(jsonStr: string): string {
+    return jsonStr.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match, p1) => {
+      const looksLikeWindowsPath = /^[a-zA-Z]:\\/.test(p1) || 
+                                   /^[a-zA-Z]:\w/.test(p1) ||
+                                   /^\\[a-zA-Z0-9_.-]+\\[a-zA-Z0-9_.-]+/.test(p1);
+      if (looksLikeWindowsPath) {
+        const unescaped = p1.replace(/\\\\/g, '\\');
+        const reEscaped = unescaped.replace(/\\/g, '\\\\');
+        return `"${reEscaped}"`;
+      }
+      return match;
+    });
+  }
+
+  /**
    * Safely parse tool call arguments
    */
   private safeParseToolArguments(toolCall: ToolCall): Record<string, any> {
@@ -845,15 +890,18 @@ export class BaseAgent {
     }
 
     const argsString = toolCall.arguments as string;
+    const preHealedString = this.healWindowsPaths ? this.healWindowsPaths(argsString) : argsString;
 
     try {
-      return JSON.parse(argsString);
+      // Try strict JSON.parse first to detect any unescaped backslashes (like LaTeX) and trigger healing
+      return JSON.parse(preHealedString);
     } catch (error: any) {
       console.warn(`[BaseAgent] JSON strict parse failed for ${toolCall.name}, trying escape-healing...`);
 
       try {
-        const healedArgsString = this.escapeLoneBackslashes(argsString);
-        const parsed = JSON.parse(healedArgsString);
+        const healedArgsString = this.escapeLoneBackslashes(preHealedString);
+        // Use JSON5 as the lenient fallback parser for self-healing
+        const parsed = JSON5.parse(healedArgsString);
         
         console.log(`[BaseAgent] JSON parse healed successfully for ${toolCall.name}`);
         this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Healed (JSON Preprocessor)', healedArgsString);
@@ -862,7 +910,7 @@ export class BaseAgent {
       } catch (healingError: any) {
         console.error(`[BaseAgent] JSON escape-healing failed for ${toolCall.name}:`, healingError.message);
         
-        // Log final failure strictly for diagnostics
+        // Log final failure strictly for diagnostics (using Failed (Strict Parsing) for compatibility)
         this.logDiagnosticIncident(toolCall.name, argsString, error.message, 'Failed (Strict Parsing)');
 
         throw new Error(
@@ -926,11 +974,11 @@ export class BaseAgent {
   /**
    * Helper to extract subagent messages and tag them with subagent metadata
    */
-  private handleSubagentMessages(skillName: string, runResult: any, targetArray: ChatMessage[], toolCallId?: string): void {
+  private getSubagentMessages(skillName: string, runResult: any, toolCallId?: string): ChatMessage[] {
     const isDelegate = skillName === 'obsidian:delegate_task' || skillName === 'obsidian:spawn_subagent' || 
                        skillName === 'delegate_task' || skillName === 'spawn_subagent';
     if (isDelegate && runResult.metadata?.subagentMessages) {
-      const subMessages = runResult.metadata.subagentMessages.map((m: any) => ({
+      return runResult.metadata.subagentMessages.map((m: any) => ({
         ...m,
         metadata: {
           ...m.metadata,
@@ -939,7 +987,7 @@ export class BaseAgent {
           parentToolCallId: toolCallId
         }
       }));
-      targetArray.push(...subMessages);
     }
+    return [];
   }
 }
