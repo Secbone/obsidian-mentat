@@ -409,24 +409,25 @@ describe('Context', () => {
       expect(result[0].content).toContain('[truncated]');
     });
 
-    it('should merge consecutive tool messages in LLM format', () => {
+    it('should preserve individual tool messages in LLM format (no merging)', () => {
       const messagesWithManyTools = [
         new Message({ role: 'user', content: 'Question' }),
-        new Message({ role: 'tool', content: 'Tool 1', name: 'tool1' }),
-        new Message({ role: 'tool', content: 'Tool 2', name: 'tool2' }),
-        new Message({ role: 'tool', content: 'Tool 3', name: 'tool3' }),
+        new Message({ role: 'tool', content: 'Tool 1', name: 'tool1', tool_call_id: 'tc1' }),
+        new Message({ role: 'tool', content: 'Tool 2', name: 'tool2', tool_call_id: 'tc2' }),
+        new Message({ role: 'tool', content: 'Tool 3', name: 'tool3', tool_call_id: 'tc3' }),
         new Message({ role: 'assistant', content: 'Answer' })
       ];
       const context = new Context(messagesWithManyTools);
       const result = context.getContext('llm');
 
-      // Should merge 3 consecutive tool messages into 1
-      expect(result).toHaveLength(3); // user, merged_tools, assistant
+      // Should keep all tool messages individually (not merge)
+      expect(result).toHaveLength(5); // user, tool1, tool2, tool3, assistant
       expect(result[1].role).toBe('tool');
-      expect(result[1].name).toBe('merged_tools');
-      expect(result[1].content).toContain('Tool 1');
-      expect(result[1].content).toContain('Tool 2');
-      expect(result[1].content).toContain('Tool 3');
+      expect(result[1].tool_call_id).toBe('tc1');
+      expect(result[2].role).toBe('tool');
+      expect(result[2].tool_call_id).toBe('tc2');
+      expect(result[3].role).toBe('tool');
+      expect(result[3].tool_call_id).toBe('tc3');
     });
 
     it('should not merge 1-2 consecutive tool messages', () => {
@@ -553,29 +554,32 @@ describe('Context', () => {
       }
     });
 
-    it('should summarize tool results before merging consecutive tools', () => {
+    it('should summarize old tool results individually (no merging)', () => {
       const messages = [
         new Message({ role: 'user', content: 'Question' }),
-        new Message({ role: 'tool', content: 'a'.repeat(300), name: 'old1' }),
-        new Message({ role: 'tool', content: 'b'.repeat(300), name: 'old2' }),
-        new Message({ role: 'tool', content: 'c'.repeat(300), name: 'old3' }),
-        new Message({ role: 'tool', content: 'd'.repeat(100), name: 'recent1' }),
-        new Message({ role: 'tool', content: 'e'.repeat(100), name: 'recent2' }),
+        new Message({ role: 'tool', content: 'a'.repeat(300), name: 'old1', tool_call_id: 'tc1' }),
+        new Message({ role: 'tool', content: 'b'.repeat(300), name: 'old2', tool_call_id: 'tc2' }),
+        new Message({ role: 'tool', content: 'c'.repeat(300), name: 'old3', tool_call_id: 'tc3' }),
+        new Message({ role: 'tool', content: 'd'.repeat(100), name: 'recent1', tool_call_id: 'tc4' }),
+        new Message({ role: 'tool', content: 'e'.repeat(100), name: 'recent2', tool_call_id: 'tc5' }),
         new Message({ role: 'assistant', content: 'Answer' })
       ];
       const context = new Context(messages);
       const result = context.getContext('llm', { keepRecentToolResults: 2 });
 
-      // Should have 3 messages: user, merged_tools, assistant
-      expect(result).toHaveLength(3);
-      expect(result[1].role).toBe('tool');
-      expect(result[1].name).toBe('merged_tools');
+      // Should have 7 messages: user, 5 individual tool messages, assistant
+      expect(result).toHaveLength(7);
 
-      // Merged content should contain summarized old results and full recent results
-      const mergedContent = result[1].content;
-      expect(mergedContent).toContain('[summarized]');
-      expect(mergedContent).toContain('d'.repeat(100));
-      expect(mergedContent).toContain('e'.repeat(100));
+      // Old tool results (first 3) should be summarized
+      const toolResults = result.filter(m => m.role === 'tool');
+      expect(toolResults).toHaveLength(5);
+      for (let i = 0; i < 3; i++) {
+        expect(toolResults[i].content).toContain('[summarized]');
+        expect(toolResults[i].tool_call_id).toBeDefined();
+      }
+      // Recent tool results (last 2) should be preserved
+      expect(toolResults[3].content).toBe('d'.repeat(100));
+      expect(toolResults[4].content).toBe('e'.repeat(100));
     });
 
     it('should handle mixed tool and non-tool messages correctly', () => {
