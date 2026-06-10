@@ -1,19 +1,36 @@
 name: Release Obsidian Plugin
 
 on:
-  push:
-    tags:
-      - '[0-9]*'
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    types:
+      - completed
 
 jobs:
   build:
+    # Only run when CI passed and was triggered by a version tag (starts with digit)
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      contains(github.event.workflow_run.head_branch, '.')
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
+      - name: Validate Tag Format
+        run: |
+          TAG="${{ github.event.workflow_run.head_branch }}"
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "⏭️ Skipping: '$TAG' is not a version tag."
+            exit 1
+          fi
+          echo "✅ Version tag detected: $TAG"
+
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -23,9 +40,6 @@ jobs:
 
       - name: Install Dependencies
         run: npm ci
-
-      - name: Run Tests
-        run: npm run test:run
 
       - name: Build Plugin
         run: npm run build
@@ -46,18 +60,20 @@ jobs:
           fi
           echo "✅ All release assets are present."
 
-      - name: Extract Version from Tag
+      - name: Extract Version from Manifest
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Validate Tag Matches Manifest Version
         run: |
-          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
-          TAG_VERSION=${{ steps.get_version.outputs.VERSION }}
+          MANIFEST_VERSION=${{ steps.get_version.outputs.VERSION }}
+          TAG_VERSION=${{ github.event.workflow_run.head_branch }}
           if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
             echo "❌ Version mismatch!"
             echo "   manifest.json version: $MANIFEST_VERSION"
-            echo "   Git tag version: $TAG_VERSION"
+            echo "   Tag version: $TAG_VERSION"
             exit 1
           fi
           echo "✅ Version matches perfectly ($TAG_VERSION)."
@@ -66,6 +82,7 @@ jobs:
         id: create_release
         uses: ncipollo/release-action@v1
         with:
+          tag: ${{ github.event.workflow_run.head_branch }}
           allowUpdates: true
           artifacts: 'main.js,manifest.json,styles.css'
           body: |

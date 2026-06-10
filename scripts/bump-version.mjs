@@ -38,7 +38,19 @@ try {
   console.warn('⚠️ Warning: Failed to sync package-lock.json:', e.message);
 }
 
-// 4. Git commit and tag
+// 4. Run tests before committing (gate: fail early, don't commit broken code)
+try {
+  console.log('\n🧪 Running tests before committing...');
+  execSync('npm run test:run', { stdio: 'inherit' });
+  console.log('✅ All tests passed.');
+} catch (e) {
+  console.error('❌ Tests failed! Aborting version bump. Please fix tests before releasing.');
+  // Revert version file changes
+  execSync('git checkout -- package.json manifest.json', { stdio: 'ignore' });
+  process.exit(1);
+}
+
+// 5. Git commit and tag
 try {
   console.log('🔄 Staging version files in Git...');
   execSync(`git add package.json manifest.json package-lock.json`, { stdio: 'inherit' });
