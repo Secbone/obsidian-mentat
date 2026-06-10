@@ -84,6 +84,14 @@ async function fetchWithJina(url: string, timeout: number): Promise<FetchResult>
       throw: false
     });
 
+    if (!response) {
+      return {
+        success: false,
+        error: 'Jina AI error: No response received',
+        isTimeout: false
+      };
+    }
+
     if (response.status >= 200 && response.status < 300) {
       // Check if Jina returned a warning/error page
       const content = response.text;
@@ -155,6 +163,14 @@ async function fetchWithBrowserless(url: string, apiKey: string, timeout: number
       throw: false
     });
 
+    if (!response) {
+      return {
+        success: false,
+        error: 'Browserless error: No response received',
+        isTimeout: false
+      };
+    }
+
     if (response.status >= 200 && response.status < 300) {
       return {
         success: true,
@@ -205,6 +221,14 @@ async function fetchDirect(input: Input): Promise<FetchResult> {
       body: input.body,
       throw: false
     });
+
+    if (!response) {
+      return {
+        success: false,
+        error: 'Direct fetch error: No response received',
+        isTimeout: false
+      };
+    }
 
     if (response.status >= 200 && response.status < 300) {
       return {

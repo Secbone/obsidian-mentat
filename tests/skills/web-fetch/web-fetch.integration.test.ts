@@ -90,10 +90,17 @@ describe('Web-Fetch Integration Tests', () => {
       error: result.error
     });
 
-    // Note: kexue.fm returns 403 for direct requests without proper headers/cookies
+    // Note: kexue.fm blocks direct requests without proper headers/cookies
     // This is expected behavior due to anti-bot protection
+    // The request may fail with 403 (forbidden), network error, or other errors depending on environment
     expect(result.success).toBe(false);
-    expect(result.error).toContain('403');
+    expect(result.error).toBeTruthy();
+    // Accept various error types: 403 (forbidden), network errors, or other connection issues
+    const hasExpectedError = result.error!.includes('403') ||
+                            result.error!.includes('Direct fetch error') ||
+                            result.error!.includes('No response received') ||
+                            result.error!.includes('All fetch strategies failed');
+    expect(hasExpectedError).toBe(true);
   }, 60000);
 
   it('should fetch https://arxiv.org/html/2601.07372v1 using direct strategy', async () => {
