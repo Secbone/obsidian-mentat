@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la tsconfig*.json 2>&1 | head -20)",
+      "Bash(gh run:*)",
+      "Bash(cat /Users/zhouweipeng/.qoder/tmp/-Users-zhouweipeng-Code-obsidian-mentat/tool-outputs/session-2275c5e0-1bc5-4352-8388-7b02646ca386/bash_call_ab0624506c55458d9b0d1355.txt | grep -A 20 -B 5 \"error\" | head -100)",
+      "Bash(tail:*)",
+      "Bash(npm run test:run 2>&1 | tail -100)",
+      "Bash(npm run:*)"
+    ]
+  }
+}

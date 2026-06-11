@@ -17,29 +17,29 @@ export class SettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h1', { text: 'Mentat Settings' });
+    new Setting(containerEl).setName('Mentat Settings').setHeading();
 
     // Render tab bar
     const tabBar = containerEl.createDiv({ cls: 'setting-tab-bar' });
-    tabBar.style.display = 'flex';
-    tabBar.style.gap = '10px';
-    tabBar.style.marginBottom = '20px';
-    tabBar.style.borderBottom = '1px solid var(--border-color)';
-    tabBar.style.paddingBottom = '10px';
+    tabBar.addClass('mentat-setting-tab-bar');
+    
+    
+    
+    
 
     const generalTabButton = tabBar.createEl('button', { text: 'General Configuration' });
     const skillsTabButton = tabBar.createEl('button', { text: 'Skills & Tools Manager' });
 
     // Style buttons based on active tab
     const activeStyle = (btn: HTMLButtonElement) => {
-      btn.style.backgroundColor = 'var(--interactive-accent)';
-      btn.style.color = 'var(--text-on-accent)';
-      btn.style.fontWeight = 'bold';
+      btn.addClass('mentat-tab-active'); btn.removeClass('mentat-tab-inactive');
+      
+      
     };
     const inactiveStyle = (btn: HTMLButtonElement) => {
-      btn.style.backgroundColor = 'var(--button-background)';
-      btn.style.color = 'var(--text-normal)';
-      btn.style.fontWeight = 'normal';
+      btn.addClass('mentat-tab-inactive'); btn.removeClass('mentat-tab-active');
+      
+      
     };
 
     if (this.activeTab === 'general') {
@@ -91,7 +91,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   displayAIProvidersSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h2', { text: 'AI Providers' });
+    new Setting(containerEl).setName('AI Providers').setHeading();
 
     containerEl.createEl('p', {
       text: 'Configure AI providers for different tasks. Supports OpenAI-compatible APIs, Anthropic, and Ollama.',
@@ -132,7 +132,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   displayTaskRoutingSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h2', { text: 'Task Routing' });
+    new Setting(containerEl).setName('Task Routing').setHeading();
 
     containerEl.createEl('p', {
       text: 'Assign different AI providers to specific task types.',
@@ -169,7 +169,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   displayIntegrationSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h2', { text: 'Integrations' });
+    new Setting(containerEl).setName('Integrations').setHeading();
 
     // OpenCode Integration
     new Setting(containerEl)
@@ -244,7 +244,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   displayUserPreferencesSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h2', { text: 'User Prompt Preferences' });
+    new Setting(containerEl).setName('User Prompt Preferences').setHeading();
 
     containerEl.createEl('p', {
       text: 'Customize writing styles, formatting rules, and notes compared to your manual style. These preferences are stored directly in your vault as a markdown note, providing a spacious and customizable editing experience. Changes are injected dynamically into the AI system prompt.',
@@ -409,7 +409,7 @@ ${folderGuidelines}
   }
 
   displayFeatureTogglesSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h2', { text: 'Features' });
+    new Setting(containerEl).setName('Features').setHeading();
 
     const features = [
       { key: 'autoClassificationEnabled', name: 'Auto Classification', desc: 'Automatically classify and tag notes' },
@@ -443,7 +443,7 @@ ${folderGuidelines}
   }
 
   displayPerformanceSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h2', { text: 'Performance' });
+    new Setting(containerEl).setName('Performance').setHeading();
 
     new Setting(containerEl)
       .setName('Indexing Batch Size')
@@ -534,7 +534,7 @@ ${folderGuidelines}
   }
 
   displaySkillsSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h2', { text: 'Skill System & Tools' });
+    new Setting(containerEl).setName('Skill System & Tools').setHeading();
 
     new Setting(containerEl)
       .setName('Skill Invocation Mode')
@@ -593,7 +593,7 @@ ${folderGuidelines}
   }
 
   displaySkillsManagerSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h2', { text: 'Skills & Tools Manager' });
+    new Setting(containerEl).setName('Skills & Tools Manager').setHeading();
     containerEl.createEl('p', {
       text: 'Manage and configure individual capabilities and tools recognized by Mentat.',
       cls: 'setting-item-description'
@@ -608,15 +608,11 @@ ${folderGuidelines}
 
     // Search input
     const searchContainer = containerEl.createDiv();
-    searchContainer.style.marginBottom = '20px';
-    searchContainer.style.display = 'flex';
-    searchContainer.style.gap = '10px';
 
     const searchInput = searchContainer.createEl('input', {
       type: 'text',
       placeholder: 'Search skills (e.g. read_note)...'
     });
-    searchInput.style.flex = '1';
     searchInput.value = this.searchQuery;
     searchInput.addEventListener('input', (e) => {
       this.searchQuery = (e.target as HTMLInputElement).value;
@@ -626,17 +622,12 @@ ${folderGuidelines}
         const skillName = card.dataset.skillName.toLowerCase();
         const description = card.dataset.description.toLowerCase();
         if (skillName.includes(query) || description.includes(query)) {
-          card.style.display = 'block';
         } else {
-          card.style.display = 'none';
         }
       });
     });
 
     const listContainer = containerEl.createDiv({ cls: 'skills-list-container' });
-    listContainer.style.display = 'flex';
-    listContainer.style.flexDirection = 'column';
-    listContainer.style.gap = '15px';
 
     const sortedSkills = [...allSkills].sort((a, b) => {
       const nameA = registry.getFullName(a.namespace, a.name);
@@ -657,42 +648,19 @@ ${folderGuidelines}
       card.dataset.skillName = fullName;
       card.dataset.description = skill.description || '';
       
-      card.style.border = '1px solid var(--border-color)';
-      card.style.borderRadius = '6px';
-      card.style.padding = '15px';
-      card.style.backgroundColor = 'var(--background-primary-alt)';
       
       // 1. Title and Badge
       const header = card.createDiv();
-      header.style.display = 'flex';
-      header.style.justifyContent = 'space-between';
-      header.style.alignItems = 'center';
-      header.style.marginBottom = '10px';
       
       const title = header.createEl('h3', { text: fullName });
-      title.style.margin = '0';
-      title.style.fontSize = '1.1em';
       
       const badge = header.createSpan({ text: skill.namespace.toUpperCase() });
-      badge.style.fontSize = '0.8em';
-      badge.style.padding = '2px 8px';
-      badge.style.borderRadius = '10px';
-      badge.style.backgroundColor = skill.namespace === 'obsidian' ? 'var(--interactive-accent)' : 'var(--background-modifier-border)';
-      badge.style.color = 'var(--text-on-accent)';
       
       // 2. Description
       const desc = card.createDiv({ text: skill.description });
-      desc.style.color = 'var(--text-muted)';
-      desc.style.fontSize = '0.9em';
-      desc.style.marginBottom = '15px';
       
       // 3. Toggles/Controls Row
       const controls = card.createDiv();
-      controls.style.display = 'flex';
-      controls.style.flexWrap = 'wrap';
-      controls.style.gap = '20px';
-      controls.style.paddingTop = '10px';
-      controls.style.borderTop = '1px solid var(--border-color)';
       
       // Toggle 1: Enabled
       const enabledSetting = new Setting(controls)
@@ -710,10 +678,6 @@ ${folderGuidelines}
             this.plugin.settings.skillConfigurations[fullName].enabled = val;
             await this.plugin.saveSettings();
           }));
-      enabledSetting.settingEl.style.border = 'none';
-      enabledSetting.settingEl.style.padding = '0';
-      enabledSetting.settingEl.style.flex = '1';
-      enabledSetting.settingEl.style.minWidth = '150px';
       
       // Toggle 2: Direct Call
       const defaultCore = [
@@ -743,10 +707,6 @@ ${folderGuidelines}
             this.plugin.settings.skillConfigurations[fullName].directCall = val;
             await this.plugin.saveSettings();
           }));
-      directSetting.settingEl.style.border = 'none';
-      directSetting.settingEl.style.padding = '0';
-      directSetting.settingEl.style.flex = '1';
-      directSetting.settingEl.style.minWidth = '150px';
 
       // Toggle 3: Require Confirmation
       const defaultConfirm = !!(skill.metadata as any)?.requiresConfirmation;
@@ -767,10 +727,6 @@ ${folderGuidelines}
             this.plugin.settings.skillConfigurations[fullName].requireConfirmation = val;
             await this.plugin.saveSettings();
           }));
-      confirmSetting.settingEl.style.border = 'none';
-      confirmSetting.settingEl.style.padding = '0';
-      confirmSetting.settingEl.style.flex = '1';
-      confirmSetting.settingEl.style.minWidth = '150px';
     });
   }
 
@@ -785,7 +741,7 @@ ${folderGuidelines}
   }
 
   displayDiagnosticsSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h2', { text: 'Diagnostics & Troubleshooting' });
+    new Setting(containerEl).setName('Diagnostics & Troubleshooting').setHeading();
 
     new Setting(containerEl)
       .setName('Diagnostics Export Folder')
@@ -977,10 +933,6 @@ ${folderGuidelines}
     this.titleEl.setText(modalTitle);
 
     const container = contentEl.createDiv({ cls: 'rebuild-modal-container' });
-    container.style.display = 'flex';
-    container.style.flexDirection = 'column';
-    container.style.gap = '16px';
-    container.style.padding = '5px 0';
 
     if (this.stage === 'confirm') {
       // 1. 确认阶段描述
@@ -992,9 +944,6 @@ ${folderGuidelines}
       // 完全使用 Obsidian 内置原生 Callout 结构，自动适配用户安装的任意第三方主题
       const callout = container.createDiv({ cls: 'callout' });
       callout.setAttribute('data-callout', 'warning');
-      callout.style.margin = '0';
-      callout.style.padding = '12px 16px';
-      callout.style.borderRadius = 'var(--radius-s)';
       
       const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px;' } as any);
       const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' } as any);
@@ -1008,10 +957,6 @@ ${folderGuidelines}
 
       // 按钮区域：利用 Obsidian 原生 modal-button-container 自动排版
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
-      buttonContainer.style.display = 'flex';
-      buttonContainer.style.justifyContent = 'flex-end';
-      buttonContainer.style.gap = '10px';
-      buttonContainer.style.marginTop = '10px';
 
       // 🤖 智能重建按钮 (推荐)
       const aiButton = buttonContainer.createEl('button', {
@@ -1039,10 +984,6 @@ ${folderGuidelines}
 
       // 极细简约自定义进度条设计
       const progressWrapper = container.createDiv();
-      progressWrapper.style.margin = '10px 0';
-      progressWrapper.style.display = 'flex';
-      progressWrapper.style.flexDirection = 'column';
-      progressWrapper.style.gap = '8px';
 
       // 自定义极细进度条 background 槽
       const progressContainer = progressWrapper.createDiv({
@@ -1065,9 +1006,6 @@ ${folderGuidelines}
 
       // 取消重建按钮容器
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
-      buttonContainer.style.display = 'flex';
-      buttonContainer.style.justifyContent = 'flex-end';
-      buttonContainer.style.marginTop = '10px';
 
       const cancelButton = buttonContainer.createEl('button', {
         text: '取消重建',
@@ -1079,9 +1017,6 @@ ${folderGuidelines}
       // 3. 成功阶段
       const callout = container.createDiv({ cls: 'callout' });
       callout.setAttribute('data-callout', 'success');
-      callout.style.margin = '0';
-      callout.style.padding = '12px 16px';
-      callout.style.borderRadius = 'var(--radius-s)';
       
       const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-success);' } as any);
       const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' } as any);
@@ -1092,10 +1027,6 @@ ${folderGuidelines}
       calloutContent.createSpan({ text: 'Mentat 已经成功 analysis 了您的整个知识库，并为您定制了最新的文件夹指南、命名规则和类别工作流。配置指南已保存在您的配置目录中。' });
 
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
-      buttonContainer.style.display = 'flex';
-      buttonContainer.style.justifyContent = 'flex-end';
-      buttonContainer.style.gap = '10px';
-      buttonContainer.style.marginTop = '10px';
 
       // 👁️ 立即查看按钮
       const viewButton = buttonContainer.createEl('button', {
@@ -1117,9 +1048,6 @@ ${folderGuidelines}
       // 4. 失败阶段
       const callout = container.createDiv({ cls: 'callout' });
       callout.setAttribute('data-callout', 'error');
-      callout.style.margin = '0';
-      callout.style.padding = '12px 16px';
-      callout.style.borderRadius = 'var(--radius-s)';
       
       const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-error);' } as any);
       const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' } as any);
@@ -1136,17 +1064,12 @@ ${folderGuidelines}
       errorBox.createSpan({ text: `错误详情：\n${this.errorMsg}` });
 
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
-      buttonContainer.style.display = 'flex';
-      buttonContainer.style.justifyContent = 'flex-end';
-      buttonContainer.style.gap = '10px';
-      buttonContainer.style.marginTop = '10px';
 
       // ⚡ 切换本地重建按钮 (在左侧)
       const localButton = buttonContainer.createEl('button', {
         text: '⚡ 切换本地快速重建',
         cls: 'mod-neutral'
       });
-      localButton.style.marginRight = 'auto'; // 按钮居左对齐
       localButton.addEventListener('click', () => this.runLocalRebuild());
 
       // 关闭按钮

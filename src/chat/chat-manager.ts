@@ -25,7 +25,7 @@ export class ChatManager {
      this.plugin = plugin;
      // Fallback to a safe mock if platform is not yet initialized or present (e.g., in tests)
      const platform = plugin.platform || {
-       getConfigDir: () => '.obsidian',
+       getConfigDir: () => plugin.app?.vault?.configDir || '.obsidian',
        exists: async () => false,
        read: async () => '',
        write: async () => {},

@@ -69,9 +69,6 @@ export default class PersonalAgentPlugin extends Plugin {
 
   async onunload() {
     console.log('Unloading Mentat plugin');
-
-    // Detach chat views
-    this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
   }
 
   private registerCommands(): void {

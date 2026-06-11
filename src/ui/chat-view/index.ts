@@ -1,6 +1,6 @@
 // Chat View - Main sidebar UI component
 
-import { ItemView, WorkspaceLeaf, setIcon, TFile, Notice } from 'obsidian';
+import { sanitizeHTMLToDom, ItemView, WorkspaceLeaf, setIcon, TFile, Notice } from 'obsidian';
 import { DiagnosticsExporter } from '../../diagnostics/diagnostics-exporter';
 import { ChatManager } from '../../chat/chat-manager';
 import { MessageRenderer } from '../message-renderer';
@@ -140,7 +140,6 @@ export class ChatView extends ItemView {
     this.stopButton = actionsContainer.createEl('button', { cls: 'chat-icon-button' });
     setIcon(this.stopButton, 'square');
     this.stopButton.setAttribute('aria-label', 'Stop generation');
-    this.stopButton.style.display = 'none';
 
     // Document panel (between header and messages)
     this.documentPanel = container.createDiv('document-panel');
@@ -322,7 +321,7 @@ export class ChatView extends ItemView {
         const rawText = this.getRawTextContent();
         if (rawText || this.inputArea.querySelectorAll('.mentat-doc-pill').length > 0) {
           e.preventDefault();
-          this.inputArea.innerHTML = '';
+          this.inputArea.empty(); this.inputArea.appendChild(sanitizeHTMLToDom(''));
           this.updateInputInfoBar();
           this.saveDraftDebounced();
           return;
@@ -368,7 +367,7 @@ export class ChatView extends ItemView {
         const fullText = this.getRawTextContent().trim();
         if (fullText.startsWith('/') && !fullText.includes('\n')) {
           const query = fullText.slice(1);
-          const rangeTrigger = document.createRange();
+          const rangeTrigger = activeDocument.createRange();
           rangeTrigger.setStart(this.inputArea.firstChild || node, 0);
           rangeTrigger.setEnd(node, offset);
           this.triggerSuggest('slash', 0, query, this.inputArea.firstChild || node, rangeTrigger);
@@ -414,7 +413,7 @@ export class ChatView extends ItemView {
     if (!text) return;
 
     // Clear input & draft
-    this.inputArea.innerHTML = '';
+    this.inputArea.empty(); this.inputArea.appendChild(sanitizeHTMLToDom(''));
     this.updateInputInfoBar();
     this.clearDraft();
 
@@ -439,7 +438,7 @@ export class ChatView extends ItemView {
       const arg = parts.slice(1).join(' ').trim();
 
       // Clear input
-      this.inputArea.innerHTML = '';
+      this.inputArea.empty(); this.inputArea.appendChild(sanitizeHTMLToDom(''));
       this.updateInputInfoBar();
       this.clearDraft();
 
@@ -502,7 +501,7 @@ export class ChatView extends ItemView {
     this.renderDocumentList();
 
     // Clear input
-    this.inputArea.innerHTML = '';
+    this.inputArea.empty(); this.inputArea.appendChild(sanitizeHTMLToDom(''));
     this.updateInputInfoBar();
     this.clearDraft();
 
@@ -535,7 +534,6 @@ export class ChatView extends ItemView {
     this.sendButton.addClass('is-steer-mode');
     setIcon(this.sendButton, 'lightbulb');
     this.sendButton.setAttribute('aria-label', 'Steer agent');
-    this.stopButton.style.display = 'inline-flex';
 
     try {
       const selectedPaths = this.chatManager.selectedFilesList;
@@ -753,23 +751,9 @@ export class ChatView extends ItemView {
           if (isAbort) {
             const infoDiv = answerContainer.createDiv({ cls: 'chat-info-banner' });
             infoDiv.setText('已终止生成');
-            infoDiv.style.color = 'var(--text-muted)';
-            infoDiv.style.marginTop = '10px';
-            infoDiv.style.padding = '8px';
-            infoDiv.style.borderRadius = '4px';
-            infoDiv.style.backgroundColor = 'var(--background-secondary)';
-            infoDiv.style.fontSize = 'var(--font-smaller)';
-            infoDiv.style.borderLeft = '3px solid var(--text-muted)';
           } else {
             const errorDiv = answerContainer.createDiv({ cls: 'chat-error-banner' });
             errorDiv.setText(`Error: ${errMsg}. Please check your AI provider settings.`);
-            errorDiv.style.color = 'var(--text-error)';
-            errorDiv.style.marginTop = '10px';
-            errorDiv.style.padding = '8px';
-            errorDiv.style.borderRadius = '4px';
-            errorDiv.style.backgroundColor = 'var(--background-modifier-error)';
-            errorDiv.style.fontSize = 'var(--font-smaller)';
-            errorDiv.style.borderLeft = '3px solid var(--text-error)';
           }
         } else {
           this.currentStreamingElement.setText(
@@ -779,7 +763,6 @@ export class ChatView extends ItemView {
       }
     } finally {
       // Hide stop button and reset controller
-      this.stopButton.style.display = 'none';
       this.currentAbortController = null;
 
       // Remove streaming indicator
@@ -810,7 +793,7 @@ export class ChatView extends ItemView {
 
     const wrapper = this.createMessageElement('user');
     const contentEl = wrapper.createDiv('message-content');
-    contentEl.innerHTML = this.messageRenderer.render(content);
+    contentEl.empty(); contentEl.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(content)));
 
     // Add copy button to message
     this.addCopyButtonToMessage(contentEl);
@@ -856,13 +839,13 @@ export class ChatView extends ItemView {
       button.addEventListener('click', async (e) => {
         const target = e.currentTarget as HTMLElement;
         const codeId = target.getAttribute('data-code-id');
-        const codeEl = document.getElementById(codeId!);
+        const codeEl = activeDocument.getElementById(codeId!);
 
         if (codeEl) {
           await navigator.clipboard.writeText(codeEl.textContent || '');
           const originalText = target.textContent;
           target.textContent = 'Copied!';
-          setTimeout(() => {
+          window.setTimeout(() => {
             target.textContent = originalText;
           }, 2000);
         }
@@ -875,7 +858,7 @@ export class ChatView extends ItemView {
       cls: 'message-copy-button',
       attr: { 'aria-label': 'Copy message' }
     });
-    copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+    copyButton.empty(); copyButton.appendChild(sanitizeHTMLToDom(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`));
   }
 
   private setupMessageCopyButtons(wrapper: HTMLElement): void {
@@ -901,10 +884,10 @@ export class ChatView extends ItemView {
 
           // Visual feedback - change to checkmark
           const originalHTML = copyButton.innerHTML;
-          copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+          copyButton.empty(); copyButton.appendChild(sanitizeHTMLToDom(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`));
 
-          setTimeout(() => {
-            copyButton.innerHTML = originalHTML;
+          window.setTimeout(() => {
+            copyButton.empty(); copyButton.appendChild(sanitizeHTMLToDom(originalHTML));
           }, 2000);
         } catch (err) {
           console.error('Failed to copy message:', err);
@@ -1065,7 +1048,7 @@ export class ChatView extends ItemView {
             const cleanExplanation = explanationPart;
             if (cleanExplanation.trim()) {
               const expDiv = consoleBody.createDiv('tui-explanation');
-              expDiv.innerHTML = this.messageRenderer.render(cleanExplanation);
+              expDiv.empty(); expDiv.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(cleanExplanation)));
             }
           }
           
@@ -1098,7 +1081,7 @@ export class ChatView extends ItemView {
               const icon = isSuccess ? '✔' : (responseMsg ? '✗' : '⠋');
               const statusClass = isSuccess ? 'success' : (responseMsg ? 'error' : 'pending');
               
-              summary.innerHTML = `<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`;
+              summary.empty(); summary.appendChild(sanitizeHTMLToDom(`<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`));
               
               const detailsBody = details.createDiv('tui-line-details');
               
@@ -1143,7 +1126,7 @@ export class ChatView extends ItemView {
                   
                   if (msg.content) {
                     const contentDiv = bubble.createDiv('subagent-msg-content');
-                    contentDiv.innerHTML = this.messageRenderer.render(msg.content);
+                    contentDiv.empty(); contentDiv.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(msg.content)));
                   }
                 });
               }
@@ -1182,13 +1165,13 @@ export class ChatView extends ItemView {
       const cleanAnswer = parsedAnswer;
       if (cleanAnswer.trim()) {
         const answerEl = contentEl.createDiv('final-answer');
-        answerEl.innerHTML = this.messageRenderer.render(cleanAnswer);
+        answerEl.empty(); answerEl.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(cleanAnswer)));
       }
     } else {
       const cleanAnswer = parsedAnswer;
       if (cleanAnswer.trim()) {
         const answerEl = contentEl.createDiv('final-answer');
-        answerEl.innerHTML = this.messageRenderer.render(cleanAnswer);
+        answerEl.empty(); answerEl.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(cleanAnswer)));
       }
     }
 
@@ -1361,7 +1344,7 @@ export class ChatView extends ItemView {
             const cleanExplanation = task.explanation;
             if (cleanExplanation.trim()) {
               const expDiv = consoleBody.createDiv('tui-explanation');
-              expDiv.innerHTML = this.messageRenderer.render(cleanExplanation);
+              expDiv.empty(); expDiv.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(cleanExplanation)));
             }
           }
 
@@ -1386,7 +1369,7 @@ export class ChatView extends ItemView {
             statusClass = 'warning';
           }
 
-          summary.innerHTML = `<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`;
+          summary.empty(); summary.appendChild(sanitizeHTMLToDom(`<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`));
 
           const detailsBody = details.createDiv('tui-line-details');
 
@@ -1415,7 +1398,7 @@ export class ChatView extends ItemView {
         const cleanExplanationChunk = cleanTurnResponse;
         if (cleanExplanationChunk && activeTasks.length > 0 && !executingTask && !confirmTask) {
           const expDiv = consoleBody.createDiv('tui-explanation');
-          expDiv.innerHTML = this.messageRenderer.render(cleanExplanationChunk) + '<span class="tui-spinner">⠋</span>';
+          expDiv.empty(); expDiv.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(cleanExplanationChunk) + '<span class="tui-spinner">⠋</span>'));
         }
       }
     }
@@ -1430,7 +1413,7 @@ export class ChatView extends ItemView {
       if (cleanResponseText) {
         answerContainer.empty();
         const answerEl = answerContainer.createDiv('final-answer');
-        answerEl.innerHTML = this.messageRenderer.render(cleanResponseText);
+        answerEl.empty(); answerEl.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(cleanResponseText)));
       } else {
         answerContainer.empty();
       }
@@ -1439,14 +1422,14 @@ export class ChatView extends ItemView {
 
     if (force || shouldUpdateConsole || (now - this.lastRenderTime > throttleInterval)) {
       if (this.renderTimeout) {
-        clearTimeout(this.renderTimeout);
+        window.clearTimeout(this.renderTimeout);
         this.renderTimeout = null;
       }
       performRenderText();
       this.lastRenderTime = now;
     } else {
       if (!this.renderTimeout) {
-        this.renderTimeout = setTimeout(() => {
+        this.renderTimeout = window.setTimeout(() => {
           performRenderText();
           this.lastRenderTime = Date.now();
           this.renderTimeout = null;
@@ -1587,11 +1570,11 @@ export class ChatView extends ItemView {
     if (this.suggestTriggerRange) {
       this.suggestTriggerRange.deleteContents();
       
-      const cmdText = document.createTextNode(command + '\u00A0');
+      const cmdText = activeDocument.createTextNode(command + '\u00A0');
       this.suggestTriggerRange.insertNode(cmdText);
       
       // Move cursor after the slash command
-      const range = document.createRange();
+      const range = activeDocument.createRange();
       range.setStartAfter(cmdText);
       range.collapse(true);
       const sel = window.getSelection();
@@ -1600,9 +1583,9 @@ export class ChatView extends ItemView {
         sel.addRange(range);
       }
     } else {
-      this.inputArea.innerHTML = `${command}&nbsp;`;
+      this.inputArea.empty(); this.inputArea.appendChild(sanitizeHTMLToDom(`${command}&nbsp;`));
       // Move cursor to end
-      const range = document.createRange();
+      const range = activeDocument.createRange();
       range.selectNodeContents(this.inputArea);
       range.collapse(false);
       const sel = window.getSelection();
@@ -1623,16 +1606,16 @@ export class ChatView extends ItemView {
     rangeTrigger.deleteContents();
     
     // Create the pill element
-    const pill = document.createElement('span');
+    const pill = activeDocument.createElement('span');
     pill.className = 'mentat-doc-pill';
     pill.setAttribute('contenteditable', 'false');
     pill.setAttribute('data-path', filePath);
-    pill.innerHTML = `📄 ${fileName} <span class="remove-pill" aria-label="Remove document">×</span>`;
+    pill.empty(); pill.appendChild(sanitizeHTMLToDom(`📄 ${fileName} <span class="remove-pill" aria-label="Remove document">×</span>`));
     
     rangeTrigger.insertNode(pill);
     
     // Insert a space after the pill to allow typing
-    const space = document.createTextNode('\u00A0');
+    const space = activeDocument.createTextNode('\u00A0');
     rangeTrigger.setStartAfter(pill);
     rangeTrigger.collapse(true);
     rangeTrigger.insertNode(space);
@@ -1640,7 +1623,7 @@ export class ChatView extends ItemView {
     // Move selection caret after space
     const sel = window.getSelection();
     if (sel) {
-      const nextRange = document.createRange();
+      const nextRange = activeDocument.createRange();
       nextRange.setStartAfter(space);
       nextRange.collapse(true);
       sel.removeAllRanges();
@@ -1672,10 +1655,10 @@ export class ChatView extends ItemView {
 
   private saveDraftDebounced(): void {
     if (this.draftSaveTimeout) {
-      clearTimeout(this.draftSaveTimeout);
+      window.clearTimeout(this.draftSaveTimeout);
     }
     
-    this.draftSaveTimeout = setTimeout(async () => {
+    this.draftSaveTimeout = window.setTimeout(async () => {
       const sessionInfo = this.chatManager.getSessionInfo();
       const sessionId = sessionInfo.sessionId;
       if (!sessionId) return;
@@ -1700,10 +1683,10 @@ export class ChatView extends ItemView {
     
     const pluginData = await this.plugin.loadData();
     if (pluginData && pluginData.drafts && pluginData.drafts[sessionId]) {
-      this.inputArea.innerHTML = pluginData.drafts[sessionId];
+      this.inputArea.empty(); this.inputArea.appendChild(sanitizeHTMLToDom(pluginData.drafts[sessionId]));
       
       // Move cursor to the end
-      const range = document.createRange();
+      const range = activeDocument.createRange();
       range.selectNodeContents(this.inputArea);
       range.collapse(false);
       const sel = window.getSelection();

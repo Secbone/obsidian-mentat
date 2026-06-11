@@ -380,31 +380,42 @@ export class OpenAIProvider implements AIProvider {
   /**
    * Convert ChatMessage[] to OpenAI format
    * Filters out system messages (defensive programming - system prompt should be passed via options)
-   * Ensures tool messages always have tool_call_id (required by OpenAI API)
+   * Ensures tool_calls / tool response pairing integrity (required by OpenAI-compatible APIs)
+   *
+   * Handles two types of orphans caused by message truncation:
+   * 1. Orphan tool messages: tool response without a preceding assistant that declared the tool_call
+   * 2. Orphan assistant tool_calls: assistant declared tool_calls but some/all responses are missing
    */
   private convertMessages(messages: ChatMessage[]): OpenAI.Chat.ChatCompletionMessageParam[] {
-    return messages
-      .filter(msg => msg.role !== 'system')  // Filter out system messages
-      .map(msg => {
-        if (msg.role === 'tool') {
-          // Defensive: if tool_call_id is missing, convert to user message to avoid API 400 error
-          if (!msg.tool_call_id) {
-            console.warn('OpenAIProvider: tool message missing tool_call_id, converting to user message');
-            return {
-              role: 'user' as const,
-              content: `[Tool Result${msg.name ? ` (${msg.name})` : ''}]: ${msg.content}`
-            };
-          }
-          return {
-            role: 'tool' as const,
-            content: msg.content,
-            tool_call_id: msg.tool_call_id
-          };
-        } else if (msg.role === 'assistant' && msg.tool_calls) {
-          return {
+    const filtered = messages.filter(msg => msg.role !== 'system');
+
+    // Pre-scan: collect all tool_call_ids that have tool responses
+    const respondedToolCallIds = new Set<string>();
+    for (const msg of filtered) {
+      if (msg.role === 'tool' && msg.tool_call_id) {
+        respondedToolCallIds.add(msg.tool_call_id);
+      }
+    }
+
+    // Forward pass: track declared tool_call IDs and build result
+    const seenToolCallIds = new Set<string>();
+    const result: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+
+    for (const msg of filtered) {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        // Register all declared tool_call IDs
+        for (const tc of msg.tool_calls) {
+          seenToolCallIds.add(tc.id);
+        }
+
+        // Keep only tool_calls that have matching tool responses
+        const validToolCalls = msg.tool_calls.filter(tc => respondedToolCallIds.has(tc.id));
+
+        if (validToolCalls.length > 0) {
+          result.push({
             role: 'assistant' as const,
             content: msg.content || null,
-            tool_calls: msg.tool_calls.map(tc => ({
+            tool_calls: validToolCalls.map(tc => ({
               id: tc.id,
               type: 'function' as const,
               function: {
@@ -412,13 +423,37 @@ export class OpenAIProvider implements AIProvider {
                 arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments)
               }
             }))
-          };
+          });
         } else {
-          return {
-            role: msg.role as 'user' | 'assistant',
-            content: msg.content
-          };
+          // All tool_calls are orphans - send as plain assistant message
+          result.push({
+            role: 'assistant' as const,
+            content: msg.content || ''
+          });
         }
-      });
+      } else if (msg.role === 'tool') {
+        if (!msg.tool_call_id || !seenToolCallIds.has(msg.tool_call_id)) {
+          // Orphan tool message - convert to user message to preserve context
+          console.warn('OpenAIProvider: orphan tool message (no matching preceding assistant tool_calls), converting to user message');
+          result.push({
+            role: 'user' as const,
+            content: `[Tool Result${msg.name ? ` (${msg.name})` : ''}]: ${msg.content}`
+          });
+        } else {
+          result.push({
+            role: 'tool' as const,
+            content: msg.content,
+            tool_call_id: msg.tool_call_id
+          });
+        }
+      } else {
+        result.push({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        });
+      }
+    }
+
+    return result;
   }
 }

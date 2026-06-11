@@ -226,6 +226,8 @@ export class Context {
     // Apply message limit (take last N)
     if (options?.maxMessages) {
       messages = messages.slice(-options.maxMessages);
+      // Ensure truncation doesn't leave orphan tool messages at the start
+      messages = this.stripLeadingOrphanToolMessages(messages);
     }
 
     // Apply format-specific transformations
@@ -266,7 +268,20 @@ export class Context {
       result.unshift(msg);
     }
 
-    return result;
+    // Strip leading orphan tool messages that lost their assistant after truncation
+    return this.stripLeadingOrphanToolMessages(result);
+  }
+
+  /**
+   * Remove leading tool messages that have no preceding assistant with matching tool_calls.
+   * Prevents broken tool_calls pairing after message truncation (causes OpenAI API 400 errors).
+   */
+  private stripLeadingOrphanToolMessages(messages: Message[]): Message[] {
+    let start = 0;
+    while (start < messages.length && messages[start].isToolCall()) {
+      start++;
+    }
+    return start > 0 ? messages.slice(start) : messages;
   }
 
   /**

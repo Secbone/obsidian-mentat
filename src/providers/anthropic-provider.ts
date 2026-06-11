@@ -285,35 +285,49 @@ export class AnthropicProvider implements AIProvider {
 
   /**
    * Convert ChatMessage[] to Anthropic format
+   *
+   * Handles two types of orphans caused by message truncation:
+   * 1. Orphan tool messages: tool_result without a preceding assistant that declared the tool_use
+   * 2. Orphan assistant tool_calls: assistant declared tool_use but some/all responses are missing
    */
   private convertMessages(messages: ChatMessage[]): Anthropic.MessageParam[] {
-    return messages
-      .filter(msg => msg.role !== 'system') // System messages handled separately
-      .map(msg => {
-        if (msg.role === 'tool') {
-          return {
-            role: 'user',
-            content: [
-              {
-                type: 'tool_result' as const,
-                tool_use_id: msg.tool_call_id!,
-                content: msg.content
-              }
-            ]
-          };
-        } else if (msg.role === 'assistant' && msg.tool_calls) {
-          const content: any[] = [];
+    const filtered = messages.filter(msg => msg.role !== 'system');
 
-          // Add text content if present
-          if (msg.content) {
-            content.push({
-              type: 'text',
-              text: msg.content
-            });
-          }
+    // Pre-scan: collect all tool_call_ids that have tool responses
+    const respondedToolCallIds = new Set<string>();
+    for (const msg of filtered) {
+      if (msg.role === 'tool' && msg.tool_call_id) {
+        respondedToolCallIds.add(msg.tool_call_id);
+      }
+    }
 
-          // Add tool use blocks
-          for (const tc of msg.tool_calls) {
+    // Forward pass: track declared tool_call IDs and build result
+    const seenToolCallIds = new Set<string>();
+    const result: Anthropic.MessageParam[] = [];
+
+    for (const msg of filtered) {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        // Register all declared tool_call IDs
+        for (const tc of msg.tool_calls) {
+          seenToolCallIds.add(tc.id);
+        }
+
+        // Keep only tool_calls that have matching tool responses
+        const validToolCalls = msg.tool_calls.filter(tc => respondedToolCallIds.has(tc.id));
+
+        const content: any[] = [];
+
+        // Add text content if present
+        if (msg.content) {
+          content.push({
+            type: 'text',
+            text: msg.content
+          });
+        }
+
+        if (validToolCalls.length > 0) {
+          // Add valid tool use blocks
+          for (const tc of validToolCalls) {
             let input;
             if (typeof tc.arguments === 'string') {
               try {
@@ -323,7 +337,6 @@ export class AnthropicProvider implements AIProvider {
                 console.error('[AnthropicProvider convertMessages] Tool name:', tc.name);
                 console.error('[AnthropicProvider convertMessages] Arguments length:', tc.arguments.length);
                 console.error('[AnthropicProvider convertMessages] Arguments preview:', tc.arguments.substring(0, 500));
-                // Try to recover or throw a more informative error
                 throw new Error(`Failed to parse tool arguments for ${tc.name}: ${error.message}`);
               }
             } else {
@@ -338,16 +351,45 @@ export class AnthropicProvider implements AIProvider {
             });
           }
 
-          return {
+          result.push({
             role: 'assistant' as const,
             content
-          };
+          });
         } else {
-          return {
-            role: msg.role as 'user' | 'assistant',
-            content: msg.content
-          };
+          // All tool_calls are orphans - send as plain assistant message
+          result.push({
+            role: 'assistant' as const,
+            content: msg.content || ''
+          });
         }
-      });
+      } else if (msg.role === 'tool') {
+        if (!msg.tool_call_id || !seenToolCallIds.has(msg.tool_call_id)) {
+          // Orphan tool message - convert to plain user message
+          console.warn('AnthropicProvider: orphan tool message (no matching preceding assistant tool_use), converting to user message');
+          result.push({
+            role: 'user' as const,
+            content: `[Tool Result${msg.name ? ` (${msg.name})` : ''}]: ${msg.content}`
+          });
+        } else {
+          result.push({
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result' as const,
+                tool_use_id: msg.tool_call_id!,
+                content: msg.content
+              }
+            ]
+          });
+        }
+      } else {
+        result.push({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        });
+      }
+    }
+
+    return result;
   }
 }
