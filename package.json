@@ -1,6 +1,6 @@
 {
   "name": "mentat",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Your local agentic cognitive partner for Obsidian",
   "main": "main.js",
   "scripts": {
