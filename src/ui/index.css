@@ -8,5 +8,8 @@
 /* Reusable UI components */
 @import './code-block/style.css';
 
+/* Settings modals */
+@import './settings/style.css';
+
 /* Global responsive adjustments (must be last) */
 @import './responsive/style.css';

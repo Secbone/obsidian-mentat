@@ -256,12 +256,10 @@ export class ChatView extends ItemView {
     // Show hint if no index exists
     if (!hasIndex) {
       const hint = this.documentList.createDiv('document-list-hint');
-      hint.innerHTML = `
-        <div class="hint-icon">ℹ️</div>
-        <div class="hint-text">
-          文档尚未索引。请执行 <strong>Ctrl/Cmd+P → "Index all documents"</strong>
-        </div>
-      `;
+      hint.createDiv({ cls: 'hint-icon', text: 'ℹ️' });
+      const hintText = hint.createDiv({ cls: 'hint-text' });
+      hintText.createSpan({ text: '文档尚未索引。请执行 ' });
+      hintText.createEl('strong', { text: 'Ctrl/Cmd+P → "Index all documents"' });
     }
   }
 
@@ -480,7 +478,7 @@ export class ChatView extends ItemView {
       if (cmd === '/help') {
         const wrapper = this.createMessageElement('assistant');
         const contentEl = wrapper.createDiv('message-content');
-        contentEl.innerHTML = `
+        contentEl.appendChild(sanitizeHTMLToDom(`
           <h3>💡 Mentat 快捷指令帮助手册</h3>
           <p>您可以在输入框中输入以下以 <code>/</code> 开头的指令快速控制智能体：</p>
           <ul>
@@ -489,8 +487,8 @@ export class ChatView extends ItemView {
             <li><code>/settings</code>: 快速打开 Mentat 插件配置面板</li>
             <li><code>/help</code>: 渲染本帮助说明</li>
           </ul>
-          <p>另外，在输入文字中输入 <code>@文件名</code>，可以直接召唤出文件模糊检索卡片，将笔记以“胶囊”形式加入到当前对话上下文中。</p>
-        `;
+          <p>另外，在输入文字中输入 <code>@文件名</code>，可以直接召唤出文件模糊检索卡片，将笔记以”胶囊”形式加入到当前对话上下文中。</p>
+        `));
         this.scrollToBottom();
         return;
       }
@@ -1154,10 +1152,8 @@ export class ChatView extends ItemView {
       const warningDiv = contentEl.createDiv('chat-warning-callout');
       const warningHeader = warningDiv.createDiv('chat-warning-callout-header');
       const limit = this.plugin.settings.maxTurns || 20;
-      warningHeader.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-        已达到最大运行迭代次数限制 (${limit} 轮)
-      `;
+      warningHeader.appendChild(sanitizeHTMLToDom(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`));
+      warningHeader.appendText(` 已达到最大运行迭代次数限制 (${limit} 轮)`);
       const warningText = warningDiv.createDiv();
       warningText.setText('智能体已被系统强制挂起，以防陷入无限循环。如果任务还未完成，您可以发送指令“继续”让其继续执行。');
       

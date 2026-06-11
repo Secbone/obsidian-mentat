@@ -17,8 +17,6 @@ export class SettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    new Setting(containerEl).setName('Mentat Settings').setHeading();
-
     // Render tab bar
     const tabBar = containerEl.createDiv({ cls: 'setting-tab-bar' });
     tabBar.addClass('mentat-setting-tab-bar');
@@ -938,19 +936,19 @@ ${folderGuidelines}
       // 1. 确认阶段描述
       container.createEl('p', {
         text: '重建将深度分析您当前的文件夹结构、高频标签和最新笔记。AI 智能重建会利用 LLM 自动规划适合您知识库的定制化目录指南与命名工作流。',
-        style: 'line-height: 1.6; color: var(--text-muted); font-size: 0.95em; margin: 0;'
-      } as any);
+        cls: 'rebuild-modal-desc'
+      });
       
       // 完全使用 Obsidian 内置原生 Callout 结构，自动适配用户安装的任意第三方主题
       const callout = container.createDiv({ cls: 'callout' });
       callout.setAttribute('data-callout', 'warning');
       
-      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px;' } as any);
-      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' } as any);
+      const calloutTitle = callout.createDiv({ cls: 'callout-title' });
+      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon' });
       setIcon(calloutIcon, 'alert-triangle'); // 完美地道地渲染原生图标
       calloutTitle.createDiv({ cls: 'callout-title-inner', text: '注意' });
 
-      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' } as any);
+      const calloutContent = callout.createDiv({ cls: 'callout-content' });
       calloutContent.createSpan({ text: '此操作将完全覆盖您目前在 ' });
       calloutContent.createEl('code', { text: 'vault-map.md' });
       calloutContent.createSpan({ text: ' 文件中手动修改或定制的所有内容，请在重建前做好备份。' });
@@ -979,30 +977,26 @@ ${folderGuidelines}
       // 2. 加载阶段
       container.createEl('p', {
         text: '我们正在分析您库中的笔记分布和组织结构，并为您量身定制最新的知识树规范与类别关联工作流。',
-        style: 'color: var(--text-muted); font-size: 0.95em; line-height: 1.5; margin: 0;'
-      } as any);
+        cls: 'rebuild-modal-desc'
+      });
 
       // 极细简约自定义进度条设计
       const progressWrapper = container.createDiv();
 
-      // 自定义极细进度条 background 槽
       const progressContainer = progressWrapper.createDiv({
-        style: 'width: 100%; height: 6px; background-color: var(--background-modifier-border); border-radius: 3px; overflow: hidden;'
-      } as any);
+        cls: 'rebuild-modal-progress-container'
+      });
 
       // 动态平滑进度条
-      progressContainer.createDiv({
-        style: `width: ${this.progressVal}%; height: 100%; background-color: var(--interactive-accent); border-radius: 3px; transition: width 0.3s ease;`
-      } as any);
+      const progressBar = progressContainer.createDiv({ cls: 'rebuild-modal-progress-bar' });
+      progressBar.style.width = `${this.progressVal}%`;
 
-      const progressInfo = progressWrapper.createDiv({
-        style: 'display: flex; justify-content: space-between; font-size: 0.85em; color: var(--text-muted); align-items: center;'
-      } as any);
+      const progressInfo = progressWrapper.createDiv({ cls: 'rebuild-modal-progress-info' });
 
       // 步骤文字
-      progressInfo.createSpan({ text: this.statusMsg, style: 'font-weight: 500;' } as any);
+      progressInfo.createSpan({ text: this.statusMsg, cls: 'rebuild-modal-progress-step' });
       // 百分比提示
-      progressInfo.createSpan({ text: `${this.progressVal}%`, style: 'font-weight: 600; color: var(--interactive-accent);' } as any);
+      progressInfo.createSpan({ text: `${this.progressVal}%`, cls: 'rebuild-modal-progress-percent' });
 
       // 取消重建按钮容器
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
@@ -1018,12 +1012,12 @@ ${folderGuidelines}
       const callout = container.createDiv({ cls: 'callout' });
       callout.setAttribute('data-callout', 'success');
       
-      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-success);' } as any);
-      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' } as any);
+      const calloutTitle = callout.createDiv({ cls: 'callout-title' });
+      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon' });
       setIcon(calloutIcon, 'check-circle');
       calloutTitle.createDiv({ cls: 'callout-title-inner', text: '重建成功！' });
 
-      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' } as any);
+      const calloutContent = callout.createDiv({ cls: 'callout-content' });
       calloutContent.createSpan({ text: 'Mentat 已经成功 analysis 了您的整个知识库，并为您定制了最新的文件夹指南、命名规则和类别工作流。配置指南已保存在您的配置目录中。' });
 
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });
@@ -1049,18 +1043,16 @@ ${folderGuidelines}
       const callout = container.createDiv({ cls: 'callout' });
       callout.setAttribute('data-callout', 'error');
       
-      const calloutTitle = callout.createDiv({ cls: 'callout-title', style: 'display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; color: var(--text-error);' } as any);
-      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon', style: 'display: flex; align-items: center;' } as any);
+      const calloutTitle = callout.createDiv({ cls: 'callout-title' });
+      const calloutIcon = calloutTitle.createDiv({ cls: 'callout-icon' });
       setIcon(calloutIcon, 'x-circle');
       calloutTitle.createDiv({ cls: 'callout-title-inner', text: 'AI 智能重建遇到异常' });
 
-      const calloutContent = callout.createDiv({ cls: 'callout-content', style: 'font-size: 0.9em; line-height: 1.5; color: var(--text-normal);' } as any);
+      const calloutContent = callout.createDiv({ cls: 'callout-content' });
       calloutContent.createSpan({ text: '在通过 AI 生成知识地图时遇到了异常。这通常是因为未配置 AI 服务商、网络连接超时或 API 额度不足。' });
 
       // 错误详情框
-      const errorBox = container.createEl('pre', {
-        style: 'background-color: var(--background-secondary); border: 1px solid var(--border-color); padding: 12px; border-radius: 4px; font-family: var(--font-monospace); font-size: 0.85em; color: var(--text-error); overflow-x: auto; max-height: 120px; white-space: pre-wrap; margin: 10px 0 0 0;'
-      } as any);
+      const errorBox = container.createEl('pre', { cls: 'rebuild-modal-error-box' });
       errorBox.createSpan({ text: `错误详情：\n${this.errorMsg}` });
 
       const buttonContainer = container.createDiv({ cls: 'modal-button-container' });

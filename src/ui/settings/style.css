@@ -1,0 +1,54 @@
+/* Settings - RebuildConfirmModal styles */
+
+.rebuild-modal-desc {
+  line-height: 1.6;
+  color: var(--text-muted);
+  font-size: 0.95em;
+  margin: 0;
+}
+
+.rebuild-modal-progress-container {
+  width: 100%;
+  height: 6px;
+  background-color: var(--background-modifier-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.rebuild-modal-progress-bar {
+  height: 100%;
+  background-color: var(--interactive-accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.rebuild-modal-progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  align-items: center;
+}
+
+.rebuild-modal-progress-step {
+  font-weight: 500;
+}
+
+.rebuild-modal-progress-percent {
+  font-weight: 600;
+  color: var(--interactive-accent);
+}
+
+.rebuild-modal-error-box {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  padding: 12px;
+  border-radius: 4px;
+  font-family: var(--font-monospace);
+  font-size: 0.85em;
+  color: var(--text-error);
+  overflow-x: auto;
+  max-height: 120px;
+  white-space: pre-wrap;
+  margin: 10px 0 0 0;
+}

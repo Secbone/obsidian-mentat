@@ -123,31 +123,33 @@ export class AgentOrchestrator {
         let hasError: any = null;
 
         // Start background runners for each stream to collect events in parallel
-        activeStreams.forEach(async ({ id, context, stream }) => {
-          try {
-            let current = await stream.next();
-            while (!current.done) {
-              eventQueue.push({ ...(current.value as AgentEvent), taskId: id });
-              if (context.abortSignal?.aborted) {
-                break;
+        activeStreams.forEach(({ id, context, stream }) => {
+          void (async () => {
+            try {
+              let current = await stream.next();
+              while (!current.done) {
+                eventQueue.push({ ...(current.value as AgentEvent), taskId: id });
+                if (context.abortSignal?.aborted) {
+                  break;
+                }
+                current = await stream.next();
               }
-              current = await stream.next();
+              if (!context.abortSignal?.aborted && !hasError) {
+                const result = current.value as AgentResponse;
+                results.set(id, result);
+                completed.add(id);
+              }
+            } catch (err) {
+              hasError = err;
+              // Abort all other tasks in this tier immediately on error to prevent resource leaks
+              tierAbortController.abort();
+            } finally {
+              activeTaskCount--;
+              if (activeTaskCount === 0) {
+                eventQueue.setDone();
+              }
             }
-            if (!context.abortSignal?.aborted && !hasError) {
-              const result = current.value as AgentResponse;
-              results.set(id, result);
-              completed.add(id);
-            }
-          } catch (err) {
-            hasError = err;
-            // Abort all other tasks in this tier immediately on error to prevent resource leaks
-            tierAbortController.abort();
-          } finally {
-            activeTaskCount--;
-            if (activeTaskCount === 0) {
-              eventQueue.setDone();
-            }
-          }
+          })();
         });
 
         // Yield events as they are pushed to the queue
