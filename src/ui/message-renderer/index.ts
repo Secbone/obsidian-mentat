@@ -47,7 +47,7 @@ export class MessageRenderer {
     // Code blocks (must come before inline code)
     html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
       const language = lang || 'text';
-      const codeId = `code-${Math.random().toString(36).substr(2, 9)}`;
+      const codeId = `code-${Math.random().toString(36).substring(2, 11)}`;
       const escapedLang = this.escapeHtml(language);
 
       return `
@@ -109,8 +109,11 @@ export class MessageRenderer {
    * Escape HTML entities to prevent XSS
    */
   private escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }

@@ -6,15 +6,13 @@ import {
   SkillResult,
   SkillCall,
   ToolCall,
-  SkillStatus,
   SkillContext,
   SkillDefinition,
   SkillNamespace,
-  AnySkillDefinition,
   isDocumentationSkill,
   isExecutableSkill
 } from '../skill-types';
-import { ConfirmationModal, ConfirmationModalOptions } from '../../ui/confirmation-modal';
+import { ConfirmationModal } from '../../ui/confirmation-modal';
 
 /**
  * Skill execution options
@@ -329,7 +327,7 @@ export class SkillExecutor {
 
     promises.push(
       new Promise<SkillResult>((_, reject) =>
-        setTimeout(() => reject(new Error('Skill execution timeout')), timeoutMs)
+        window.setTimeout(() => reject(new Error('Skill execution timeout')), timeoutMs)
       )
     );
 
@@ -437,7 +435,7 @@ export class SkillExecutor {
    * Generate unique call ID
    */
   private generateCallId(): string {
-    return `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `call_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   }
 
   /**

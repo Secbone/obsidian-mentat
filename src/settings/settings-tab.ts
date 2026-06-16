@@ -110,7 +110,7 @@ export class SettingsTab extends PluginSettingTab {
           }))
         .addButton(button => button
           .setButtonText('Remove')
-          .setWarning()
+          .setClass('mod-warning')
           .onClick(async () => {
             this.plugin.settings.aiProviders.splice(index, 1);
             await this.plugin.saveSettings();
@@ -400,7 +400,7 @@ ${folderGuidelines}
         }))
       .addButton(button => button
         .setButtonText('Rebuild Knowledge Map')
-        .setWarning()
+        .setClass('mod-warning')
         .onClick(() => {
           new RebuildConfirmModal(this.app, this.plugin).open();
         }));
@@ -449,7 +449,7 @@ ${folderGuidelines}
       .addSlider(slider => slider
         .setLimits(10, 100, 10)
         .setValue(this.plugin.settings.indexingBatchSize)
-        .setDynamicTooltip()
+
         .onChange(async (value) => {
           this.plugin.settings.indexingBatchSize = value;
           await this.plugin.saveSettings();
@@ -461,7 +461,7 @@ ${folderGuidelines}
       .addSlider(slider => slider
         .setLimits(1, 30, 1)
         .setValue(this.plugin.settings.cacheExpiryDays)
-        .setDynamicTooltip()
+
         .onChange(async (value) => {
           this.plugin.settings.cacheExpiryDays = value;
           await this.plugin.saveSettings();
@@ -473,7 +473,7 @@ ${folderGuidelines}
       .addSlider(slider => slider
         .setLimits(1, 30, 1)
         .setValue(this.plugin.settings.reviewIntervalDays)
-        .setDynamicTooltip()
+
         .onChange(async (value) => {
           this.plugin.settings.reviewIntervalDays = value;
           await this.plugin.saveSettings();
@@ -510,7 +510,7 @@ ${folderGuidelines}
       slider
         .setLimits(1, 99, 1)
         .setValue(this.plugin.settings.maxTurns)
-        .setDynamicTooltip()
+
         .onChange(async (value) => {
           this.plugin.settings.maxTurns = value;
           await this.plugin.saveSettings();
@@ -620,7 +620,9 @@ ${folderGuidelines}
         const skillName = card.dataset.skillName.toLowerCase();
         const description = card.dataset.description.toLowerCase();
         if (skillName.includes(query) || description.includes(query)) {
+          card.style.display = '';
         } else {
+          card.style.display = 'none';
         }
       });
     });
@@ -650,18 +652,18 @@ ${folderGuidelines}
       // 1. Title and Badge
       const header = card.createDiv();
       
-      const title = header.createEl('h3', { text: fullName });
+      header.createDiv({ cls: 'skill-card-title', text: fullName });
       
-      const badge = header.createSpan({ text: skill.namespace.toUpperCase() });
-      
+      header.createSpan({ text: skill.namespace.toUpperCase() });
+
       // 2. Description
-      const desc = card.createDiv({ text: skill.description });
-      
+      card.createDiv({ text: skill.description });
+
       // 3. Toggles/Controls Row
       const controls = card.createDiv();
-      
+
       // Toggle 1: Enabled
-      const enabledSetting = new Setting(controls)
+      new Setting(controls)
         .setName('Allowed')
         .setDesc('AI can use this tool')
         .addToggle(toggle => toggle
@@ -690,7 +692,7 @@ ${folderGuidelines}
       const defaultDirect = defaultCore.includes(fullName);
       const directCallValue = skillConfig.directCall !== undefined ? skillConfig.directCall : defaultDirect;
       
-      const directSetting = new Setting(controls)
+      new Setting(controls)
         .setName('Direct-Call')
         .setDesc('Call directly (no spec)')
         .addToggle(toggle => toggle
@@ -710,7 +712,7 @@ ${folderGuidelines}
       const defaultConfirm = !!(skill.metadata as any)?.requiresConfirmation;
       const confirmValue = skillConfig.requireConfirmation !== undefined ? skillConfig.requireConfirmation : defaultConfirm;
       
-      const confirmSetting = new Setting(controls)
+      new Setting(controls)
         .setName('Confirm First')
         .setDesc('Requires permission')
         .addToggle(toggle => toggle

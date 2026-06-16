@@ -22,7 +22,7 @@ if [ ! -d "$VAULT_PATH" ]; then
 fi
 
 # 检查必需文件
-if [ ! -f "main.js" ] || [ ! -f "styles.css" ] || [ ! -f "manifest.json" ]; then
+if [ ! -f "dist/main.js" ] || [ ! -f "dist/styles.css" ] || [ ! -f "dist/manifest.json" ]; then
     echo "❌ 错误: 缺少编译文件，请先运行 npm run build"
     exit 1
 fi
@@ -36,9 +36,9 @@ mkdir -p "$PLUGIN_DIR"
 
 # 复制文件
 echo "2️⃣  复制插件文件..."
-cp main.js "$PLUGIN_DIR/"
-cp styles.css "$PLUGIN_DIR/"
-cp manifest.json "$PLUGIN_DIR/"
+cp dist/main.js "$PLUGIN_DIR/"
+cp dist/styles.css "$PLUGIN_DIR/"
+cp dist/manifest.json "$PLUGIN_DIR/"
 
 # 验证安装
 echo "3️⃣  验证安装..."

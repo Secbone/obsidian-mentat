@@ -81,7 +81,7 @@ export class ConfirmationModal extends Modal {
     cancelBtn.addEventListener('click', () => this.handleCancel());
 
     // Auto-focus cancel button for safety
-    setTimeout(() => cancelBtn.focus(), 50);
+    window.setTimeout(() => cancelBtn.focus(), 50);
 
     // Confirm button
     const confirmBtn = buttonContainer.createEl('button', {

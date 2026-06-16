@@ -7,7 +7,7 @@ export class SkillCallRenderer {
    * Render a skill call as HTML
    */
   static render(skillCall: SkillCall): HTMLElement {
-    const container = document.createElement('div');
+    const container = activeDocument.createElement('div');
     container.className = `skill-call skill-call-${skillCall.status}`;
 
     // Header

@@ -20,7 +20,7 @@ const MAX_TOKENS_UPPER_LIMIT = 393216;
 export class OpenAIProvider implements AIProvider {
   id: string;
   name: string;
-  type: 'openai' = 'openai';
+  type = 'openai' as const;
   private client: OpenAI;
   private config: OpenAIProviderConfig;
 

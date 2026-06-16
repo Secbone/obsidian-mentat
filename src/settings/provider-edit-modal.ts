@@ -46,10 +46,7 @@ export class ProviderEditModal extends Modal {
     contentEl.addClass('provider-edit-modal');
 
     // Title
-    const title = contentEl.createEl('h2', {
-      text: this.provider ? '编辑 AI Provider' : '添加 AI Provider',
-      cls: 'modal-title'
-    });
+    contentEl.createDiv({ cls: 'modal-title', text: this.provider ? '编辑 AI Provider' : '添加 AI Provider' });
 
     // Create all form fields
     this.createFormFields();
@@ -192,7 +189,7 @@ export class ProviderEditModal extends Modal {
       .addSlider(slider => slider
         .setLimits(0, 2, 0.1)
         .setValue(this.tempConfig.temperature ?? 0.7)
-        .setDynamicTooltip()
+
         .onChange(value => {
           this.tempConfig.temperature = value;
         }));

@@ -7,7 +7,7 @@ import { MessageRenderer } from '../message-renderer';
 import { ChatOrchestrator, ChatQueryResult } from '../../chat/chat-orchestrator';
 import { FileSelectorModal } from '../file-selector-modal';
 import { ConfirmationModal } from '../confirmation-modal';
-import { TaskType, ChatMessage, ToolCall } from '../../types';
+import { ChatMessage, ToolCall } from '../../types';
 import { AgentEvent } from '../../agents/agent-types';
 import PersonalAgentPlugin from '../../main';
 
@@ -544,7 +544,7 @@ export class ChatView extends ItemView {
       const contextMessages = await this.chatManager
         .getContextForLLM({ maxMessages: 50 });
 
-      let fullResponse = '';
+      const fullResponse = '';
       const activeTasks: ActiveTask[] = [];
       let currentStatus = '初始化智能体...';
 
@@ -1037,7 +1037,7 @@ export class ChatView extends ItemView {
           const showContentAsExplanation = turnMsg.content && (isInterrupted || !isLastMsg);
           
           if (showContentAsExplanation) {
-            let rawContent = turnMsg.content || '';
+            const rawContent = turnMsg.content || '';
             let explanationPart = rawContent;
             // 静态剥离最终答复部分，只在 timeline 审计折叠框里保留纯净的思维链
             if (rawContent.includes('<final_answer>')) {
@@ -1079,7 +1079,9 @@ export class ChatView extends ItemView {
               const icon = isSuccess ? '✔' : (responseMsg ? '✗' : '⠋');
               const statusClass = isSuccess ? 'success' : (responseMsg ? 'error' : 'pending');
               
-              summary.empty(); summary.appendChild(sanitizeHTMLToDom(`<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`));
+              summary.empty();
+              summary.createSpan({ cls: `tui-icon ${statusClass}`, text: icon });
+              summary.createSpan({ cls: 'tui-tool-name', text: shortName });
               
               const detailsBody = details.createDiv('tui-line-details');
               
@@ -1136,7 +1138,7 @@ export class ChatView extends ItemView {
 
     // 2. Render Final Answer / Warning Callouts
     // 对最终静态气泡渲染中的最终回复做自适应标签剥离与清洗
-    let rawContent = lastAssistantMsg.content || '';
+    const rawContent = lastAssistantMsg.content || '';
     let parsedAnswer = rawContent;
     if (rawContent.includes('<final_answer>')) {
       const parts = rawContent.split('<final_answer>');
@@ -1365,7 +1367,9 @@ export class ChatView extends ItemView {
             statusClass = 'warning';
           }
 
-          summary.empty(); summary.appendChild(sanitizeHTMLToDom(`<span class="tui-icon ${statusClass}">${icon}</span> <span class="tui-tool-name">${shortName}</span>`));
+          summary.empty();
+          summary.createSpan({ cls: `tui-icon ${statusClass}`, text: icon });
+          summary.createSpan({ cls: 'tui-tool-name', text: shortName });
 
           const detailsBody = details.createDiv('tui-line-details');
 
@@ -1579,7 +1583,8 @@ export class ChatView extends ItemView {
         sel.addRange(range);
       }
     } else {
-      this.inputArea.empty(); this.inputArea.appendChild(sanitizeHTMLToDom(`${command}&nbsp;`));
+      this.inputArea.empty();
+      this.inputArea.appendText(command + '\u00A0');
       // Move cursor to end
       const range = activeDocument.createRange();
       range.selectNodeContents(this.inputArea);
@@ -1606,7 +1611,11 @@ export class ChatView extends ItemView {
     pill.className = 'mentat-doc-pill';
     pill.setAttribute('contenteditable', 'false');
     pill.setAttribute('data-path', filePath);
-    pill.empty(); pill.appendChild(sanitizeHTMLToDom(`📄 ${fileName} <span class="remove-pill" aria-label="Remove document">×</span>`));
+    pill.empty();
+    pill.appendText(`📄 ${fileName}\u00A0`);
+    const removeSpan = pill.createSpan({ cls: 'remove-pill' });
+    removeSpan.setAttribute('aria-label', 'Remove document');
+    removeSpan.setText('×');
     
     rangeTrigger.insertNode(pill);
     

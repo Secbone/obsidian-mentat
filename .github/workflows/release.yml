@@ -47,16 +47,16 @@ jobs:
 
       - name: Validate Release Assets
         run: |
-          if [ ! -f main.js ]; then
-            echo "❌ main.js was not built!"
+          if [ ! -f dist/main.js ]; then
+            echo "❌ dist/main.js was not built!"
             exit 1
           fi
-          if [ ! -f manifest.json ]; then
-            echo "❌ manifest.json is missing!"
+          if [ ! -f dist/manifest.json ]; then
+            echo "❌ dist/manifest.json is missing!"
             exit 1
           fi
-          if [ ! -f styles.css ]; then
-            echo "❌ styles.css is missing!"
+          if [ ! -f dist/styles.css ]; then
+            echo "❌ dist/styles.css is missing!"
             exit 1
           fi
           echo "✅ All release assets are present."
@@ -64,7 +64,7 @@ jobs:
       - name: Extract Version from Manifest
         id: get_version
         run: |
-          VERSION=$(node -p "require('./manifest.json').version")
+          VERSION=$(node -p "require('./dist/manifest.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Validate Tag Matches Manifest Version
@@ -85,7 +85,7 @@ jobs:
         with:
           tag: ${{ github.event.workflow_run.head_branch }}
           allowUpdates: true
-          artifacts: 'main.js,manifest.json,styles.css'
+          artifacts: 'dist/main.js,dist/manifest.json,dist/styles.css'
           body: |
             ## 🧠 Mentat v${{ steps.get_version.outputs.VERSION }} Release
             
@@ -108,6 +108,6 @@ jobs:
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: |
-            main.js
-            manifest.json
-            styles.css
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css

@@ -4,15 +4,12 @@ import {
   MCPServerConfig,
   MCPClientState,
   MCPToolDefinition,
-  MCPMessage,
   MCPInitializeRequest,
   MCPInitializeResponse,
   MCPToolsListRequest,
   MCPToolsListResponse,
   MCPToolCallRequest,
   MCPToolCallResponse,
-  MCPConnectionStatus,
-  MCPErrorCode,
   MCPTransport
 } from './mcp-types';
 import { createTransport } from './mcp-transport';

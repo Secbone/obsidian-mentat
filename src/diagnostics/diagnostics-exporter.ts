@@ -1,4 +1,4 @@
-import { TFile, Notice } from 'obsidian';
+import { Notice } from 'obsidian';
 import PersonalAgentPlugin from '../main';
 import { ChatManager } from '../chat/chat-manager';
 import { ChatMessage } from '../types';
@@ -435,8 +435,8 @@ export class DiagnosticsExporter {
           diagram += `    Agent->>User: "${cleaned}"\n`;
         }
       } else if (msg.role === 'tool') {
-        let isSuccess = !msg.content.startsWith('Error:') && !msg.content.startsWith('Failed:');
-        let status = isSuccess ? 'Success' : 'Error';
+        const isSuccess = !msg.content.startsWith('Error:') && !msg.content.startsWith('Failed:');
+        const status = isSuccess ? 'Success' : 'Error';
         let text = msg.content.substring(0, 60);
         if (!isSuccess) {
           text = msg.content.substring(0, 100);
@@ -457,7 +457,7 @@ export class DiagnosticsExporter {
       .replace(/"/g, "'") // Replace inner double quotes with single quotes to keep valid string boundaries
       .replace(/\n/g, ' ')
       .replace(/[\r]/g, '')
-      .replace(/[\[\]\(\)\{\}<>]/g, ' ') // Clean up special Mermaid delimiters to protect diagram compilation
+      .replace(/[[\](){}<>]/g, ' ') // Clean up special Mermaid delimiters to protect diagram compilation
       .substring(0, 80)
       .trim();
   }

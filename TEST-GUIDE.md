@@ -23,7 +23,7 @@
 
 3. **复制文件**：
    ```bash
-   cp main.js styles.css manifest.json "/path/to/your/vault/.obsidian/plugins/personal-agent/"
+   cp dist/main.js dist/styles.css dist/manifest.json "/path/to/your/vault/.obsidian/plugins/personal-agent/"
    ```
 
 4. **重启 Obsidian**

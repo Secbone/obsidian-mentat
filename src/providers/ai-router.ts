@@ -2,7 +2,7 @@
 
 import { AIProvider } from '../types';
 import { TaskType } from '../types';
-import { AIProviderConfig, PersonalAgentSettings } from '../settings/settings';
+import { PersonalAgentSettings } from '../settings/settings';
 import { OpenAIProvider } from './openai-provider';
 import { AnthropicProvider } from './anthropic-provider';
 import { OllamaProvider } from './ollama-provider';

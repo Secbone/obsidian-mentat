@@ -43,7 +43,7 @@ export interface GenerateOptions {
   stopSequences?: string[];
   // Skill support
   skills?: any[]; // OpenAI functions or Anthropic tools
-  toolChoice?: 'auto' | 'none' | string;
+  toolChoice?: 'auto' | 'none' | (string & NonNullable<unknown>);
   abortSignal?: AbortSignal;
 }
 

@@ -79,7 +79,7 @@ export class UserInputModal extends Modal {
           this.selectedOption = option;
         });
 
-        const label = optionContainer.createEl('label', {
+        optionContainer.createEl('label', {
           text: option,
           attr: { for: `option-${index}` }
         });
@@ -99,7 +99,7 @@ export class UserInputModal extends Modal {
       }
 
       // Auto-focus the textarea
-      setTimeout(() => this.textInput?.focus(), 50);
+      window.setTimeout(() => this.textInput?.focus(), 50);
 
       // Handle Enter key (Ctrl+Enter or Cmd+Enter to submit)
       this.textInput.addEventListener('keydown', (e) => {

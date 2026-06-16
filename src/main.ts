@@ -67,8 +67,10 @@ export default class PersonalAgentPlugin extends Plugin {
     console.log('Mentat plugin loaded successfully');
   }
 
-  async onunload() {
+  onunload(): void {
     console.log('Unloading Mentat plugin');
+    this.chatOrchestrator?.dispose();
+    this.openCodeIntegration?.dispose();
   }
 
   private registerCommands(): void {

@@ -1,7 +1,6 @@
 import { BaseAgent, AgentDependencies } from '../agents/base-agent';
 import { AgentConfig, AgentContext, AgentResponse, AgentEvent } from '../agents/agent-types';
-import { AIProvider, ChatMessage } from '../types';
-import { Notice } from 'obsidian';
+import { AIProvider } from '../types';
 
 /**
  * DraftReviewPipeline - Multi-agent Drafting and Quality Auditing Pipeline

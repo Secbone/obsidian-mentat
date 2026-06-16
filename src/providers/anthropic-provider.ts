@@ -14,7 +14,7 @@ export interface AnthropicProviderConfig {
 export class AnthropicProvider implements AIProvider {
   id: string;
   name: string;
-  type: 'anthropic' = 'anthropic';
+  type = 'anthropic' as const;
   private client: Anthropic;
   private config: AnthropicProviderConfig;
 

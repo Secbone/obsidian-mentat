@@ -3,8 +3,7 @@
 import {
   MCPTransport,
   MCPMessage,
-  MCPServerConfig,
-  MCPErrorCode
+  MCPServerConfig
 } from './mcp-types';
 
 /**
@@ -31,6 +30,7 @@ export class StdioTransport implements MCPTransport {
     try {
       // Note: In Obsidian plugin environment, we need to use Node.js child_process
       // This will only work in desktop environments
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { spawn } = require('child_process');
 
       this.process = spawn(this.config.command!, this.config.args || [], {
@@ -79,13 +79,13 @@ export class StdioTransport implements MCPTransport {
     // If message has an ID, wait for response
     if (message.id !== undefined) {
       return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
+        const timeout = window.setTimeout(() => {
           this.responseHandlers.delete(message.id!.toString());
           reject(new Error('Request timeout'));
         }, 30000); // 30s timeout
 
         this.responseHandlers.set(message.id!.toString(), (response) => {
-          clearTimeout(timeout);
+          window.clearTimeout(timeout);
           if (response.error) {
             reject(new Error(response.error.message));
           } else {

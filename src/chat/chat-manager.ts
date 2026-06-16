@@ -25,7 +25,7 @@ export class ChatManager {
      this.plugin = plugin;
      // Fallback to a safe mock if platform is not yet initialized or present (e.g., in tests)
      const platform = plugin.platform || {
-       getConfigDir: () => plugin.app?.vault?.configDir || '.obsidian',
+       getConfigDir: () => plugin.app?.vault?.configDir || '',
        exists: async () => false,
        read: async () => '',
        write: async () => {},
@@ -211,7 +211,7 @@ export class ChatManager {
    * Generate a unique session ID
    */
   private generateSessionId(): string {
-    return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `session-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
   }
 
   /**

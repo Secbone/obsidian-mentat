@@ -1,6 +1,7 @@
 // Ollama Provider - Local AI models (HTTP API)
 
 import { AIProvider, GenerateOptions } from '../types';
+import { requestUrl } from 'obsidian';
 
 export interface OllamaProviderConfig {
   id: string;
@@ -19,7 +20,7 @@ interface OllamaMessage {
 export class OllamaProvider implements AIProvider {
   id: string;
   name: string;
-  type: 'ollama' = 'ollama';
+  type = 'ollama' as const;
   private config: OllamaProviderConfig;
 
   constructor(config: OllamaProviderConfig) {
@@ -44,7 +45,8 @@ export class OllamaProvider implements AIProvider {
         content: prompt
       });
 
-      const response = await fetch(`${this.config.baseURL}/api/chat`, {
+      const response = await requestUrl({
+        url: `${this.config.baseURL}/api/chat`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -61,11 +63,11 @@ export class OllamaProvider implements AIProvider {
         })
       });
 
-      if (!response.ok) {
-        throw new Error(`Ollama API error: ${response.statusText}`);
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Ollama API error: ${response.status}`);
       }
 
-      const data = await response.json();
+      const data = response.json as any;
       return data.message?.content || '';
     } catch (error: any) {
       console.error('OllamaProvider generate error:', error);
@@ -93,6 +95,7 @@ export class OllamaProvider implements AIProvider {
         content: prompt
       });
 
+      // eslint-disable-next-line no-restricted-globals
       const response = await fetch(`${this.config.baseURL}/api/chat`, {
         method: 'POST',
         headers: {
@@ -120,6 +123,7 @@ export class OllamaProvider implements AIProvider {
       }
 
       const decoder = new TextDecoder();
+      // eslint-disable-next-line no-constant-condition
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -148,7 +152,8 @@ export class OllamaProvider implements AIProvider {
     try {
       const embeddingModel = this.config.embeddingModel || 'nomic-embed-text';
 
-      const response = await fetch(`${this.config.baseURL}/api/embeddings`, {
+      const response = await requestUrl({
+        url: `${this.config.baseURL}/api/embeddings`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -159,11 +164,11 @@ export class OllamaProvider implements AIProvider {
         })
       });
 
-      if (!response.ok) {
-        throw new Error(`Ollama API error: ${response.statusText}`);
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Ollama API error: ${response.status}`);
       }
 
-      const data = await response.json();
+      const data = response.json as any;
       return {
         embedding: data.embedding || [],
         tokens: undefined // Ollama doesn't provide token count in response
@@ -183,7 +188,8 @@ export class OllamaProvider implements AIProvider {
     try {
       const embeddingModel = this.config.embeddingModel || 'nomic-embed-text';
 
-      const response = await fetch(`${this.config.baseURL}/api/embed`, {
+      const response = await requestUrl({
+        url: `${this.config.baseURL}/api/embed`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -194,8 +200,8 @@ export class OllamaProvider implements AIProvider {
         })
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (response.status >= 200 && response.status < 300) {
+        const data = response.json as any;
         return {
           embeddings: data.embeddings || [],
           tokens: undefined
@@ -203,7 +209,7 @@ export class OllamaProvider implements AIProvider {
       }
       
       // Fallback if /api/embed is not supported by older Ollama version
-      console.warn('Ollama /api/embed failed, falling back to sequential /api/embeddings:', response.statusText);
+      console.warn('Ollama /api/embed failed, falling back to sequential /api/embeddings:', response.status);
       const embeddings: number[][] = [];
       for (const text of texts) {
         const res = await this.generateEmbedding(text);
@@ -233,13 +239,15 @@ export class OllamaProvider implements AIProvider {
   async isAvailable(): Promise<boolean> {
     try {
       // Check if the model is available using tags endpoint
-      const response = await fetch(`${this.config.baseURL}/api/tags`);
+      const response = await requestUrl({
+        url: `${this.config.baseURL}/api/tags`
+      });
 
-      if (!response.ok) {
+      if (response.status < 200 || response.status >= 300) {
         return false;
       }
 
-      const data = await response.json();
+      const data = response.json as any;
       const hasModel = data.models?.some((m: any) =>
         m.name?.includes(this.config.model) ||
         m.model?.includes(this.config.model)

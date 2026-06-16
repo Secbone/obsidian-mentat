@@ -1,8 +1,8 @@
 // Skill Loader
 // Loads all skills from the skills/ directory according to Agent Skills specification
 
-import { App, TFile, FileSystemAdapter } from 'obsidian';
-import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDefinition, isExecutableSkill, isDocumentationSkill } from '../skill-types';
+import { App } from 'obsidian';
+import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDefinition } from '../skill-types';
 
 // Import all skill implementations (compile-time imports for TypeScript)
 import * as QueryNotesImpl from '../../../skills/query-notes/scripts';
@@ -104,35 +104,20 @@ export class SkillLoader {
   private async scanSkillDirectories(): Promise<string[]> {
     const adapter = this.app.vault.adapter;
 
-    if (!(adapter instanceof FileSystemAdapter)) {
-      console.warn('[SkillLoader] Not using FileSystemAdapter');
-      return [];
-    }
-
     try {
-      const basePath = adapter.getBasePath();
-      const skillsPath = `${basePath}/${this.skillsBasePath}`;
-
-      const fs = require('fs');
-      const path = require('path');
-
-      if (!fs.existsSync(skillsPath)) {
+      const skillsPath = this.skillsBasePath;
+      if (!(await adapter.exists(skillsPath))) {
         console.warn(`[SkillLoader] Skills directory not found: ${skillsPath}`);
         return [];
       }
-
-      const entries = fs.readdirSync(skillsPath, { withFileTypes: true });
-
+      const listing = await adapter.list(skillsPath);
       const skillDirs: string[] = [];
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const skillMdPath = path.join(skillsPath, entry.name, 'SKILL.md');
-          if (fs.existsSync(skillMdPath)) {
-            skillDirs.push(entry.name);
-          }
+      for (const folder of listing.folders) {
+        const skillMdPath = `${skillsPath}/${folder}/SKILL.md`;
+        if (await adapter.exists(skillMdPath)) {
+          skillDirs.push(folder);
         }
       }
-
       return skillDirs;
     } catch (error) {
       console.error('[SkillLoader] Error scanning skills directory:', error);
@@ -173,23 +158,14 @@ export class SkillLoader {
   private async readSkillMetadata(skillMdPath: string): Promise<SkillMetadata | null> {
     const adapter = this.app.vault.adapter;
 
-    if (!(adapter instanceof FileSystemAdapter)) {
-      console.warn('[SkillLoader] Not using FileSystemAdapter');
-      return null;
-    }
-
     try {
-      const basePath = adapter.getBasePath();
-      const fullPath = `${basePath}/${skillMdPath}`;
-
-      const fs = require('fs');
-
-      if (!fs.existsSync(fullPath)) {
+      const fullPath = `${skillMdPath}`;
+      if (!(await adapter.exists(fullPath))) {
         console.error(`[SkillLoader] SKILL.md not found: ${fullPath}`);
         return null;
       }
 
-      const content = fs.readFileSync(fullPath, 'utf-8');
+      const content = await adapter.read(fullPath);
 
       // Parse frontmatter
       const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);

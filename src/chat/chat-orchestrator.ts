@@ -14,7 +14,6 @@ import { PROMPT_PATHS, FALLBACK_PROMPTS, TEMPLATE_VARS } from '../prompts/prompt
 import { BaseAgent, AgentDependencies } from '../agents/base-agent';
 import { AgentManager } from '../agents/agent-manager';
 import { AgentConfig, AgentContext, AgentEvent, AgentResponse } from '../agents/agent-types';
-import { DraftReviewPipeline } from './draft-review-pipeline';
 import { VaultDiagnosticsLogger } from '../diagnostics/vault-diagnostics-logger';
 import { IPlatformAdapter, IPlatformFile } from '../types/platform';
 import { ConfirmationModal } from '../ui/confirmation-modal';
@@ -104,6 +103,10 @@ export class ChatOrchestrator {
 
     this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext);
     this.diagnosticsLogger = new VaultDiagnosticsLogger(platform.getVault());
+  }
+
+  dispose(): void {
+    this.mcpManager?.disconnectAll();
   }
 
   /**

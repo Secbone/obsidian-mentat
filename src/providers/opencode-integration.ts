@@ -25,6 +25,10 @@ export class OpenCodeIntegration {
     this.apiKey = plugin.settings.opencodeApiKey;
   }
 
+  dispose(): void {
+    // No persistent resources to clean up
+  }
+
   /**
    * Check if OpenCode is available
    */

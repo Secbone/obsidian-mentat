@@ -1,6 +1,6 @@
 // Core types for Skill system
 
-import { z, ZodTypeAny } from 'zod';
+import { ZodTypeAny } from 'zod';
 
 /**
  * Skill execution status
