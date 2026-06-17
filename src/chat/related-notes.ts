@@ -1,7 +1,7 @@
 // Related Notes Recommender - Suggests related notes based on conversation context
 
 import { TFile } from 'obsidian';
-import PersonalAgentPlugin from '../main';
+import MentatPlugin from '../main';
 import { IndexManager } from '../indexing/index-manager';
 
 export interface RelatedNote {
@@ -12,7 +12,7 @@ export interface RelatedNote {
 
 export class RelatedNotesRecommender {
   constructor(
-    private plugin: PersonalAgentPlugin,
+    private plugin: MentatPlugin,
     private indexManager: IndexManager
   ) {}
 

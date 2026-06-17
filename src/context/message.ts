@@ -87,7 +87,7 @@ export class Message {
   /**
    * Convert to plain object
    */
-  toJSON(): Record<string, any> {
+  toJSON(): { role: string; content: string; [key: string]: unknown } {
     return {
       role: this.role,
       content: this.content,
@@ -102,8 +102,8 @@ export class Message {
   /**
    * Create from plain object (for deserialization)
    */
-  static fromJSON(data: any): Message {
-    return new Message(data);
+  static fromJSON(data: Record<string, unknown>): Message {
+    return new Message(data as { role: MessageRole; content: string; timestamp?: number; sources?: unknown[]; name?: string; tool_call_id?: string; tool_calls?: ToolCall[] });
   }
 }
 

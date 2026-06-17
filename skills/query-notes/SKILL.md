@@ -3,7 +3,7 @@ name: query_notes
 description: Search documents by content, tags, folders, or glob patterns
 metadata:
   version: "1.0.0"
-  author: personal-agent
+  author: mentat
   tags: [search, query, filter]
   executable: true
   implementation: scripts/index.ts

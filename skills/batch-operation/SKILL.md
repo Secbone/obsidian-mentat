@@ -3,7 +3,7 @@ name: batch_operation
 description: Perform bulk operations on multiple documents matching filter criteria
 metadata:
   version: "1.0.0"
-  author: personal-agent
+  author: mentat
   tags: [batch, bulk, update]
   executable: true
   implementation: scripts/index.ts

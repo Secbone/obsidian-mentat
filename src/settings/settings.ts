@@ -3,7 +3,7 @@ import { MCPServerConfig } from '../skills/mcp/mcp-types';
 import { SkillInvocationConfig } from '../types';
 import { ContextOptions } from '../context/context-types';
 
-export interface PersonalAgentSettings {
+export interface MentatSettings {
   // AI Providers Configuration
   aiProviders: AIProviderConfig[];
   defaultProvider: string; // Provider ID for default tasks
@@ -85,6 +85,8 @@ export interface PersonalAgentSettings {
 
   // Input area send options
   sendWithCmdEnter?: boolean;
+
+  [key: string]: unknown;
 }
 
 export interface SkillConfig {
@@ -116,7 +118,7 @@ export interface AIProviderConfig {
   maxTokens?: number;
 }
 
-export const DEFAULT_SETTINGS: PersonalAgentSettings = {
+export const DEFAULT_SETTINGS: MentatSettings = {
   aiProviders: [],
   defaultProvider: '',
 

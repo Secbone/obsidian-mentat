@@ -78,24 +78,24 @@ export function safeParseJson(
   jsonStr: string,
   onHealed?: (healedStr: string, errorMsg: string) => void,
   onFailed?: (errorMsg: string) => void
-): Record<string, any> {
+): Record<string, unknown> {
   const preHealedString = healWindowsPaths(jsonStr);
 
   try {
     return JSON.parse(preHealedString);
-  } catch (error: any) {
+  } catch (error: unknown) {
     try {
       const healedArgsString = escapeLoneBackslashes(preHealedString);
       const parsed = JSON5.parse(healedArgsString);
       if (onHealed) {
-        onHealed(healedArgsString, error.message);
+        onHealed(healedArgsString, error instanceof Error ? error.message : String(error));
       }
       return parsed;
-    } catch (_healingError: any) {
+    } catch (_healingError: unknown) {
       if (onFailed) {
-        onFailed(error.message);
+        onFailed(error instanceof Error ? error.message : String(error));
       }
-      throw new Error(`Failed to parse JSON string: ${error.message}`);
+      throw new Error(`Failed to parse JSON string: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

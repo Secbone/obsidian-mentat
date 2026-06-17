@@ -13,7 +13,7 @@ if [ -z "$1" ]; then
 fi
 
 VAULT_PATH="$1"
-PLUGIN_DIR="$VAULT_PATH/.obsidian/plugins/personal-agent"
+PLUGIN_DIR="$VAULT_PATH/.obsidian/plugins/mentat"
 
 # 检查 vault 是否存在
 if [ ! -d "$VAULT_PATH" ]; then

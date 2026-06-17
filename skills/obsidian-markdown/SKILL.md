@@ -3,7 +3,7 @@ name: obsidian-markdown
 description: Guide for Obsidian Flavored Markdown syntax and best practices
 metadata:
   version: "1.0.0"
-  author: personal-agent
+  author: mentat
   tags: [obsidian, markdown, syntax]
   executable: false
   category: documentation

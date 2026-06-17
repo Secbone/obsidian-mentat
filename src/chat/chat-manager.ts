@@ -134,7 +134,7 @@ export class ChatManager {
   /**
    * Get context optimized for LLM (convenience method)
    */
-  async getContextForLLM(options?: ContextOptions): Promise<any[]> {
+  async getContextForLLM(options?: ContextOptions): Promise<unknown[]> {
     const context = await this.createContext();
     return context.getContext('llm', options);
   }
@@ -142,7 +142,7 @@ export class ChatManager {
   /**
    * Get context enhanced for display (convenience method)
    */
-  async getContextForDisplay(options?: ContextOptions): Promise<any[]> {
+  async getContextForDisplay(options?: ContextOptions): Promise<unknown[]> {
     const context = await this.createContext();
     return context.getContext('display', options);
   }
@@ -150,7 +150,7 @@ export class ChatManager {
   /**
    * Get raw context (convenience method)
    */
-  async getRawContext(): Promise<any[]> {
+  async getRawContext(): Promise<unknown[]> {
     const context = await this.createContext();
     return context.getContext('raw');
   }

@@ -8,7 +8,7 @@ describe('ChatView UI Smoke Test', () => {
   it('should initialize and run onOpen without throwing error', async () => {
     const platform = new MemoryPlatformAdapter();
     
-    // Create a robust Mock PersonalAgentPlugin
+    // Create a robust Mock MentatPlugin
     const mockPlugin = {
       platform: platform,
       settings: {

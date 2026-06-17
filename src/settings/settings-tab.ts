@@ -1,14 +1,15 @@
-import { App, PluginSettingTab, Setting, Notice, Modal, setIcon } from 'obsidian';
-import PersonalAgentPlugin from '../main';
+import { App, PluginSettingTab, Setting, Notice, Modal, setIcon, TextComponent, SliderComponent } from 'obsidian';
+import MentatPlugin from '../main';
 import { AIProviderConfig } from './settings';
+import { SkillInvocationConfig } from '../types';
 import { ProviderEditModal } from './provider-edit-modal';
 
 export class SettingsTab extends PluginSettingTab {
-  plugin: PersonalAgentPlugin;
+  plugin: MentatPlugin;
   private activeTab: 'general' | 'skills' = 'general';
   private searchQuery: string = '';
 
-  constructor(app: App, plugin: PersonalAgentPlugin) {
+  constructor(app: App, plugin: MentatPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
@@ -159,7 +160,7 @@ export class SettingsTab extends PluginSettingTab {
           dropdown
             .setValue(this.plugin.settings.taskRouting[task.key as keyof typeof this.plugin.settings.taskRouting] || '')
             .onChange(async (value) => {
-              (this.plugin.settings.taskRouting as any)[task.key] = value;
+              (this.plugin.settings as Record<string, unknown>)[task.key] = value;
               await this.plugin.saveSettings();
             });
         });
@@ -314,7 +315,7 @@ Write your custom style instructions and preferences here. This file is dynamica
               new Notice('Failed to locate preferences file in vault');
             }
           } catch (err) {
-            new Notice(`Failed to open/create preferences: ${(err as any).message}`);
+            new Notice(`Failed to open/create preferences: ${err instanceof Error ? err.message : String(err)}`);
           }
         }));
 
@@ -395,7 +396,7 @@ ${folderGuidelines}
               new Notice('Failed to locate vault map file');
             }
           } catch (err) {
-            new Notice(`Failed to open/create vault map: ${(err as any).message}`);
+            new Notice(`Failed to open/create vault map: ${err instanceof Error ? err.message : String(err)}`);
           }
         }))
       .addButton(button => button
@@ -422,9 +423,9 @@ ${folderGuidelines}
         .setName(feature.name)
         .setDesc(feature.desc)
         .addToggle(toggle => toggle
-          .setValue((this.plugin.settings as any)[feature.key])
+          .setValue(this.plugin.settings[feature.key] as boolean)
           .onChange(async (value) => {
-            (this.plugin.settings as any)[feature.key] = value;
+            this.plugin.settings[feature.key] = value;
             await this.plugin.saveSettings();
           }));
     });
@@ -483,8 +484,8 @@ ${folderGuidelines}
       .setName('Agent Max Turns')
       .setDesc('Maximum number of iterations the AI agent can perform when executing tasks (1-99). Default: 20. Higher values allow for more complex multi-step operations.');
 
-    let textCtrl: any = null;
-    let sliderCtrl: any = null;
+    let textCtrl: TextComponent | null = null;
+    let sliderCtrl: SliderComponent | null = null;
 
     // Add text input for precise control
     maxTurnsSetting.addText(text => {
@@ -545,16 +546,16 @@ ${folderGuidelines}
         .onChange(async (value) => {
           this.plugin.settings.skillInvocationMode = value as 'auto' | 'progressive' | 'native';
           if (!this.plugin.settings.skillInvocationConfig) {
-            this.plugin.settings.skillInvocationConfig = { mode: value as any };
+            this.plugin.settings.skillInvocationConfig = { mode: value as 'auto' | 'progressive' | 'native' };
           } else {
-            this.plugin.settings.skillInvocationConfig.mode = value as any;
+            this.plugin.settings.skillInvocationConfig.mode = value as 'auto' | 'progressive' | 'native';
           }
           await this.plugin.saveSettings();
           this.display(); // Redraw to show/hide dynamic fields
         }));
 
     if (this.plugin.settings.skillInvocationMode === 'auto') {
-      const config = (this.plugin.settings.skillInvocationConfig || {}) as any;
+      const config = (this.plugin.settings.skillInvocationConfig || {}) as SkillInvocationConfig;
       const directSkills = config.directCallSkills || [
         'obsidian:read_note',
         'obsidian:query_notes',
@@ -616,13 +617,14 @@ ${folderGuidelines}
       this.searchQuery = (e.target as HTMLInputElement).value;
       const cards = containerEl.querySelectorAll('.skill-card');
       const query = this.searchQuery.toLowerCase();
-      cards.forEach((card: any) => {
-        const skillName = card.dataset.skillName.toLowerCase();
-        const description = card.dataset.description.toLowerCase();
+      cards.forEach((card: Element) => {
+        const htmlCard = card as HTMLElement;
+        const skillName = (htmlCard.dataset.skillName || '').toLowerCase();
+        const description = (htmlCard.dataset.description || '').toLowerCase();
         if (skillName.includes(query) || description.includes(query)) {
-          card.classList.remove('skill-card-hidden');
+          htmlCard.classList.remove('skill-card-hidden');
         } else {
-          card.classList.add('skill-card-hidden');
+          htmlCard.classList.add('skill-card-hidden');
         }
       });
     });
@@ -709,7 +711,7 @@ ${folderGuidelines}
           }));
 
       // Toggle 3: Require Confirmation
-      const defaultConfirm = !!(skill.metadata as any)?.requiresConfirmation;
+      const defaultConfirm = !!(skill.metadata as Record<string, unknown>)?.requiresConfirmation;
       const confirmValue = skillConfig.requireConfirmation !== undefined ? skillConfig.requireConfirmation : defaultConfirm;
       
       new Setting(controls)
@@ -757,14 +759,14 @@ ${folderGuidelines}
 }
 
 class RebuildConfirmModal extends Modal {
-  private plugin: PersonalAgentPlugin;
+  private plugin: MentatPlugin;
   private stage: 'confirm' | 'loading' | 'success' | 'error' = 'confirm';
   private progressVal: number = 0;
   private statusMsg: string = '';
   private errorMsg: string = '';
   private isCancelled: boolean = false;
 
-  constructor(app: App, plugin: PersonalAgentPlugin) {
+  constructor(app: App, plugin: MentatPlugin) {
     super(app);
     this.plugin = plugin;
   }
@@ -863,7 +865,7 @@ ${folderGuidelines}
     } catch (err) {
       if (this.isCancelled) return;
       this.stage = 'error';
-      this.errorMsg = `本地重建失败: ${(err as any).message}`;
+      this.errorMsg = `本地重建失败: ${err instanceof Error ? err.message : String(err)}`;
       this.updateUI();
     }
   }
@@ -890,7 +892,7 @@ ${folderGuidelines}
     } catch (err) {
       if (this.isCancelled) return;
       this.stage = 'error';
-      this.errorMsg = (err as any).message || String(err);
+      this.errorMsg = err instanceof Error ? err.message : String(err);
       this.updateUI();
     }
   }
@@ -913,7 +915,7 @@ ${folderGuidelines}
         new Notice('❌ 找不到重建后的知识地图文件');
       }
     } catch (e) {
-      new Notice(`无法打开知识地图: ${(e as any).message}`);
+      new Notice(`无法打开知识地图: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

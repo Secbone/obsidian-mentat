@@ -3,7 +3,7 @@ name: web_search
 description: Search the web and return relevant results with automatic engine selection and fallback
 metadata:
   version: "1.0.0"
-  author: personal-agent
+  author: mentat
   tags: [web, search, external]
   executable: true
   implementation: scripts/index.ts

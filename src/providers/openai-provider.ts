@@ -61,9 +61,9 @@ export class OpenAIProvider implements AIProvider {
       });
 
       return response.choices[0]?.message?.content || '';
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OpenAIProvider generate error:', error);
-      throw new Error(`OpenAI API error: ${error.message}`);
+      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -104,9 +104,9 @@ export class OpenAIProvider implements AIProvider {
           onChunk(content);
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OpenAIProvider generateStream error:', error);
-      throw new Error(`OpenAI API error: ${error.message}`);
+      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -125,9 +125,9 @@ export class OpenAIProvider implements AIProvider {
         embedding: response.data[0].embedding,
         tokens: response.usage?.total_tokens
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OpenAIProvider generateEmbedding error:', error);
-      throw new Error(`OpenAI Embedding error: ${error.message}`);
+      throw new Error(`OpenAI Embedding error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -151,9 +151,9 @@ export class OpenAIProvider implements AIProvider {
         embeddings: response.data.map(d => d.embedding),
         tokens: response.usage?.total_tokens
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OpenAIProvider generateEmbeddings error:', error);
-      throw new Error(`OpenAI Embeddings error: ${error.message}`);
+      throw new Error(`OpenAI Embeddings error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -171,7 +171,7 @@ export class OpenAIProvider implements AIProvider {
         max_tokens: 5
       });
       return true;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OpenAIProvider availability check failed:', error);
       return false;
     }
@@ -247,9 +247,9 @@ export class OpenAIProvider implements AIProvider {
           cacheCreationTokens: 0
         } : undefined
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OpenAIProvider generateWithSkills error:', error);
-      throw new Error(`OpenAI API error: ${error.message}`);
+      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -371,9 +371,9 @@ export class OpenAIProvider implements AIProvider {
           cacheCreationTokens: 0
         } : undefined
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OpenAIProvider generateStreamWithSkills error:', error);
-      throw new Error(`OpenAI API error: ${error.message}`);
+      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

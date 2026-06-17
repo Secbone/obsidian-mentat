@@ -49,7 +49,7 @@ export class AnthropicProvider implements AIProvider {
       return textContent ? textContent.text : '';
     } catch (error) {
       console.error('AnthropicProvider generate error:', error);
-      throw new Error(`Anthropic API error: ${(error as any).message}`);
+      throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -82,7 +82,7 @@ export class AnthropicProvider implements AIProvider {
       }
     } catch (error) {
       console.error('AnthropicProvider generateStream error:', error);
-      throw new Error(`Anthropic API error: ${(error as any).message}`);
+      throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -183,7 +183,7 @@ export class AnthropicProvider implements AIProvider {
       };
     } catch (error) {
       console.error('AnthropicProvider generateWithSkills error:', error);
-      throw new Error(`Anthropic API error: ${(error as any).message}`);
+      throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -279,7 +279,7 @@ export class AnthropicProvider implements AIProvider {
       };
     } catch (error) {
       console.error('AnthropicProvider generateStreamWithSkills error:', error);
-      throw new Error(`Anthropic API error: ${(error as any).message}`);
+      throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -332,12 +332,12 @@ export class AnthropicProvider implements AIProvider {
             if (typeof tc.arguments === 'string') {
               try {
                 input = JSON.parse(tc.arguments);
-              } catch (error: any) {
+              } catch (error: unknown) {
                 console.error('[AnthropicProvider convertMessages] Failed to parse tool arguments:', error);
                 console.error('[AnthropicProvider convertMessages] Tool name:', tc.name);
                 console.error('[AnthropicProvider convertMessages] Arguments length:', tc.arguments.length);
                 console.error('[AnthropicProvider convertMessages] Arguments preview:', tc.arguments.substring(0, 500));
-                throw new Error(`Failed to parse tool arguments for ${tc.name}: ${error.message}`);
+                throw new Error(`Failed to parse tool arguments for ${tc.name}: ${error instanceof Error ? error.message : String(error)}`);
               }
             } else {
               input = tc.arguments;

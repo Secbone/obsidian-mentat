@@ -3,7 +3,7 @@ name: ask_user
 description: Ask user a question to get clarification or guidance
 metadata:
   version: "1.0.0"
-  author: personal-agent
+  author: mentat
   tags: [interaction, guidance, clarification]
   executable: true
   implementation: scripts/index.ts

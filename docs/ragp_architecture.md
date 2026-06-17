@@ -1,6 +1,6 @@
 # RAGP (Reactive Async-Generator Pipeline) 智能体架构设计方案
 
-本设计方案旨在为 `personal-agent` 提供一套极轻量、响应式、完全可控且深度契合 Obsidian 沙盒环境的自主 AI 智能体（Agent）架构。
+本设计方案旨在为 `mentat` 提供一套极轻量、响应式、完全可控且深度契合 Obsidian 沙盒环境的自主 AI 智能体（Agent）架构。
 
 该架构通过 JavaScript/TypeScript 原生的**异步生成器（Async Generators）**和**双向事件驱动流**，实现高频人机交互（Human-in-the-Loop）、精细状态感知和极速流式渲染。
 

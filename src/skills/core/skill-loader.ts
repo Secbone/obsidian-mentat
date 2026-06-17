@@ -184,7 +184,7 @@ export class SkillLoader {
       return {
         name: frontmatter.name as string,
         description: frontmatter.description as string,
-        metadata: frontmatter.metadata as any,
+        metadata: frontmatter.metadata as Record<string, unknown>,
         content: bodyContent.trim()
       };
     } catch (error) {
@@ -245,12 +245,12 @@ export class SkillLoader {
   /**
    * Simple YAML frontmatter parser
    */
-  private parseFrontmatter(frontmatterText: string): Record<string, any> {
-    const result: Record<string, any> = {};
+  private parseFrontmatter(frontmatterText: string): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
     const lines = frontmatterText.split('\n');
     let currentKey: string | null = null;
-    let currentArray: any[] | null = null;
-    let currentObject: Record<string, any> | null = null;
+    let currentArray: unknown[] | null = null;
+    let currentObject: Record<string, unknown> | null = null;
     let indentLevel = 0;
 
     for (const line of lines) {
@@ -296,22 +296,23 @@ export class SkillLoader {
             if (!result[currentKey] || typeof result[currentKey] !== 'object') {
               result[currentKey] = {};
             }
+            const nested = result[currentKey] as Record<string, unknown>;
 
             if (value === '') {
               // Start of array
               currentArray = [];
-              result[currentKey][key] = currentArray;
+              nested[key] = currentArray;
             } else if (value.startsWith('[') && value.endsWith(']')) {
               // Inline array
               const items = value.slice(1, -1).split(',').map(s => s.trim());
-              result[currentKey][key] = items;
+              nested[key] = items;
               currentArray = null;
             } else if (value === 'true') {
-              result[currentKey][key] = true;
+              nested[key] = true;
             } else if (value === 'false') {
-              result[currentKey][key] = false;
+              nested[key] = false;
             } else {
-              result[currentKey][key] = value;
+              nested[key] = value;
             }
           }
         }

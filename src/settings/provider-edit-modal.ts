@@ -1,11 +1,11 @@
 // Provider Edit Modal - Configure AI provider settings
 
 import { App, Modal, Setting, Notice } from 'obsidian';
-import PersonalAgentPlugin from '../main';
+import MentatPlugin from '../main';
 import { AIProviderConfig } from './settings';
 
 export class ProviderEditModal extends Modal {
-  private plugin: PersonalAgentPlugin;
+  private plugin: MentatPlugin;
   private provider: AIProviderConfig | null;
   private index: number;
   private tempConfig: Partial<AIProviderConfig>;
@@ -14,7 +14,7 @@ export class ProviderEditModal extends Modal {
 
   constructor(
     app: App,
-    plugin: PersonalAgentPlugin,
+    plugin: MentatPlugin,
     provider: AIProviderConfig | null,
     index: number,
     onSave: () => void

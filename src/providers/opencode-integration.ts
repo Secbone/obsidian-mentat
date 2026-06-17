@@ -1,6 +1,6 @@
 // OpenCode Integration - Optional advanced automation
 
-import PersonalAgentPlugin from '../main';
+import MentatPlugin from '../main';
 import { requestUrl } from 'obsidian';
 
 export interface OpenCodeTask {
@@ -16,11 +16,11 @@ export interface OpenCodeResult {
 }
 
 export class OpenCodeIntegration {
-  private plugin: PersonalAgentPlugin;
+  private plugin: MentatPlugin;
   private baseURL: string;
   private apiKey: string;
 
-  constructor(plugin: PersonalAgentPlugin) {
+  constructor(plugin: MentatPlugin) {
     this.plugin = plugin;
     this.baseURL = plugin.settings.opencodeApiUrl;
     this.apiKey = plugin.settings.opencodeApiKey;
@@ -84,7 +84,7 @@ export class OpenCodeIntegration {
       console.error('OpenCode execution error:', error);
       return {
         success: false,
-        error: (error as any).message
+        error: error instanceof Error ? error.message : String(error)
       };
     }
   }

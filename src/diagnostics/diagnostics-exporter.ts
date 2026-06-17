@@ -1,5 +1,5 @@
 import { Notice } from 'obsidian';
-import PersonalAgentPlugin from '../main';
+import MentatPlugin from '../main';
 import { ChatManager } from '../chat/chat-manager';
 import { ChatMessage } from '../types';
 
@@ -8,7 +8,7 @@ export class DiagnosticsExporter {
    * Export the current active chat session to a premium Markdown note inside the user's vault.
    */
   static async exportSession(
-    plugin: PersonalAgentPlugin,
+    plugin: MentatPlugin,
     chatManager: ChatManager
   ): Promise<string | null> {
     try {
@@ -341,9 +341,9 @@ export class DiagnosticsExporter {
       await leaf.openFile(file);
 
       return fileFullPath;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[DiagnosticsExporter] Failed to export session:', err);
-      new Notice(`❌ 导出诊断报告异常：${err.message}`);
+      new Notice(`❌ 导出诊断报告异常：${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }
@@ -353,7 +353,7 @@ export class DiagnosticsExporter {
    * and extracts logs whose timestamps fall within the session.
    */
   private static async retrieveIncidentLogs(
-    plugin: PersonalAgentPlugin,
+    plugin: MentatPlugin,
     startTime: number,
     endTime: number
   ): Promise<any[]> {
@@ -468,7 +468,7 @@ export class DiagnosticsExporter {
   private static generateJsonPayload(messages: ChatMessage[]): string {
     try {
       const cleanArray = messages.map(m => {
-        const entry: Record<string, any> = {
+        const entry: Record<string, unknown> = {
           role: m.role,
           content: m.content
         };
@@ -496,7 +496,7 @@ export class DiagnosticsExporter {
    * Open Diagnostics and compile debug logs into a beautiful markdown note.
    * Extracted from main.ts callback to satisfy SRP.
    */
-  static async generateAndOpenDiagnosticsLog(plugin: PersonalAgentPlugin): Promise<void> {
+  static async generateAndOpenDiagnosticsLog(plugin: MentatPlugin): Promise<void> {
     const adapter = plugin.app.vault.adapter;
     const logPath = '.mentat/diagnostics.jsonl';
     
@@ -609,8 +609,8 @@ export class DiagnosticsExporter {
       } else {
         new Notice('Log compiled. Please open "Mentat Debug Log.md" in your vault root.');
       }
-    } catch (err: any) {
-      new Notice(`Failed to load diagnostics: ${err.message}`);
+    } catch (err: unknown) {
+      new Notice(`Failed to load diagnostics: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }

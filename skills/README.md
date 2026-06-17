@@ -55,7 +55,7 @@ name: skill_name
 description: Brief description of what the skill does
 metadata:
   version: "1.0.0"
-  author: personal-agent
+  author: mentat
   tags: [tag1, tag2]
   executable: true  # false for documentation-only skills
   implementation: scripts/index.ts
@@ -160,7 +160,7 @@ interface SkillContext {
   metadataCache: MetadataCache;    // File metadata and cache
   workspace: Workspace;            // Workspace API
   indexManager: IndexManager;      // Semantic search index
-  plugin: PersonalAgentPlugin;     // Main plugin instance
+  plugin: MentatPlugin;     // Main plugin instance
 }
 ```
 

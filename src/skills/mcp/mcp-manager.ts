@@ -114,9 +114,8 @@ export class MCPManager {
     for (const [serverId, config] of this.configs.entries()) {
       if (config.enabled && config.autoConnect) {
         connectPromises.push(
-          this.connect(serverId).catch((error: any) => {
+          this.connect(serverId).catch((error: unknown) => {
             console.error(`[MCPManager] Auto-connect failed for ${serverId}:`, error);
-            return error;
           })
         );
       }
@@ -208,7 +207,7 @@ export class MCPManager {
 
       return { success: true, toolCount };
     } catch (error) {
-      return { success: false, error: (error as any).message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 

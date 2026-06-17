@@ -30,7 +30,7 @@ export interface AgentState {
   fullResponse: string;
   skillCalls: SkillCall[];
   onStream?: (chunk: string) => void;
-  skills: any[];
+  skills: unknown[];
 }
 
 /**
@@ -68,7 +68,7 @@ export class BaseAgent {
   async *execute(
     prompt: string,
     context: AgentContext
-  ): AsyncGenerator<AgentEvent, AgentResponse, any> {
+  ): AsyncGenerator<AgentEvent, AgentResponse, unknown> {
     const startTime = Date.now();
     const systemPrompt = this.buildSystemPrompt();
 
@@ -98,8 +98,8 @@ export class BaseAgent {
           temperature: this.config.temperature || 0.7,
           abortSignal: context.abortSignal
         });
-      } catch (err: any) {
-        yield { type: 'error', message: `大模型执行异常: ${err.message}` };
+      } catch (err: unknown) {
+        yield { type: 'error', message: `大模型执行异常: ${err instanceof Error ? err.message : String(err)}` };
         throw err;
       }
 
@@ -219,8 +219,8 @@ export class BaseAgent {
           cacheReadTokens += result.usage.cacheReadTokens ?? 0;
           cacheCreationTokens += result.usage.cacheCreationTokens ?? 0;
         }
-      } catch (err: any) {
-        yield { type: 'error', message: `大模型决策异常: ${err.message}` };
+      } catch (err: unknown) {
+        yield { type: 'error', message: `大模型决策异常: ${err instanceof Error ? err.message : String(err)}` };
         throw err;
       }
 
@@ -298,7 +298,7 @@ export class BaseAgent {
           newSkillCalls.push({
             id: toolCall.id,
             skillName: toolCall.name,
-            namespace: 'guard' as any,
+            namespace: 'guard',
             parameters: typeof toolCall.arguments === 'string' ? { raw: toolCall.arguments } : toolCall.arguments,
             status: 'error',
             timestamp: Date.now(),
@@ -373,7 +373,7 @@ export class BaseAgent {
   private async *streamModel(
     messages: ChatMessage[],
     options: any
-  ): AsyncGenerator<AgentEvent, GenerateResponse, any> {
+  ): AsyncGenerator<AgentEvent, GenerateResponse, unknown> {
     const queue: AgentEvent[] = [];
     let resolveNext: (() => void) | null = null;
     let completed = false;
@@ -452,7 +452,7 @@ export class BaseAgent {
   private async *streamModelSimple(
     prompt: string,
     options: any
-  ): AsyncGenerator<AgentEvent, string, any> {
+  ): AsyncGenerator<AgentEvent, string, unknown> {
     const queue: AgentEvent[] = [];
     let resolveNext: (() => void) | null = null;
     let completed = false;
@@ -545,7 +545,7 @@ export class BaseAgent {
   private async *executeSingleToolCall(
     toolCall: ToolCall,
     context: AgentContext
-  ): AsyncGenerator<AgentEvent, { toolMessages: ChatMessage[]; skillCalls: SkillCall[] }, any> {
+  ): AsyncGenerator<AgentEvent, { toolMessages: ChatMessage[]; skillCalls: SkillCall[] }, unknown> {
     const toolMessages: ChatMessage[] = [];
     const skillCalls: SkillCall[] = [];
     const toolName = toolCall.name;
@@ -563,16 +563,16 @@ export class BaseAgent {
           this.logDiagnosticIncident(toolName, typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments), errorMsg, 'Failed (Strict Parsing)');
         }
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Parsing failed
       yield { type: 'skill_call', name: toolName, params: toolCall.arguments };
       yield { type: 'status', message: `⚠️ 工具 [${toolName}] 参数解析失败，正在引导智能体自我纠错...` };
-      yield { type: 'skill_error', name: toolName, error: err.message };
+      yield { type: 'skill_error', name: toolName, error: err instanceof Error ? err.message : String(err) };
 
       return {
         toolMessages: [{
           role: 'tool',
-          content: `Error: Failed to parse arguments for tool '${toolName}'. Details: ${err.message}. Please regenerate the tool call with valid, balanced JSON formatting.`,
+          content: `Error: Failed to parse arguments for tool '${toolName}'. Details: ${err instanceof Error ? err.message : String(err)}. Please regenerate the tool call with valid, balanced JSON formatting.`,
           timestamp: Date.now(),
           tool_call_id: toolCall.id,
           name: toolName
@@ -584,7 +584,7 @@ export class BaseAgent {
           parameters: typeof toolCall.arguments === 'string' ? { raw_arguments: toolCall.arguments } : toolCall.arguments,
           status: 'error',
           timestamp: Date.now(),
-          result: { success: false, error: err.message }
+          result: { success: false, error: err instanceof Error ? err.message : String(err) }
         }]
       };
     }
@@ -702,12 +702,12 @@ export class BaseAgent {
             result: { success: isSuccess, data: isSuccess ? details : undefined, error: isSuccess ? undefined : details }
           }]
         };
-      } catch (err: any) {
-        yield { type: 'skill_error', name: `spec:${targetSkillName}`, error: err.message };
+      } catch (err: unknown) {
+        yield { type: 'skill_error', name: `spec:${targetSkillName}`, error: err instanceof Error ? err.message : String(err) };
         return {
           toolMessages: [{
             role: 'tool',
-            content: `Error: Exception during execution: ${err.message}`,
+            content: `Error: Exception during execution: ${err instanceof Error ? err.message : String(err)}`,
             timestamp: Date.now(),
             tool_call_id: toolCall.id,
             name: toolName
@@ -776,14 +776,14 @@ export class BaseAgent {
           }]
         };
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       yield { type: 'status', message: `⚠️ 工具 [${targetSkillName}] 参数解析或运行异常，正在自动纠错...` };
-      yield { type: 'skill_error', name: callNameForEvent, error: err.message };
+      yield { type: 'skill_error', name: callNameForEvent, error: err instanceof Error ? err.message : String(err) };
 
       return {
         toolMessages: [{
           role: 'tool',
-          content: `Error: Exception during execution: ${err.message}`,
+          content: `Error: Exception during execution: ${err instanceof Error ? err.message : String(err)}`,
           timestamp: Date.now(),
           tool_call_id: toolCall.id,
           name: toolName
@@ -795,7 +795,7 @@ export class BaseAgent {
           parameters: args,
           status: 'error',
           timestamp: Date.now(),
-          result: { success: false, error: err.message }
+          result: { success: false, error: err instanceof Error ? err.message : String(err) }
         }]
       };
     }
@@ -859,7 +859,7 @@ export class BaseAgent {
     const isDelegate = skillName === 'obsidian:delegate_task' || skillName === 'obsidian:spawn_subagent' || 
                        skillName === 'delegate_task' || skillName === 'spawn_subagent';
     if (isDelegate && runResult.metadata?.subagentMessages) {
-      return runResult.metadata.subagentMessages.map((m: any) => ({
+      return runResult.metadata.subagentMessages.map((m: ChatMessage) => ({
         ...m,
         metadata: {
           ...m.metadata,

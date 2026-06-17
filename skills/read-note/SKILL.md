@@ -3,7 +3,7 @@ name: read_note
 description: Read document content with optional metadata
 metadata:
   version: "1.0.0"
-  author: personal-agent
+  author: mentat
   tags: [read, file, content]
   executable: true
   implementation: scripts/index.ts

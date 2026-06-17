@@ -8,17 +8,22 @@ import { ChatOrchestrator, ChatQueryResult } from '../../chat/chat-orchestrator'
 import { FileSelectorModal } from '../file-selector-modal';
 import { ConfirmationModal } from '../confirmation-modal';
 import { ChatMessage, ToolCall } from '../../types';
-import { AgentEvent } from '../../agents/agent-types';
-import PersonalAgentPlugin from '../../main';
+import { AgentEvent, AgentContext } from '../../agents/agent-types';
+import MentatPlugin from '../../main';
 
 export const CHAT_VIEW_TYPE = 'mentat-chat';
+
+interface SuggestItem {
+  name: string;
+  desc: string;
+}
 
 interface ActiveTask {
   id: string;
   name: string;
   status: 'pending' | 'executing' | 'success' | 'error' | 'confirm';
-  params?: any;
-  result?: any;
+  params?: Record<string, unknown>;
+  result?: unknown;
   explanation?: string;
 }
 
@@ -56,21 +61,21 @@ export class ChatView extends ItemView {
   private lastExecutedToolName: string = '';
   private lastExecutedToolStatus: 'success' | 'error' | 'pending' = 'pending';
   private lastRenderTime: number = 0;
-  private renderTimeout: any = null;
+  private renderTimeout: number | null = null;
 
   // Steerability & Autocomplete & Draft States
-  private activeContext: any | null = null;
+  private activeContext: AgentContext | null = null;
   private activeSuggestType: 'slash' | 'mention' | null = null;
   private suggestTriggerIdx: number = -1;
   private suggestDropdown: HTMLDivElement | null = null;
   private suggestSelectedIndex: number = 0;
-  private suggestFilteredItems: any[] = [];
+  private suggestFilteredItems: SuggestItem[] = [];
   private suggestQuery: string = '';
   private suggestTriggerNode: Node | null = null;
   private suggestTriggerRange: Range | null = null;
-  private draftSaveTimeout: any = null;
+  private draftSaveTimeout: number | null = null;
 
-  constructor(leaf: WorkspaceLeaf, plugin: PersonalAgentPlugin) {
+  constructor(leaf: WorkspaceLeaf, plugin: MentatPlugin) {
     super(leaf);
     this.plugin = plugin;
     this.chatManager = new ChatManager(plugin);
@@ -471,7 +476,7 @@ export class ChatView extends ItemView {
           new Notice(`✓ 成功索引了 ${processed} 个文档`);
         } catch (err) {
           notice.hide();
-          new Notice(`✗ 索引失败: ${(err as any).message}`);
+          new Notice(`✗ 索引失败: ${err instanceof Error ? err.message : String(err)}`);
         }
         return;
       }
@@ -552,7 +557,7 @@ export class ChatView extends ItemView {
 
       // Setup activeContext reference
       this.activeContext = {
-        messages: contextMessages,
+        messages: contextMessages as ChatMessage[],
         sessionId: this.chatManager.getSessionInfo().sessionId || Date.now().toString(),
         metadata: {
           maxTurns: this.plugin.settings.maxTurns || 20
@@ -567,7 +572,7 @@ export class ChatView extends ItemView {
         {
           enableSkills: this.plugin.settings.skillsEnabled,
           maxTurns: this.plugin.settings.maxTurns || 20,
-          context: this.activeContext
+          context: this.activeContext ?? undefined
         }
       );
 
@@ -737,9 +742,9 @@ export class ChatView extends ItemView {
 
     } catch (error) {
       console.error('Chat error:', error);
-      const errMsg = (error as any).message || String(error);
+      const errMsg = error instanceof Error ? error.message : String(error);
       const isAbort = (error instanceof DOMException && error.name === 'AbortError') || 
-                      ((error as any).name === 'AbortError') || 
+                      (error instanceof Error && error.name === 'AbortError') || 
                       errMsg.toLowerCase().includes('aborted') || 
                       errMsg.toLowerCase().includes('cancel');
 
@@ -1189,7 +1194,7 @@ export class ChatView extends ItemView {
   private renderTruncatedText(
     container: HTMLElement,
     label: string,
-    value: any,
+    value: unknown,
     typeKey: string,
     onToggle?: () => void
   ): void {

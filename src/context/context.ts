@@ -17,7 +17,7 @@ export interface ContextMetadata {
   lastUpdated?: number;
   tokenCount?: number;
   statistics?: MessageStatistics;
-  [key: string]: any;  // Allow custom metadata
+  [key: string]: unknown;  // Allow custom metadata
 }
 
 /**
@@ -35,7 +35,7 @@ export interface ContextOptions {
   optimizeForLLM?: boolean;
   enhanceForDisplay?: boolean;
   transformToolCalls?: boolean;
-  [key: string]: any;  // Allow custom options
+  [key: string]: unknown;  // Allow custom options
 }
 
 /**
@@ -173,7 +173,7 @@ export class Context {
   /**
    * Convert to plain object for serialization
    */
-  toJSON(): { messages: any[]; metadata: ContextMetadata } {
+  toJSON(): { messages: unknown[]; metadata: ContextMetadata } {
     return {
       messages: this.messages.map(m => m.toJSON()),
       metadata: this.metadata
@@ -183,8 +183,8 @@ export class Context {
   /**
    * Create from plain object (deserialization)
    */
-  static fromJSON(data: { messages: any[]; metadata: ContextMetadata }): Context {
-    const messages = data.messages.map(m => Message.fromJSON(m));
+  static fromJSON(data: { messages: unknown[]; metadata: ContextMetadata }): Context {
+    const messages = data.messages.map(m => Message.fromJSON(m as Record<string, unknown>));
     return new Context(messages, data.metadata);
   }
 
@@ -204,7 +204,7 @@ export class Context {
   getContext(
     format: 'raw' | 'llm' | 'display' = 'raw',
     options?: ContextOptions
-  ): Array<{role: string; content: string; [key: string]: any}> {
+  ): Array<{role: string; content: string; [key: string]: unknown}> {
     let messages = [...this.messages];
 
     // Apply filters
@@ -340,7 +340,7 @@ export class Context {
   /**
    * Format messages for LLM consumption
    */
-  private formatForLLM(messages: Message[], options?: ContextOptions): any[] {
+  private formatForLLM(messages: Message[], options?: ContextOptions): { role: string; content: string; [key: string]: unknown }[] {
     const keepRecentToolResults = options?.keepRecentToolResults ?? 5;
 
     // Step 1: Find all tool message indices
@@ -357,7 +357,7 @@ export class Context {
     );
 
     // Step 3: Process messages
-    const formatted: any[] = [];
+    const formatted: { role: string; content: string; [key: string]: unknown }[] = [];
 
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
@@ -381,7 +381,7 @@ export class Context {
         }
 
         // Build the tool message, always preserving tool_call_id
-        const toolMsg: any = {
+        const toolMsg: { role: string; content: string; [key: string]: unknown } = {
           role: 'tool',
           content: obj.content,
         };
@@ -403,14 +403,14 @@ export class Context {
   /**
    * Format messages for display
    */
-  private formatForDisplay(messages: Message[]): any[] {
+  private formatForDisplay(messages: Message[]): { role: string; content: string; [key: string]: unknown }[] {
     return messages.map(m => m.toJSON());
   }
 
   /**
    * Format messages as raw (no transformations)
    */
-  private formatRaw(messages: Message[]): any[] {
+  private formatRaw(messages: Message[]): { role: string; content: string; [key: string]: unknown }[] {
     return messages.map(m => m.toJSON());
   }
 

@@ -2,16 +2,16 @@
 
 import { AIProvider } from '../types';
 import { TaskType } from '../types';
-import { PersonalAgentSettings } from '../settings/settings';
+import { MentatSettings } from '../settings/settings';
 import { OpenAIProvider } from './openai-provider';
 import { AnthropicProvider } from './anthropic-provider';
 import { OllamaProvider } from './ollama-provider';
 
 export class AIRouter {
   private providers: Map<string, AIProvider> = new Map();
-  private settings: PersonalAgentSettings;
+  private settings: MentatSettings;
 
-  constructor(settings: PersonalAgentSettings) {
+  constructor(settings: MentatSettings) {
     this.settings = settings;
     this.initializeProviders();
   }
@@ -125,7 +125,7 @@ export class AIRouter {
   /**
    * Refresh providers after settings change
    */
-  refresh(settings: PersonalAgentSettings): void {
+  refresh(settings: MentatSettings): void {
     this.settings = settings;
     this.initializeProviders();
   }

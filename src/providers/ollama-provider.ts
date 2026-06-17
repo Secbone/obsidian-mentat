@@ -2,6 +2,13 @@
 
 import { AIProvider, GenerateOptions } from '../types';
 import { requestUrl } from 'obsidian';
+import {
+  OllamaChatResponse,
+  OllamaEmbeddingResponse,
+  OllamaEmbeddingsResponse,
+  OllamaTagsResponse,
+  OllamaStreamChunk
+} from './ollama-types';
 
 export interface OllamaProviderConfig {
   id: string;
@@ -67,11 +74,11 @@ export class OllamaProvider implements AIProvider {
         throw new Error(`Ollama API error: ${response.status}`);
       }
 
-      const data = response.json as any;
+      const data = response.json as OllamaChatResponse;
       return data.message?.content || '';
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OllamaProvider generate error:', error);
-      throw new Error(`Ollama error: ${error.message}`);
+      throw new Error(`Ollama error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -133,7 +140,7 @@ export class OllamaProvider implements AIProvider {
 
         for (const line of lines) {
           try {
-            const data = JSON.parse(line);
+            const data: OllamaStreamChunk = JSON.parse(line);
             if (data.message?.content) {
               onChunk(data.message.content);
             }
@@ -142,9 +149,9 @@ export class OllamaProvider implements AIProvider {
           }
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OllamaProvider generateStream error:', error);
-      throw new Error(`Ollama error: ${error.message}`);
+      throw new Error(`Ollama error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -168,14 +175,14 @@ export class OllamaProvider implements AIProvider {
         throw new Error(`Ollama API error: ${response.status}`);
       }
 
-      const data = response.json as any;
+      const data = response.json as OllamaEmbeddingResponse;
       return {
         embedding: data.embedding || [],
         tokens: undefined // Ollama doesn't provide token count in response
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OllamaProvider generateEmbedding error:', error);
-      throw new Error(`Ollama embedding error: ${error.message}`);
+      throw new Error(`Ollama embedding error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -201,7 +208,7 @@ export class OllamaProvider implements AIProvider {
       });
 
       if (response.status >= 200 && response.status < 300) {
-        const data = response.json as any;
+        const data = response.json as OllamaEmbeddingsResponse;
         return {
           embeddings: data.embeddings || [],
           tokens: undefined
@@ -216,7 +223,7 @@ export class OllamaProvider implements AIProvider {
         embeddings.push(res.embedding);
       }
       return { embeddings };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OllamaProvider generateEmbeddings error, falling back to sequential:', error);
       try {
         const embeddings: number[][] = [];
@@ -225,8 +232,8 @@ export class OllamaProvider implements AIProvider {
           embeddings.push(res.embedding);
         }
         return { embeddings };
-      } catch (fallbackError: any) {
-        throw new Error(`Ollama batch embedding failed: ${fallbackError.message}`);
+      } catch (fallbackError: unknown) {
+        throw new Error(`Ollama batch embedding failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
       }
     }
   }
@@ -247,13 +254,13 @@ export class OllamaProvider implements AIProvider {
         return false;
       }
 
-      const data = response.json as any;
-      const hasModel = data.models?.some((m: any) =>
+      const data = response.json as OllamaTagsResponse;
+      const hasModel = data.models?.some((m: { name?: string; model?: string }) =>
         m.name?.includes(this.config.model) ||
         m.model?.includes(this.config.model)
       );
 
-      return hasModel;
+      return hasModel ?? false;
     } catch (error) {
       console.error('OllamaProvider availability check failed:', error);
       return false;

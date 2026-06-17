@@ -3,7 +3,7 @@ name: run_command
 description: Execute terminal shell commands in the vault root directory (e.g., git status, python, grep). Requires user confirmation and blocks high-risk commands.
 metadata:
   version: "1.0.0"
-  author: personal-agent
+  author: mentat
   tags: [terminal, execution, command-line, automation]
   executable: true
   implementation: scripts/index.ts

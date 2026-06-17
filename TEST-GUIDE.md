@@ -18,12 +18,12 @@
 
 2. **创建插件文件夹**：
    ```bash
-   mkdir -p "/path/to/your/vault/.obsidian/plugins/personal-agent"
+   mkdir -p "/path/to/your/vault/.obsidian/plugins/mentat"
    ```
 
 3. **复制文件**：
    ```bash
-   cp dist/main.js dist/styles.css dist/manifest.json "/path/to/your/vault/.obsidian/plugins/personal-agent/"
+   cp dist/main.js dist/styles.css dist/manifest.json "/path/to/your/vault/.obsidian/plugins/mentat/"
    ```
 
 4. **重启 Obsidian**
@@ -39,7 +39,7 @@
 ```bash
 # 替换为您的 vault 路径
 VAULT_PATH="/path/to/your/vault"
-ln -s "$(pwd)" "$VAULT_PATH/.obsidian/plugins/personal-agent"
+ln -s "$(pwd)" "$VAULT_PATH/.obsidian/plugins/mentat"
 ```
 
 ## ⚙️ 配置 AI Provider

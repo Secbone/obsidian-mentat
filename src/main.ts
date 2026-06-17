@@ -1,5 +1,5 @@
 import { Plugin, Notice } from 'obsidian';
-import { PersonalAgentSettings, DEFAULT_SETTINGS } from './settings/settings';
+import { MentatSettings, DEFAULT_SETTINGS } from './settings/settings';
 import { SettingsTab } from './settings/settings-tab';
 import { AIRouter } from './providers/ai-router';
 import { OpenCodeIntegration } from './providers/opencode-integration';
@@ -11,8 +11,8 @@ import { TaskType } from './types';
 import { ObsidianAdapter } from './utils/obsidian-adapter';
 import { DiagnosticsExporter } from './diagnostics/diagnostics-exporter';
 
-export default class PersonalAgentPlugin extends Plugin {
-  settings: PersonalAgentSettings;
+export default class MentatPlugin extends Plugin {
+  settings: MentatSettings;
   aiRouter: AIRouter;
   openCodeIntegration: OpenCodeIntegration;
   indexManager: IndexManager;

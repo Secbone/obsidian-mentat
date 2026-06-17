@@ -3,7 +3,7 @@ name: web_fetch
 description: Fetch content from web URLs using multiple strategies - Jina AI Reader for clean content extraction, Browserless for JavaScript-rendered pages, or direct HTTP requests.
 metadata:
   version: "3.0.0"
-  author: personal-agent
+  author: mentat
   tags: [web, http, fetch, network, scraping, external]
   executable: true
   implementation: scripts/index.ts

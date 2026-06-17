@@ -24,6 +24,12 @@ export interface ExecutionOptions {
   abortSignal?: AbortSignal;   // Abort signal for execution cancellation
 }
 
+export interface SkillStats {
+  total: number;
+  success: number;
+  failed: number;
+}
+
 /**
  * SkillExecutor handles validation and execution of skills
  */
@@ -42,7 +48,7 @@ export class SkillExecutor {
   async execute(
     namespace: SkillNamespace | (string & NonNullable<unknown>),
     name: string,
-    parameters: Record<string, any>,
+    parameters: Record<string, unknown>,
     options: ExecutionOptions = {}
   ): Promise<SkillResult> {
     const startTime = Date.now();
@@ -155,7 +161,7 @@ export class SkillExecutor {
 
       const result: SkillResult = {
         success: false,
-        error: (error as any).message || 'Unknown error',
+        error: error instanceof Error ? error.message : String(error) || 'Unknown error',
         metadata: { executionTime: Date.now() - startTime }
       };
 
@@ -221,14 +227,14 @@ export class SkillExecutor {
 
     try {
       return JSON.parse(argsString);
-    } catch (_error: any) {
+    } catch (_error: unknown) {
       console.warn(`[SkillExecutor] JSON strict parse failed for ${toolCall.name}, trying escape-healing...`);
 
       try {
         const healedArgsString = this.escapeLoneBackslashes(argsString);
         return JSON.parse(healedArgsString);
-      } catch (healingError: any) {
-        console.error('[SkillExecutor] JSON parse and healing failed for', toolCall.name, 'Error:', healingError.message);
+      } catch (healingError: unknown) {
+        console.error('[SkillExecutor] JSON parse and healing failed for', toolCall.name, 'Error:', healingError instanceof Error ? healingError.message : String(healingError));
         return null;
       }
     }
@@ -285,7 +291,7 @@ export class SkillExecutor {
   /**
    * Validate skill input against schema
    */
-  private validateInput(skill: SkillDefinition, input: Record<string, any>): any {
+  private validateInput(skill: SkillDefinition, input: Record<string, unknown>): Record<string, unknown> {
     try {
       return skill.schema.parse(input);
     } catch (error) {
@@ -301,8 +307,8 @@ export class SkillExecutor {
    * Execute skill with timeout
    */
   private async executeWithTimeout(
-    skill: any,
-    input: any,
+    skill: SkillDefinition,
+    input: unknown,
     timeoutMs: number,
     options: ExecutionOptions = {}
   ): Promise<SkillResult> {
@@ -339,7 +345,7 @@ export class SkillExecutor {
    */
   private async executeMCPSkill(
     fullName: string,
-    parameters: Record<string, any>,
+    parameters: Record<string, unknown>,
     options: ExecutionOptions
   ): Promise<SkillResult> {
     // This will be implemented when MCP client is integrated
@@ -391,13 +397,13 @@ export class SkillExecutor {
     totalCalls: number;
     successRate: number;
     averageExecutionTime: number;
-    bySkill: Record<string, any>;
+    bySkill: Record<string, SkillStats>;
   } {
     const total = this.executionHistory.length;
     const successful = this.executionHistory.filter(call => call.status === 'success').length;
     const avgTime = this.executionHistory.reduce((sum, call) => sum + (call.executionTime || 0), 0) / total;
 
-    const bySkill: Record<string, any> = {};
+    const bySkill: Record<string, SkillStats> = {};
     this.executionHistory.forEach(call => {
       const fullName = `${call.namespace}:${call.skillName}`;
       if (!bySkill[fullName]) {
@@ -466,7 +472,7 @@ export class SkillExecutor {
    */
   private async requestConfirmation(
     skill: SkillDefinition,
-    parameters: Record<string, any>
+    parameters: Record<string, unknown>
   ): Promise<boolean> {
     // Determine operation type from skill name
     const operationType = this.getOperationType(skill.name);

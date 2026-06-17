@@ -53,7 +53,7 @@ export class AgentOrchestrator {
   /**
    * Execute multiple agent tasks with dependency management
    */
-  async *executeTasks(tasks: AgentTask[]): AsyncGenerator<AgentEvent & { taskId?: string }, AgentOrchestrationResult, any> {
+  async *executeTasks(tasks: AgentTask[]): AsyncGenerator<AgentEvent & { taskId?: string }, AgentOrchestrationResult, unknown> {
     const results = new Map<string, AgentResponse>();
     const completed = new Set<string>();
     const cleanupListeners: (() => void)[] = [];
@@ -195,7 +195,7 @@ export class AgentOrchestrator {
     agentIds: string[],
     initialPrompt: string,
     initialContext: AgentContext
-  ): AsyncGenerator<AgentEvent & { activeAgentId?: string }, AgentResponse, any> {
+  ): AsyncGenerator<AgentEvent & { activeAgentId?: string }, AgentResponse, unknown> {
     let currentContext = initialContext;
     let currentPrompt = initialPrompt;
     let finalResponse: AgentResponse | null = null;

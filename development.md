@@ -47,7 +47,7 @@ We use [Vitest](https://vitest.dev/) for our unit and integration tests. The tes
     ```
 
 ### Mocking Environment
-Obsidian classes (`TFile`, `Vault`, `Setting`, `Modal`, `Notice`, etc.) are fully mocked in [tests/utils/obsidian.mock.ts](file:///Users/zhouweipeng/Code/personal-agent/tests/utils/obsidian.mock.ts) to support fast, transitive unit testing without side effects.
+Obsidian classes (`TFile`, `Vault`, `Setting`, `Modal`, `Notice`, etc.) are fully mocked in [tests/utils/obsidian.mock.ts](file:///Users/zhouweipeng/Code/obsidian-mentat/tests/utils/obsidian.mock.ts) to support fast, transitive unit testing without side effects.
 
 ---
 
@@ -101,10 +101,10 @@ This local script (`scripts/bump-version.mjs`) automatically:
 3.  Creates a Git commit `chore: bump version to 0.1.1` and an annotated local tag `v0.1.1`.
 
 ### Continuous Integration (CI)
-Our [ci.yml](file:///Users/zhouweipeng/Code/personal-agent/.github/workflows/ci.yml) workflow runs on every push to `master` and pull request, executing the entire 137+ test suite to guarantee code stability.
+Our [ci.yml](file:///Users/zhouweipeng/Code/obsidian-mentat/.github/workflows/ci.yml) workflow runs on every push to `master` and pull request, executing the entire 137+ test suite to guarantee code stability.
 
 ### Continuous Delivery (CD)
-Our [release.yml](file:///Users/zhouweipeng/Code/personal-agent/.github/workflows/release.yml) workflow triggers when version tags (`v*`) are pushed to GitHub:
+Our [release.yml](file:///Users/zhouweipeng/Code/obsidian-mentat/.github/workflows/release.yml) workflow triggers when version tags (`v*`) are pushed to GitHub:
 1.  Checks out tag, installs dependencies, and runs all unit tests.
 2.  Compiles the production bundle via `npm run build`.
 3.  Verifies the build outputs: `main.js`, `manifest.json`, and `styles.css`.

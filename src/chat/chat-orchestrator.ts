@@ -16,7 +16,11 @@ import { AgentManager } from '../agents/agent-manager';
 import { AgentConfig, AgentContext, AgentEvent, AgentResponse } from '../agents/agent-types';
 import { VaultDiagnosticsLogger } from '../diagnostics/vault-diagnostics-logger';
 import { IPlatformAdapter, IPlatformFile } from '../types/platform';
+import { AIRouter } from '../providers/ai-router';
+import { IndexManager } from '../indexing/index-manager';
+import { MentatSettings } from '../settings/settings';
 import { ConfirmationModal } from '../ui/confirmation-modal';
+import { App } from 'obsidian';
 import { z } from 'zod';
 
 export interface ChatQueryOptions {
@@ -42,9 +46,9 @@ export class ChatOrchestrator {
   
   // Decoupled host & engine references
   private platform: IPlatformAdapter;
-  private settings: any;
-  private aiRouter: any;
-  private indexManager: any;
+  private settings: MentatSettings;
+  private aiRouter: AIRouter;
+  private indexManager: IndexManager;
 
   // Skill system components
   private skillRegistry: SkillRegistry;
@@ -57,9 +61,9 @@ export class ChatOrchestrator {
 
   constructor(
     platform: IPlatformAdapter,
-    settings: any,
-    aiRouter: any,
-    indexManager: any
+    settings: MentatSettings,
+    aiRouter: AIRouter,
+    indexManager: IndexManager
   ) {
     this.platform = platform;
     this.settings = settings;
@@ -67,7 +71,7 @@ export class ChatOrchestrator {
     this.indexManager = indexManager;
     this.agentManager = new AgentManager();
 
-    const app = (platform as any).app;
+    const app = this.getApp();
 
     // Initialize Skill system
     this.skillRegistry = new SkillRegistry();
@@ -98,11 +102,19 @@ export class ChatOrchestrator {
       metadataCache: app?.metadataCache,
       workspace: app?.workspace,
       indexManager: indexManager,
-      plugin: (platform as any).plugin
+      plugin: this.getPlugin()
     };
 
     this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext);
     this.diagnosticsLogger = new VaultDiagnosticsLogger(platform.getVault());
+  }
+
+  private getApp(): App {
+    return (this.platform as unknown as { app: App }).app;
+  }
+
+  private getPlugin(): any {
+    return (this.platform as unknown as { plugin: any }).plugin;
   }
 
   dispose(): void {
@@ -113,7 +125,7 @@ export class ChatOrchestrator {
    * Initialize the orchestrator (load skills and create default agent)
    */
   async initialize(): Promise<void> {
-    const app = (this.platform as any).app;
+    const app = this.getApp();
     
     // Create skill context
     const skillContext: SkillContext = {
@@ -121,7 +133,7 @@ export class ChatOrchestrator {
       metadataCache: app?.metadataCache,
       workspace: app?.workspace,
       indexManager: this.indexManager,
-      plugin: (this.platform as any).plugin
+      plugin: this.getPlugin()
     };
 
     // Load all skills from skills directory
@@ -177,7 +189,7 @@ export class ChatOrchestrator {
   async *query(
     userQuery: string,
     options: ChatQueryOptions = {}
-  ): AsyncGenerator<AgentEvent, ChatQueryResult, any> {
+  ): AsyncGenerator<AgentEvent, ChatQueryResult, unknown> {
     if (!this.defaultAgent) {
       throw new Error('ChatOrchestrator not initialized');
     }
@@ -193,7 +205,7 @@ export class ChatOrchestrator {
       sessionContextPayload = await this.buildVaultSessionContextPayload();
     }
 
-    const app = (this.platform as any).app;
+    const app = this.getApp();
     const context: AgentContext = options.context || {
       messages: messages,
       sessionId: Date.now().toString(),
@@ -296,14 +308,14 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
    * Reload all skills (useful for development/debugging)
    */
   async reloadSkills(): Promise<void> {
-    const app = (this.platform as any).app;
+    const app = this.getApp();
     
     const skillContext: SkillContext = {
       vault: app?.vault,
       metadataCache: app?.metadataCache,
       workspace: app?.workspace,
       indexManager: this.indexManager,
-      plugin: (this.platform as any).plugin
+      plugin: this.getPlugin()
     };
 
     // Clear existing skills
@@ -350,8 +362,8 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
         [TEMPLATE_VARS.TOP_TAGS]: "(Refer to the Vault Session Context in the message history)",
         [TEMPLATE_VARS.SKILL_CONTENT]: skillContent,
         [TEMPLATE_VARS.USER_PREFERENCES]: userPreferences,
-        [(TEMPLATE_VARS as any).VAULT_HIERARCHY || 'vaultHierarchy']: "(Refer to the Vault Session Context in the message history)",
-        [(TEMPLATE_VARS as any).VAULT_MAP || 'vaultMap']: "(Refer to the Vault Session Context in the message history)"
+        [TEMPLATE_VARS.VAULT_HIERARCHY]: "(Refer to the Vault Session Context in the message history)",
+        [TEMPLATE_VARS.VAULT_MAP]: "(Refer to the Vault Session Context in the message history)"
       });
     } catch (error) {
       console.error('[ChatOrchestrator] Error building system prompt, using inline fallback:', error);
@@ -416,9 +428,9 @@ OBSIDIAN SYNTAX CHEAT SHEET:
   /**
    * Generates a high-density Knowledge Structure Map from the vault files locally.
    */
-  private async generateSemanticVaultMap(allFiles: any[]): Promise<string> {
+  private async generateSemanticVaultMap(allFiles: IPlatformFile[]): Promise<string> {
     const folderDataMap = new Map<string, {
-      files: any[];
+      files: IPlatformFile[];
       tags: Map<string, number>;
       directCount: number;
     }>();
@@ -962,8 +974,8 @@ OTHERWISE:
               agentId: input.agentId
             }
           };
-        } catch (err: any) {
-          return { success: false, error: `Delegation error: ${err.message}` };
+        } catch (err: unknown) {
+          return { success: false, error: `Delegation error: ${err instanceof Error ? err.message : String(err)}` };
         }
       }
     };
@@ -1017,8 +1029,8 @@ OTHERWISE:
               agentId: tempAgentId
             }
           };
-        } catch (err: any) {
-          return { success: false, error: `Spawning error: ${err.message}` };
+        } catch (err: unknown) {
+          return { success: false, error: `Spawning error: ${err instanceof Error ? err.message : String(err)}` };
         } finally {
           this.agentManager.unregisterAgent(tempAgentId);
         }

@@ -17,7 +17,7 @@
 1. 将项目复制到您的 Obsidian vault:
    ```bash
    cd /path/to/your/vault/.obsidian/plugins
-   cp -r /Users/zhouweipeng/Code/personal-agent .
+   cp -r /Users/zhouweipeng/Code/obsidian-mentat .
    ```
 
 2. 在 Obsidian 中:
@@ -30,7 +30,7 @@
 
 ```bash
 cd /path/to/your/vault/.obsidian/plugins
-ln -s /Users/zhouweipeng/Code/personal-agent personal-agent
+ln -s /Users/zhouweipeng/Code/obsidian-mentat obsidian-mentat
 ```
 
 然后在 Obsidian 中重载插件。
@@ -142,7 +142,7 @@ ollama pull nomic-embed-text
 如果您想继续开发:
 
 ```bash
-cd /Users/zhouweipeng/Code/personal-agent
+cd /Users/zhouweipeng/Code/obsidian-mentat
 
 # 开发模式（带热重载）
 npm run dev

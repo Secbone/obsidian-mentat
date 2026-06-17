@@ -103,11 +103,11 @@ export class EmbeddingBatch {
   ): Promise<T> {
     try {
       return await fn();
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (retries <= 0) {
         throw error;
       }
-      console.warn(`Embedding request failed. Retrying in ${delayMs}ms... (Retries left: ${retries}). Error: ${error.message || error}`);
+      console.warn(`Embedding request failed. Retrying in ${delayMs}ms... (Retries left: ${retries}). Error: ${error instanceof Error ? error.message : String(error)}`);
       await this.delay(delayMs);
       return this.retryWithBackoff(fn, retries - 1, delayMs * 2);
     }

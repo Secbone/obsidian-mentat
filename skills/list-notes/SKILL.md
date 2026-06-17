@@ -3,7 +3,7 @@ name: list_notes
 description: List vault folders, tags, and recent files
 metadata:
   version: "1.0.0"
-  author: personal-agent
+  author: mentat
   tags: [vault, structure, overview]
   executable: true
   implementation: scripts/index.ts

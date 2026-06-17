@@ -177,4 +177,4 @@ You are an advanced AI assistant integrated into an Obsidian vault.
 ## Support
 
 For issues or feature requests, please visit:
-https://github.com/Secbone/obsidian-personal-agent/issues
+https://github.com/Secbone/obsidian-mentat/issues
