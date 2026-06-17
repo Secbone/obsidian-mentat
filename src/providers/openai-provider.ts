@@ -199,7 +199,7 @@ export class OpenAIProvider implements AIProvider {
         });
       }
 
-      const requestParams: any = {
+      const requestParams: Record<string, unknown> = {
         model: this.config.model,
         messages: openaiMessages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
@@ -208,17 +208,22 @@ export class OpenAIProvider implements AIProvider {
 
       // Add tools if provided
       if (options?.skills && options.skills.length > 0) {
-        requestParams.tools = options.skills.map((skill: any) => ({
-          type: 'function',
-          function: skill
-        }));
+        requestParams.tools = options.skills.map((skill: unknown) => {
+          const s = skill as { name?: string; description?: string; parameters?: Record<string, unknown> };
+          return {
+            type: 'function',
+            function: s
+          };
+        });
 
         if (options.toolChoice) {
           requestParams.tool_choice = options.toolChoice;
         }
       }
 
-      const response = await this.client.chat.completions.create(requestParams);
+      const response = await this.client.chat.completions.create(
+        requestParams as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+      );
 
       const choice = response.choices[0];
       const message = choice.message;
@@ -238,12 +243,12 @@ export class OpenAIProvider implements AIProvider {
       return {
         content: message.content || '',
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: choice.finish_reason as any,
+        finishReason: (choice.finish_reason ?? undefined) as GenerateResponse['finishReason'],
         usage: response.usage ? {
           promptTokens: response.usage.prompt_tokens,
           completionTokens: response.usage.completion_tokens,
           totalTokens: response.usage.total_tokens,
-          cacheReadTokens: (response.usage as any).prompt_tokens_details?.cached_tokens ?? 0,
+          cacheReadTokens: (response.usage as unknown as { prompt_tokens_details?: { cached_tokens?: number } }).prompt_tokens_details?.cached_tokens ?? 0,
           cacheCreationTokens: 0
         } : undefined
       };
@@ -273,7 +278,7 @@ export class OpenAIProvider implements AIProvider {
         });
       }
 
-      const requestParams: any = {
+      const requestParams: Record<string, unknown> = {
         model: this.config.model,
         messages: openaiMessages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
@@ -284,32 +289,34 @@ export class OpenAIProvider implements AIProvider {
 
       // Add tools if provided
       if (options?.skills && options.skills.length > 0) {
-        requestParams.tools = options.skills.map((skill: any) => ({
-          type: 'function',
-          function: skill
-        }));
+        requestParams.tools = options.skills.map((skill: unknown) => {
+          const s = skill as { name?: string; description?: string; parameters?: Record<string, unknown> };
+          return {
+            type: 'function',
+            function: s
+          };
+        });
 
         if (options.toolChoice) {
           requestParams.tool_choice = options.toolChoice;
         }
       }
 
-      const stream = await this.client.chat.completions.create(requestParams, {
+      const stream = await this.client.chat.completions.create(requestParams as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming, {
         signal: options?.abortSignal
-      }) as any;
-
+      }) as unknown as AsyncIterable<{ choices?: Array<{ delta?: { content?: string; tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string }>; usage?: { completion_tokens?: number; prompt_tokens?: number; total_tokens?: number } }>;
       let fullContent = '';
       const toolCalls: ToolCall[] = [];
       const toolCallsInProgress: Map<number, { id: string; name: string; arguments: string }> = new Map();
       let finishReason: string | undefined;
-      let finalUsage: any = undefined;
+      let finalUsage: { completion_tokens?: number; prompt_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } } | undefined = undefined;
 
       for await (const chunk of stream) {
         if (chunk.usage) {
           finalUsage = chunk.usage;
         }
 
-        const delta = chunk.choices[0]?.delta;
+        const delta = chunk.choices?.[0]?.delta;
 
         // Handle content
         if (delta?.content) {
@@ -339,7 +346,7 @@ export class OpenAIProvider implements AIProvider {
         }
 
         // Handle finish reason
-        if (chunk.choices[0]?.finish_reason) {
+        if (chunk.choices?.[0]?.finish_reason) {
           finishReason = chunk.choices[0].finish_reason;
         }
       }
@@ -362,11 +369,11 @@ export class OpenAIProvider implements AIProvider {
       return {
         content: fullContent,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: finishReason as any,
+        finishReason: (finishReason ?? undefined) as GenerateResponse['finishReason'],
         usage: finalUsage ? {
-          promptTokens: finalUsage.prompt_tokens,
-          completionTokens: finalUsage.completion_tokens,
-          totalTokens: finalUsage.total_tokens,
+          promptTokens: finalUsage.prompt_tokens ?? 0,
+          completionTokens: finalUsage.completion_tokens ?? 0,
+          totalTokens: finalUsage.total_tokens ?? 0,
           cacheReadTokens: finalUsage.prompt_tokens_details?.cached_tokens ?? 0,
           cacheCreationTokens: 0
         } : undefined

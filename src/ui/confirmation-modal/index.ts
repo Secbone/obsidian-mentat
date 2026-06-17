@@ -5,7 +5,7 @@ import { App, Modal } from 'obsidian';
 export interface ConfirmationModalOptions {
   skillName: string;
   description: string;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   operationType: 'create' | 'update' | 'delete' | 'write';
 }
 
@@ -102,7 +102,7 @@ export class ConfirmationModal extends Modal {
     });
   }
 
-  private renderParameters(container: HTMLElement, params: Record<string, any>): void {
+  private renderParameters(container: HTMLElement, params: Record<string, unknown>): void {
     for (const [key, value] of Object.entries(params)) {
       const paramRow = container.createDiv({ cls: 'confirmation-modal-param-row' });
 
@@ -113,7 +113,7 @@ export class ConfirmationModal extends Modal {
 
       if (key === 'path') {
         // Highlight file paths prominently
-        paramValue.createEl('code', { text: value, cls: 'confirmation-modal-path' });
+        paramValue.createEl('code', { text: String(value), cls: 'confirmation-modal-path' });
       } else if (key === 'content' && typeof value === 'string') {
         // Truncate long content
         const preview = this.truncateContent(value, 200);

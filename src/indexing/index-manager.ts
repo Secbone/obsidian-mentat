@@ -67,7 +67,7 @@ export class IndexManager {
     const contentHash = this.calculateHash(extracted.content);
 
     // 3. Split into chunks
-    const chunks = await this.chunkProcessor.chunkDocument(file as any, extracted);
+    const chunks = await this.chunkProcessor.chunkDocument(file as unknown as Parameters<typeof this.chunkProcessor.chunkDocument>[0], extracted);
 
     // 4. Generate embeddings for all chunks
     const texts = chunks.map(c => c.content);

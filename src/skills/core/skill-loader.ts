@@ -42,7 +42,7 @@ interface SkillMetadata {
  */
 export class SkillLoader {
   private skillsBasePath: string;
-  private implementationMap: Map<string, any>;
+  private implementationMap: Map<string, unknown>;
 
   constructor(
     private app: App,
@@ -52,7 +52,7 @@ export class SkillLoader {
     this.skillsBasePath = `${app?.vault?.configDir || '.obsidian'}/plugins/${pluginId}/skills`;
 
     // Map skill names to their implementations (compile-time mapping)
-    this.implementationMap = new Map<string, any>([
+    this.implementationMap = new Map<string, unknown>([
       ['query_notes', QueryNotesImpl],
       ['read_note', ReadNoteImpl],
       ['edit_note', EditNoteImpl],
@@ -201,7 +201,7 @@ export class SkillLoader {
     context: SkillContext
   ): SkillDefinition | null {
     // Get implementation from map
-    const impl = this.implementationMap.get(metadata.name);
+    const impl = this.implementationMap.get(metadata.name) as { createSkill: (context: SkillContext) => { schema: import('zod').ZodTypeAny; execute: (input: unknown) => Promise<import('../skill-types').SkillResult<unknown>> } } | undefined;
 
     if (!impl) {
       console.error(`[SkillLoader] No implementation found for ${metadata.name}`);
@@ -250,8 +250,6 @@ export class SkillLoader {
     const lines = frontmatterText.split('\n');
     let currentKey: string | null = null;
     let currentArray: unknown[] | null = null;
-    let currentObject: Record<string, unknown> | null = null;
-    let indentLevel = 0;
 
     for (const line of lines) {
       const trimmed = line.trim();
@@ -278,13 +276,10 @@ export class SkillLoader {
         if (leadingSpaces === 0) {
           // Top-level key
           currentKey = key;
-          currentObject = null;
 
           if (value === '') {
             // Start of nested structure
             currentArray = [];
-            currentObject = {};
-            indentLevel = leadingSpaces;
           } else {
             // Simple value
             result[key] = value;

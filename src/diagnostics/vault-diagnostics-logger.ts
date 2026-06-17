@@ -5,9 +5,9 @@ import { DiagnosticsLogger } from '../agents/agent-types';
  * directly into the Obsidian vault adapter under `.mentat/diagnostics.jsonl`.
  */
 export class VaultDiagnosticsLogger implements DiagnosticsLogger {
-  private vault: any;
+  private vault: { adapter: { exists: (path: string) => Promise<boolean>; mkdir: (path: string) => Promise<void>; append: (path: string, data: string) => Promise<void> } } | null;
 
-  constructor(vault: any) {
+  constructor(vault: { adapter: { exists: (path: string) => Promise<boolean>; mkdir: (path: string) => Promise<void>; append: (path: string, data: string) => Promise<void> } } | null) {
     this.vault = vault;
   }
 

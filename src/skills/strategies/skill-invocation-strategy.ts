@@ -220,7 +220,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
   private listGenerator = new SkillListGenerator();
   private platform?: IPlatformAdapter;
 
-  constructor(platform?: IPlatformAdapter, _directCallSkills?: string[]) {
+  constructor(platform?: IPlatformAdapter) {
     this.platform = platform;
   }
 
@@ -388,9 +388,9 @@ export class SkillInvocationContext {
       case 'progressive':
         return new ProgressiveDisclosureStrategy(this.platform);
       case 'auto':
-        return new HybridSkillInvocationStrategy(this.platform, this.directCallSkills);
+        return new HybridSkillInvocationStrategy(this.platform);
       default:
-        return new HybridSkillInvocationStrategy(this.platform, this.directCallSkills);
+        return new HybridSkillInvocationStrategy(this.platform);
     }
   }
 

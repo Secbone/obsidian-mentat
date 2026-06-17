@@ -555,8 +555,8 @@ export class BaseAgent {
     toolCall: ToolCall,
     context: AgentContext
   ): AsyncGenerator<AgentEvent, { toolMessages: ChatMessage[]; skillCalls: SkillCall[] }, unknown> {
-    const toolMessages: ChatMessage[] = [];
-    const skillCalls: SkillCall[] = [];
+    const _toolMessages: ChatMessage[] = [];
+    const _skillCalls: SkillCall[] = [];
     const toolName = toolCall.name;
 
     // Parse arguments

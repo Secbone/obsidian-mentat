@@ -89,7 +89,6 @@ export const exactReplaceString = (
 
   // Multiple occurrences exist - exact replacement requires unique match
   if (occurrences.length > 1) {
-    const lines = content.split('\n');
     const locations = occurrences.map(pos => {
       const textBefore = content.substring(0, pos);
       const lineNum = textBefore.split('\n').length;

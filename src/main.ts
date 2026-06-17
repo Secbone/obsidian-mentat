@@ -110,9 +110,9 @@ export default class MentatPlugin extends Plugin {
 
           notice.hide();
           new Notice(`✓ Indexed ${processedCount} documents successfully`);
-        } catch (error: any) {
+        } catch (error: unknown) {
           notice.hide();
-          new Notice(`✗ Indexing failed: ${error.message}`);
+          new Notice(`✗ Indexing failed: ${error instanceof Error ? error.message : String(error)}`);
           console.error('Indexing error:', error);
         }
       }
@@ -140,9 +140,9 @@ export default class MentatPlugin extends Plugin {
           } else {
             new Notice('✓ Index is up to date');
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           notice.hide();
-          new Notice(`✗ Update failed: ${error.message}`);
+          new Notice(`✗ Update failed: ${error instanceof Error ? error.message : String(error)}`);
           console.error('Incremental indexing error:', error);
         }
       }
@@ -186,9 +186,9 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
           await this.indexManager.indexFile(activeFile);
           notice.hide();
           new Notice(`✓ Indexed ${activeFile.basename}`);
-        } catch (error: any) {
+        } catch (error: unknown) {
           notice.hide();
-          new Notice(`✗ Failed to index: ${error.message}`);
+          new Notice(`✗ Failed to index: ${error instanceof Error ? error.message : String(error)}`);
           console.error('File indexing error:', error);
         }
       }
@@ -222,9 +222,9 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
           await this.chatOrchestrator.reloadSkills();
           notice.hide();
           new Notice('✓ All skills reloaded');
-        } catch (error: any) {
+        } catch (error: unknown) {
           notice.hide();
-          new Notice(`✗ Failed to reload skills: ${error.message}`);
+          new Notice(`✗ Failed to reload skills: ${error instanceof Error ? error.message : String(error)}`);
           console.error('Skill reload error:', error);
         }
       }

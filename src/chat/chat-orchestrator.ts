@@ -220,7 +220,7 @@ export class ChatOrchestrator {
             {
               skillName,
               description: message || '',
-              parameters: params || {},
+              parameters: (params ?? {}) as Record<string, unknown>,
               operationType: 'write'
             },
             (confirmed) => resolve({ approved: confirmed })

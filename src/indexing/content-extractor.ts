@@ -8,7 +8,7 @@ export interface ExtractedContent {
     tags: string[];
     links: string[];
     headings: string[];
-    frontmatter: Record<string, any>;
+    frontmatter: Record<string, unknown>;
   };
   stats: {
     wordCount: number;
@@ -88,16 +88,16 @@ export class ContentExtractor {
     // Note: link extraction in Obsidian cache
     // We try to grab internal links. If platform doesn't parse it fully, we return empty or extract what we can.
     // In our mock, we assume metadata contains parsed links if they exist.
-    const rawLinks = (metadata as any)?.links || [];
-    return rawLinks.map((link: any) => link.link || link);
+    const rawLinks = (metadata as unknown as { links?: Array<{ link?: string }> | string[] })?.links || [];
+    return rawLinks.map((link: string | { link?: string }) => typeof link === 'string' ? link : (link.link || ''));
   }
 
   /**
    * Extract headings
    */
   private extractHeadings(metadata: IFileCache | null): string[] {
-    const rawHeadings = (metadata as any)?.headings || [];
-    return rawHeadings.map((h: any) => h.heading || h);
+    const rawHeadings = (metadata as unknown as { headings?: Array<{ heading?: string }> | string[] })?.headings || [];
+    return rawHeadings.map((h: string | { heading?: string }) => typeof h === 'string' ? h : (h.heading || ''));
   }
 
   /**

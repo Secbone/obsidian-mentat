@@ -9,7 +9,7 @@
 export interface ToolCall {
   id: string;
   name: string;
-  arguments: string | Record<string, any>;
+  arguments: string | Record<string, unknown>;
 }
 
 /**
@@ -25,7 +25,7 @@ export class Message {
   role: MessageRole;
   content: string;
   timestamp: number;
-  sources?: any[];  // Generic, not tied to TFile - can be any source reference
+  sources?: unknown[];  // Generic, not tied to TFile - can be any source reference
   name?: string;
   tool_call_id?: string;
   tool_calls?: ToolCall[];
@@ -34,7 +34,7 @@ export class Message {
     role: MessageRole;
     content: string;
     timestamp?: number;
-    sources?: any[];
+    sources?: unknown[];
     name?: string;
     tool_call_id?: string;
     tool_calls?: ToolCall[];

@@ -53,7 +53,7 @@ export function healWindowsPaths(jsonStr: string): string {
  * Normalizes arguments by sorting keys of the JSON object alphabetically.
  * This guarantees consistent output formats regardless of key insertion order.
  */
-export function normalizeJsonArguments(args: any): string {
+export function normalizeJsonArguments(args: unknown): string {
   if (args === null || args === undefined) {
     return '';
   }
@@ -63,7 +63,7 @@ export function normalizeJsonArguments(args: any): string {
   if (typeof args === 'object') {
     const sortedKeys = Object.keys(args).sort();
     const parts = sortedKeys.map(key => {
-      const valStr = normalizeJsonArguments(args[key]);
+      const valStr = normalizeJsonArguments((args as Record<string, unknown>)[key]);
       return `"${key}":${valStr}`;
     });
     return '{' + parts.join(',') + '}';

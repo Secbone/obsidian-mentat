@@ -159,17 +159,17 @@ export class SkillRegistry {
    * Convert a single skill to OpenAI Function format
    */
   skillToOpenAIFunction(skill: SkillDefinition): OpenAIFunction {
-    const jsonSchema = zodToJsonSchema(skill.schema as any, {
+    const jsonSchema = zodToJsonSchema(skill.schema as unknown as Parameters<typeof zodToJsonSchema>[0], {
       $refStrategy: 'none'
-    }) as any;
+    }) as { properties?: Record<string, unknown>; required?: string[] };
 
     return {
       name: this.getFullName(skill.namespace, skill.name),
       description: skill.description,
       parameters: {
         type: 'object',
-        properties: jsonSchema.properties || {},
-        required: jsonSchema.required || []
+        properties: jsonSchema.properties ?? {},
+        required: jsonSchema.required ?? []
       }
     };
   }
@@ -178,9 +178,9 @@ export class SkillRegistry {
    * Convert a single skill to Anthropic Tool format
    */
   skillToAnthropicTool(skill: SkillDefinition): AnthropicTool {
-    const jsonSchema = zodToJsonSchema(skill.schema as any, {
+    const jsonSchema = zodToJsonSchema(skill.schema as unknown as Parameters<typeof zodToJsonSchema>[0], {
       $refStrategy: 'none'
-    }) as any;
+    }) as { properties?: Record<string, unknown>; required?: string[] };
 
     return {
       name: this.getFullName(skill.namespace, skill.name),
@@ -295,7 +295,7 @@ export class SkillRegistry {
    * Discover new skills dynamically (e.g., from MCP servers, plugins)
    * Returns newly discovered skills
    */
-  async discoverSkills(pattern?: string): Promise<AnySkillDefinition[]> {
+  async discoverSkills(_pattern?: string): Promise<AnySkillDefinition[]> {
     // TODO: Implement dynamic skill discovery
     // This is a placeholder for future implementation
     // 1. Scan MCP servers

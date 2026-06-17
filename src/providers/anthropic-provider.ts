@@ -86,7 +86,7 @@ export class AnthropicProvider implements AIProvider {
     }
   }
 
-  async generateEmbedding(text: string): Promise<{ embedding: number[]; tokens?: number }> {
+  async generateEmbedding(_text: string): Promise<{ embedding: number[]; tokens?: number }> {
     // Anthropic doesn't provide embedding endpoints
     // Users should use Ollama or OpenAI for embeddings
     throw new Error('Anthropic does not support embeddings. Please use Ollama or OpenAI for embedding tasks.');
@@ -131,7 +131,7 @@ export class AnthropicProvider implements AIProvider {
     try {
       const anthropicMessages = this.convertMessages(messages);
 
-      const requestParams: any = {
+      const requestParams: Record<string, unknown> = {
         model: this.config.model,
         max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 4096,
         temperature: options?.temperature ?? this.config.temperature ?? 1.0,
@@ -151,7 +151,9 @@ export class AnthropicProvider implements AIProvider {
         }
       }
 
-      const response = await this.client.messages.create(requestParams);
+      const response = await this.client.messages.create(
+        requestParams as unknown as Anthropic.MessageCreateParamsNonStreaming
+      );
 
       // Extract content and tool calls
       let content = '';
@@ -164,7 +166,7 @@ export class AnthropicProvider implements AIProvider {
           toolCalls.push({
             id: block.id,
             name: block.name,
-            arguments: block.input as any
+            arguments: block.input as Record<string, unknown>
           });
         }
       }
@@ -172,13 +174,13 @@ export class AnthropicProvider implements AIProvider {
       return {
         content,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: response.stop_reason as any,
+        finishReason: (response.stop_reason ?? undefined) as GenerateResponse['finishReason'],
         usage: response.usage ? {
           promptTokens: response.usage.input_tokens,
           completionTokens: response.usage.output_tokens,
           totalTokens: response.usage.input_tokens + response.usage.output_tokens,
-          cacheReadTokens: (response.usage as any).cache_read_input_tokens ?? 0,
-          cacheCreationTokens: (response.usage as any).cache_creation_input_tokens ?? 0
+          cacheReadTokens: (response.usage as unknown as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0,
+          cacheCreationTokens: (response.usage as unknown as { cache_creation_input_tokens?: number }).cache_creation_input_tokens ?? 0
         } : undefined
       };
     } catch (error) {
@@ -199,7 +201,7 @@ export class AnthropicProvider implements AIProvider {
     try {
       const anthropicMessages = this.convertMessages(messages);
 
-      const requestParams: any = {
+      const requestParams: Record<string, unknown> = {
         model: this.config.model,
         max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 4096,
         temperature: options?.temperature ?? this.config.temperature ?? 1.0,
@@ -219,7 +221,9 @@ export class AnthropicProvider implements AIProvider {
         }
       }
 
-      const stream = await this.client.messages.stream(requestParams, {
+      const stream = await this.client.messages.stream(
+        requestParams as unknown as Anthropic.MessageCreateParams,
+        {
         signal: options?.abortSignal
       });
 
@@ -255,7 +259,7 @@ export class AnthropicProvider implements AIProvider {
             id: block.id,
             name: block.name,
             // Arguments can be either string or object - both are handled by downstream parsers
-            arguments: block.input as any
+            arguments: block.input as Record<string, unknown>
           };
           toolCalls.push(toolCall);
 
@@ -268,13 +272,13 @@ export class AnthropicProvider implements AIProvider {
        return {
         content: fullContent,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: finalMessage.stop_reason as any,
+        finishReason: (finalMessage.stop_reason ?? undefined) as GenerateResponse['finishReason'],
         usage: finalMessage.usage ? {
           promptTokens: finalMessage.usage.input_tokens,
           completionTokens: finalMessage.usage.output_tokens,
           totalTokens: finalMessage.usage.input_tokens + finalMessage.usage.output_tokens,
-          cacheReadTokens: (finalMessage.usage as any).cache_read_input_tokens ?? 0,
-          cacheCreationTokens: (finalMessage.usage as any).cache_creation_input_tokens ?? 0
+          cacheReadTokens: (finalMessage.usage as unknown as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0,
+          cacheCreationTokens: (finalMessage.usage as unknown as { cache_creation_input_tokens?: number }).cache_creation_input_tokens ?? 0
         } : undefined
       };
     } catch (error) {
@@ -315,7 +319,7 @@ export class AnthropicProvider implements AIProvider {
         // Keep only tool_calls that have matching tool responses
         const validToolCalls = msg.tool_calls.filter(tc => respondedToolCallIds.has(tc.id));
 
-        const content: any[] = [];
+        const content: Record<string, unknown>[] = [];
 
         // Add text content if present
         if (msg.content) {
@@ -353,7 +357,7 @@ export class AnthropicProvider implements AIProvider {
 
           result.push({
             role: 'assistant' as const,
-            content
+            content: content as unknown as Anthropic.MessageParam['content']
           });
         } else {
           // All tool_calls are orphans - send as plain assistant message

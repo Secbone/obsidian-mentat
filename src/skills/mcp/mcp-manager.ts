@@ -161,7 +161,7 @@ export class MCPManager {
   getServerStatus(serverId: string): {
     connected: boolean;
     toolCount: number;
-    serverInfo?: any;
+    serverInfo?: Record<string, unknown>;
   } {
     const client = this.clients.get(serverId);
     if (!client) {

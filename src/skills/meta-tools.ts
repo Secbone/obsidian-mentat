@@ -89,7 +89,7 @@ export interface SpecParams {
  */
 export interface InvokeParams {
   skill_name: string;
-  params: Record<string, any>;
+  params: Record<string, unknown>;
 }
 
 /**

@@ -20,7 +20,7 @@ export interface ContextOptions {
   filter?: (message: ChatMessage) => boolean;
   /** Transform tool calls */
   transformToolCalls?: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -79,7 +79,7 @@ export interface ExportData {
   /** Export timestamp */
   exported: number;
   /** Session metadata */
-  session: Record<string, any>;
+  session: Record<string, unknown>;
   /** Message history */
   messages: ChatMessage[];
   /** Data integrity checksum */

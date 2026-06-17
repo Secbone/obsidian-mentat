@@ -1,6 +1,6 @@
 // File Selector Modal - Fuzzy search interface for selecting documents
 
-import { SuggestModal, TFile } from 'obsidian';
+import { SuggestModal, TFile, App } from 'obsidian';
 import Fuse from 'fuse.js';
 
 export class FileSelectorModal extends SuggestModal<TFile> {
@@ -9,7 +9,7 @@ export class FileSelectorModal extends SuggestModal<TFile> {
   private onSelect: (file: TFile) => void;
 
   constructor(
-    plugin: any,
+    plugin: { app: App },
     onSelect: (file: TFile) => void
   ) {
     super(plugin.app);
@@ -62,7 +62,7 @@ export class FileSelectorModal extends SuggestModal<TFile> {
     });
   }
 
-  onChooseSuggestion(file: TFile, evt: MouseEvent | KeyboardEvent): void {
+  onChooseSuggestion(file: TFile, _evt: MouseEvent | KeyboardEvent): void {
     this.onSelect(file);
   }
 

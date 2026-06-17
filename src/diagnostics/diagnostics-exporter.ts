@@ -1,4 +1,4 @@
-import { Notice } from 'obsidian';
+import { Notice, TFile } from 'obsidian';
 import MentatPlugin from '../main';
 import { ChatManager } from '../chat/chat-manager';
 import { ChatMessage } from '../types';
@@ -97,9 +97,10 @@ export class DiagnosticsExporter {
         markdownContent += `> [!IMPORTANT]\n`;
         markdownContent += `> 以下是本会话期间捕获的运行时报错及参数解析失败数据。这些信息有助于大模型精准定位并修正 JSON 参数错误。\n\n`;
 
-        logs.forEach((log, idx) => {
+        logs.forEach((rawLog, idx) => {
+          const log = rawLog as Record<string, unknown>;
           markdownContent += `### 🚨 事件 ${idx + 1}: ${log.toolName} 调用异常\n`;
-          markdownContent += `* **触发时间**: \`${new Date(log.timestamp).toLocaleString()}\`\n`;
+          markdownContent += `* **触发时间**: \`${new Date(log.timestamp as number).toLocaleString()}\`\n`;
           markdownContent += `* **应用策略**: \`${log.strategy || 'Strict'}\`\n`;
           markdownContent += `* **异常信息**: \`${log.errorMessage}\`\n`;
           markdownContent += `* **原始模型返回参数 (Malformed String)**:\n`;
@@ -227,7 +228,7 @@ export class DiagnosticsExporter {
         // Sum up real usage
         for (const assistantMsg of group.assistantMsgs) {
           if (assistantMsg.metadata?.usage) {
-            const usage = assistantMsg.metadata.usage;
+            const usage = assistantMsg.metadata.usage as { promptTokens: number; cacheReadTokens?: number; totalTokens: number };
             turnPromptTokens += usage.promptTokens;
             turnCacheReadTokens += usage.cacheReadTokens ?? 0;
             turnTotalTokens += usage.totalTokens;
@@ -356,8 +357,8 @@ export class DiagnosticsExporter {
     plugin: MentatPlugin,
     startTime: number,
     endTime: number
-  ): Promise<any[]> {
-    const logs: any[] = [];
+  ): Promise<unknown[]> {
+    const logs: unknown[] = [];
     try {
       const adapter = plugin.app.vault.adapter;
       const logPath = '.mentat/diagnostics.jsonl';
@@ -604,7 +605,7 @@ export class DiagnosticsExporter {
       // Open the note in workspace
       const tFile = plugin.app.vault.getAbstractFileByPath(debugNotePath);
       if (tFile) {
-        await plugin.app.workspace.getLeaf().openFile(tFile as any);
+        await plugin.app.workspace.getLeaf().openFile(tFile as TFile);
         new Notice('Diagnostics Log opened successfully');
       } else {
         new Notice('Log compiled. Please open "Mentat Debug Log.md" in your vault root.');

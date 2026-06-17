@@ -95,7 +95,7 @@ class MarkdownFormatter implements SkillFormatter {
   }
 
   private getSchemaInfo(skill: SkillDefinition): Record<string, unknown> {
-    const jsonSchema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as Record<string, unknown>;
+    const jsonSchema = zodToJsonSchema(skill.schema as unknown as Parameters<typeof zodToJsonSchema>[0], { $refStrategy: 'none' }) as Record<string, unknown>;
     return jsonSchema;
   }
 
@@ -117,6 +117,7 @@ class MarkdownFormatter implements SkillFormatter {
 class XMLFormatter implements SkillFormatter {
   format(skill: SkillDefinition): string {
     const fullName = `${skill.namespace}:${skill.name}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zodToJsonSchema requires ZodTypeAny, skill.schema is compatible at runtime
     const schema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as Record<string, unknown>;
 
     let output = `<skill>\n`;
@@ -159,6 +160,7 @@ class XMLFormatter implements SkillFormatter {
 class JSONFormatter implements SkillFormatter {
   format(skill: SkillDefinition): string {
     const fullName = `${skill.namespace}:${skill.name}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zodToJsonSchema requires ZodTypeAny, skill.schema is compatible at runtime
     const schema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as Record<string, unknown>;
 
     const output = {

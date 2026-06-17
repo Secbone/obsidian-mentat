@@ -6,12 +6,12 @@ import { requestUrl } from 'obsidian';
 export interface OpenCodeTask {
   task: string;
   prompt: string;
-  data?: any;
+  data?: unknown;
 }
 
 export interface OpenCodeResult {
   success: boolean;
-  result?: any;
+  result?: unknown;
   error?: string;
 }
 
@@ -103,7 +103,7 @@ export class OpenCodeIntegration {
   /**
    * Batch extract information using OpenCode
    */
-  async batchExtract(notes: string[], schema: Record<string, any>): Promise<OpenCodeResult> {
+  async batchExtract(notes: string[], schema: Record<string, unknown>): Promise<OpenCodeResult> {
     return await this.execute({
       task: 'batch_extract',
       prompt: '从以下笔记中提取结构化信息。',

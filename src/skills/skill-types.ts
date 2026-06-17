@@ -166,7 +166,7 @@ export type ToolDefinition = OpenAIFunction | AnthropicTool;
 /**
  * Union type for all skill types
  */
-export type AnySkillDefinition =
+export type AnySkillDefinition = // eslint-disable-next-line @typescript-eslint/no-explicit-any
   | SkillDefinition<any, any>
   | DocumentationSkillDefinition;
 
@@ -184,6 +184,6 @@ export function isDocumentationSkill(
  */
 export function isExecutableSkill(
   skill: AnySkillDefinition
-): skill is SkillDefinition<any, any> {
+): skill is SkillDefinition<any, any> { // eslint-disable-line @typescript-eslint/no-explicit-any
   return 'execute' in skill;
 }

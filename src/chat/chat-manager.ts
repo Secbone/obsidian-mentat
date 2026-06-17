@@ -3,6 +3,7 @@
 import { ChatMessage } from '../types';
 import { Context, Message, ContextOptions } from '../context';
 import { FileStorage } from '../utils/file-storage';
+import { IPlatformAdapter } from '../types/platform';
 
 interface ChatHistory {
   sessionId: string;
@@ -12,7 +13,7 @@ interface ChatHistory {
 }
 
 export class ChatManager {
-  private plugin: any;
+  private plugin: { loadData: () => Promise<Record<string, unknown>>; saveData: (data: Record<string, unknown>) => Promise<void>; platform?: { getConfigDir: () => string; exists: (path: string) => Promise<boolean>; read: (path: string) => Promise<string>; write: (path: string, data: string) => Promise<void>; delete: (path: string) => Promise<void>; mkdir: (path: string) => Promise<void>; list: (path: string) => Promise<{ files: string[]; folders: string[] }> }; app?: { vault?: { configDir?: string } } };
   private storage: FileStorage;
   private history: ChatMessage[] = [];
   private selectedFiles: Set<string> = new Set(); // Selected document paths
@@ -21,18 +22,18 @@ export class ChatManager {
   private readonly STORAGE_KEY = 'mentat-chat-history';
   private readonly MAX_HISTORY_SIZE = 100; // Keep last 100 messages
 
-  constructor(plugin: any) {
+  constructor(plugin: ChatManager['plugin']) {
      this.plugin = plugin;
      // Fallback to a safe mock if platform is not yet initialized or present (e.g., in tests)
-     const platform = plugin.platform || {
-       getConfigDir: () => plugin.app?.vault?.configDir || '',
-       exists: async () => false,
-       read: async () => '',
-       write: async () => {},
-       delete: async () => {},
-       mkdir: async () => {},
-       list: async () => ({ files: [], folders: [] }),
-     } as any;
+      const platform = (plugin.platform || {
+        getConfigDir: () => plugin.app?.vault?.configDir || '',
+        exists: async () => false,
+        read: async () => '',
+        write: async () => {},
+        delete: async () => {},
+        mkdir: async () => {},
+        list: async () => ({ files: [], folders: [] }),
+      }) as IPlatformAdapter;
      this.storage = new FileStorage(platform);
      this.sessionId = this.generateSessionId();
      this.initialized = this.loadHistory();
@@ -189,7 +190,7 @@ export class ChatManager {
         // Migration from data.json
         const pluginData = await this.plugin.loadData();
         if (pluginData && pluginData[this.STORAGE_KEY]) {
-          const data: ChatHistory = pluginData[this.STORAGE_KEY];
+          const data: ChatHistory = pluginData[this.STORAGE_KEY] as ChatHistory;
           const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
           if (data && data.lastUpdated > sevenDaysAgo) {
             this.history = data.messages || [];

@@ -68,7 +68,7 @@ export class AgentManager {
   async *executeWithCurrentAgent(
     prompt: string,
     context: AgentContext
-  ): AsyncGenerator<AgentEvent, AgentResponse, any> {
+  ): AsyncGenerator<AgentEvent, AgentResponse, unknown> {
     if (!this.currentAgent) {
       throw new Error('No current agent set');
     }
@@ -82,7 +82,7 @@ export class AgentManager {
     agentId: string,
     prompt: string,
     context: AgentContext
-  ): AsyncGenerator<AgentEvent, AgentResponse, any> {
+  ): AsyncGenerator<AgentEvent, AgentResponse, unknown> {
     const agent = this.agents.get(agentId);
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`);

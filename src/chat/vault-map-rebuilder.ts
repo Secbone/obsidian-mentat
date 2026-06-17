@@ -5,7 +5,7 @@ import { TaskType } from '../types';
 export class VaultMapRebuilder {
   constructor(
     private platform: IPlatformAdapter,
-    private settings: any,
+    private settings: { userConfigFolder?: string; skillInvocationConfig?: { directCallSkills?: string[] } },
     private aiRouter: AIRouter
   ) {}
 
@@ -48,7 +48,7 @@ export class VaultMapRebuilder {
 
     // Process the stats to compile structured metadata for the LLM
     onProgress?.('正在整理并分析热门标签与最新笔记样本...', 35);
-    const analyzedFolders: any[] = [];
+    const analyzedFolders: Record<string, unknown>[] = [];
     folderStats.forEach((stat, folder) => {
       // Sort files by modification time descending and pick top 5
       const recentFiles = stat.files
@@ -118,7 +118,7 @@ Return the finalized markdown content:`;
    */
   static getFileTags(file: IPlatformFile, platform: IPlatformAdapter): string[] {
     const cache = platform.getFileCache(file);
-    const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
+    const fileTags = cache?.tags?.map((t: unknown) => (t as { tag: string }).tag.replace('#', '')) || [];
     const frontmatterTagsRaw = cache?.frontmatter?.tags;
     let frontmatterTags: string[] = [];
     if (Array.isArray(frontmatterTagsRaw)) {

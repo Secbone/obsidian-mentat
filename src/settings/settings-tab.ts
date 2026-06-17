@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Notice, Modal, setIcon, TextComponent, SliderComponent } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, Modal, setIcon, TextComponent, SliderComponent, TFile } from 'obsidian';
 import MentatPlugin from '../main';
 import { AIProviderConfig } from './settings';
 import { SkillInvocationConfig } from '../types';
@@ -307,9 +307,9 @@ Write your custom style instructions and preferences here. This file is dynamica
 
             // Open the file in active editor pane
             const tFile = vault.getAbstractFileByPath(preferencesPath);
-            if (tFile) {
+            if (tFile instanceof TFile) {
               const leaf = this.app.workspace.getLeaf(false);
-              await leaf.openFile(tFile as any);
+              await leaf.openFile(tFile);
               new Notice('Opened user-preferences.md in editor');
             } else {
               new Notice('Failed to locate preferences file in vault');
@@ -388,9 +388,9 @@ ${folderGuidelines}
 
             // Open the file in active editor pane
             const tFile = vault.getAbstractFileByPath(mapPath);
-            if (tFile) {
+            if (tFile instanceof TFile) {
               const leaf = this.app.workspace.getLeaf(false);
-              await leaf.openFile(tFile as any);
+              await leaf.openFile(tFile);
               new Notice('Opened vault-map.md in editor');
             } else {
               new Notice('Failed to locate vault map file');
@@ -907,9 +907,9 @@ ${folderGuidelines}
       const folderPath = this.plugin.settings.userConfigFolder || 'Mentat/Config';
       const mapPath = `${folderPath}/vault-map.md`;
       const tFile = this.plugin.app.vault.getAbstractFileByPath(mapPath);
-      if (tFile) {
+      if (tFile instanceof TFile) {
         const leaf = this.plugin.app.workspace.getLeaf(false);
-        await leaf.openFile(tFile as any);
+        await leaf.openFile(tFile);
         new Notice('🎉 已为您打开知识地图！');
       } else {
         new Notice('❌ 找不到重建后的知识地图文件');

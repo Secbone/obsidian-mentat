@@ -120,7 +120,7 @@ export class AgentOrchestrator {
 
         const eventQueue = new AsyncEventQueue<AgentEvent & { taskId: string }>();
         let activeTaskCount = activeStreams.length;
-        let hasError: any = null;
+        let hasError: unknown = null;
 
         // Start background runners for each stream to collect events in parallel
         activeStreams.forEach(({ id, context, stream }) => {

@@ -218,7 +218,7 @@ export class SkillExecutor {
     return result;
   }
 
-  private safeParseToolArguments(toolCall: ToolCall): Record<string, any> | null {
+  private safeParseToolArguments(toolCall: ToolCall): Record<string, unknown> | null {
     if (typeof toolCall.arguments !== 'string') {
       return toolCall.arguments;
     }
@@ -277,7 +277,7 @@ export class SkillExecutor {
     calls: Array<{
       namespace: SkillNamespace;
       name: string;
-      parameters: Record<string, any>;
+      parameters: Record<string, unknown>;
     }>,
     options: ExecutionOptions = {}
   ): Promise<SkillResult[]> {
@@ -344,9 +344,9 @@ export class SkillExecutor {
    * Execute MCP skill (placeholder - will be implemented by MCP client)
    */
   private async executeMCPSkill(
-    fullName: string,
-    parameters: Record<string, unknown>,
-    options: ExecutionOptions
+    _fullName: string,
+    _parameters: Record<string, unknown>,
+    _options: ExecutionOptions
   ): Promise<SkillResult> {
     // This will be implemented when MCP client is integrated
     return {

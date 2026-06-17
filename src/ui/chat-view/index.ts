@@ -28,7 +28,7 @@ interface ActiveTask {
 }
 
 export class ChatView extends ItemView {
-  plugin: any;
+  plugin: MentatPlugin;
   chatManager: ChatManager;
   messageRenderer: MessageRenderer;
   chatOrchestrator: ChatOrchestrator;
@@ -393,8 +393,8 @@ export class ChatView extends ItemView {
 
     // Settings button
     this.settingsButton.addEventListener('click', () => {
-      (this.app as any).setting.open();
-      (this.app as any).setting.openTabById(this.plugin.manifest.id);
+      (this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.open();
+      (this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.openTabById(this.plugin.manifest.id);
     });
 
     // Clear conversation
@@ -450,8 +450,8 @@ export class ChatView extends ItemView {
         return;
       }
       if (cmd === '/settings') {
-        (this.app as any).setting.open();
-        (this.app as any).setting.openTabById(this.plugin.manifest.id);
+        (this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.open();
+        (this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.openTabById(this.plugin.manifest.id);
         return;
       }
       if (cmd === '/index') {
@@ -468,7 +468,7 @@ export class ChatView extends ItemView {
         const notice = new Notice(`正在重建 ${filesToSearch.length} 个文档的向量索引...`, 0);
         try {
           let processed = 0;
-          await this.plugin.indexManager.indexFiles(filesToSearch, (progress: any) => {
+          await this.plugin.indexManager.indexFiles(filesToSearch, (progress: { current: number; total: number; currentFile: string }) => {
             processed = progress.current;
             notice.setMessage(`索引进度: ${progress.current}/${progress.total} - ${progress.currentFile}`);
           });
@@ -539,17 +539,11 @@ export class ChatView extends ItemView {
     this.sendButton.setAttribute('aria-label', 'Steer agent');
 
     try {
-      const selectedPaths = this.chatManager.selectedFilesList;
-      const selectedFiles = selectedPaths
-        .map(path => this.app.vault.getAbstractFileByPath(path))
-        .filter((f): f is TFile => f instanceof TFile);
-
       // Get conversation history (does NOT include current message)
       // Using Context.getContext() for optimized LLM context
       const contextMessages = await this.chatManager
         .getContextForLLM({ maxMessages: 50 });
 
-      const fullResponse = '';
       const activeTasks: ActiveTask[] = [];
       let currentStatus = '初始化智能体...';
 

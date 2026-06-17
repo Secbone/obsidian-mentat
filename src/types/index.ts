@@ -25,7 +25,7 @@ export enum TaskType {
 export interface ToolCall {
   id: string;
   name: string;
-  arguments: string | Record<string, any>;
+  arguments: string | Record<string, unknown>;
 }
 
 export interface SkillCallMessage {
@@ -42,7 +42,7 @@ export interface GenerateOptions {
   systemPrompt?: string;
   stopSequences?: string[];
   // Skill support
-  skills?: any[]; // OpenAI functions or Anthropic tools
+  skills?: unknown[]; // OpenAI functions or Anthropic tools
   toolChoice?: 'auto' | 'none' | (string & NonNullable<unknown>);
   abortSignal?: AbortSignal;
 }
@@ -130,7 +130,7 @@ export interface ChatMessage {
     isSubagent?: boolean;
     agentId?: string;
     parentMessageId?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -181,7 +181,7 @@ export interface FileIndex {
     tags: string[];
     links: string[];
     headings: string[];
-    frontmatter: Record<string, any>;
+    frontmatter: Record<string, unknown>;
   };
   stats: {
     wordCount: number;
@@ -222,5 +222,5 @@ export interface SpecParams {
 // Invoke Parameters
 export interface InvokeParams {
   skill_name: string;
-  params: Record<string, any>;
+  params: Record<string, unknown>;
 }
