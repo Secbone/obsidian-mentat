@@ -73,7 +73,7 @@ export const exactReplaceString = (
   const occurrences: number[] = [];
   let searchIndex = 0;
 
-  // eslint-disable-next-line no-constant-condition
+  // eslint-disable-next-line no-constant-condition -- indexOf search loop terminates on foundIndex === -1
   while (true) {
     const foundIndex = content.indexOf(oldString, searchIndex);
     if (foundIndex === -1) break;

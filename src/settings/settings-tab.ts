@@ -620,9 +620,9 @@ ${folderGuidelines}
         const skillName = card.dataset.skillName.toLowerCase();
         const description = card.dataset.description.toLowerCase();
         if (skillName.includes(query) || description.includes(query)) {
-          card.style.display = '';
+          card.classList.remove('skill-card-hidden');
         } else {
-          card.style.display = 'none';
+          card.classList.add('skill-card-hidden');
         }
       });
     });

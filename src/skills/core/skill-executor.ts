@@ -40,7 +40,7 @@ export class SkillExecutor {
    * Execute a skill by name
    */
   async execute(
-    namespace: SkillNamespace | string,
+    namespace: SkillNamespace | (string & NonNullable<unknown>),
     name: string,
     parameters: Record<string, any>,
     options: ExecutionOptions = {}
@@ -221,7 +221,7 @@ export class SkillExecutor {
 
     try {
       return JSON.parse(argsString);
-    } catch (error: any) {
+    } catch (_error: any) {
       console.warn(`[SkillExecutor] JSON strict parse failed for ${toolCall.name}, trying escape-healing...`);
 
       try {

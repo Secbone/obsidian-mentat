@@ -116,7 +116,7 @@ export class SkillRegistry {
   /**
    * Get full skill name (namespace:name)
    */
-  getFullName(namespace: SkillNamespace | string, name: string): string {
+  getFullName(namespace: SkillNamespace | (string & NonNullable<unknown>), name: string): string {
     return `${namespace}:${name}`;
   }
 

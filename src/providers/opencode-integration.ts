@@ -1,6 +1,7 @@
 // OpenCode Integration - Optional advanced automation
 
 import PersonalAgentPlugin from '../main';
+import { requestUrl } from 'obsidian';
 
 export interface OpenCodeTask {
   task: string;
@@ -38,12 +39,13 @@ export class OpenCodeIntegration {
     }
 
     try {
-      const response = await fetch(`${this.baseURL}/health`, {
+      const response = await requestUrl({
+        url: `${this.baseURL}/health`,
         headers: {
           'Authorization': `Bearer ${this.apiKey}`
         }
       });
-      return response.ok;
+      return response.status >= 200 && response.status < 300;
     } catch (error) {
       console.error('OpenCode availability check failed:', error);
       return false;
@@ -59,7 +61,8 @@ export class OpenCodeIntegration {
     }
 
     try {
-      const response = await fetch(`${this.baseURL}/execute`, {
+      const response = await requestUrl({
+        url: `${this.baseURL}/execute`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -68,11 +71,11 @@ export class OpenCodeIntegration {
         body: JSON.stringify(task)
       });
 
-      if (!response.ok) {
-        throw new Error(`OpenCode API error: ${response.statusText}`);
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`OpenCode API error: ${response.status}`);
       }
 
-      const result = await response.json();
+      const result = response.json;
       return {
         success: true,
         result: result

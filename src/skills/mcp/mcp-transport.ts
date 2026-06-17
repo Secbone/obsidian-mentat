@@ -5,6 +5,7 @@ import {
   MCPMessage,
   MCPServerConfig
 } from './mcp-types';
+import { requestUrl } from 'obsidian';
 
 /**
  * Stdio Transport - Communicates with MCP servers via stdio
@@ -30,7 +31,7 @@ export class StdioTransport implements MCPTransport {
     try {
       // Note: In Obsidian plugin environment, we need to use Node.js child_process
       // This will only work in desktop environments
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-var-requires -- child_process required for MCP stdio transport, desktop-only
       const { spawn } = require('child_process');
 
       this.process = spawn(this.config.command!, this.config.args || [], {
@@ -169,7 +170,8 @@ export class HttpTransport implements MCPTransport {
 
     try {
       // Test connection with a ping
-      const response = await fetch(this.config.url!, {
+      const response = await requestUrl({
+        url: this.config.url!,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -182,8 +184,8 @@ export class HttpTransport implements MCPTransport {
         })
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`HTTP ${response.status}`);
       }
 
       this.connected = true;
@@ -200,7 +202,8 @@ export class HttpTransport implements MCPTransport {
     }
 
     try {
-      const response = await fetch(this.config.url!, {
+      const response = await requestUrl({
+        url: this.config.url!,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -210,17 +213,17 @@ export class HttpTransport implements MCPTransport {
         body: JSON.stringify(message)
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`HTTP ${response.status}`);
       }
 
       // Check for session ID in response headers
-      const sessionIdHeader = response.headers.get('X-Session-ID');
+      const sessionIdHeader = response.headers['x-session-id'] || response.headers['X-Session-ID'];
       if (sessionIdHeader) {
         this.sessionId = sessionIdHeader;
       }
 
-      const responseData: MCPMessage = await response.json();
+      const responseData: MCPMessage = response.json;
 
       if (responseData.error) {
         throw new Error(responseData.error.message);

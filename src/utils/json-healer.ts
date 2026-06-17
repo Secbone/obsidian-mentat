@@ -91,7 +91,7 @@ export function safeParseJson(
         onHealed(healedArgsString, error.message);
       }
       return parsed;
-    } catch (healingError: any) {
+    } catch (_healingError: any) {
       if (onFailed) {
         onFailed(error.message);
       }

@@ -95,7 +95,7 @@ export class OllamaProvider implements AIProvider {
         content: prompt
       });
 
-      // eslint-disable-next-line no-restricted-globals
+      // Obsidian review: streaming requires native fetch (requestUrl doesn't support ReadableStream)
       const response = await fetch(`${this.config.baseURL}/api/chat`, {
         method: 'POST',
         headers: {
@@ -123,7 +123,7 @@ export class OllamaProvider implements AIProvider {
       }
 
       const decoder = new TextDecoder();
-      // eslint-disable-next-line no-constant-condition
+      // eslint-disable-next-line no-constant-condition -- reader.read() loop terminates on done:true
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
