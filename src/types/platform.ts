@@ -1,3 +1,6 @@
+import type { MentatSettings } from '../settings/settings';
+import { App, Vault, Workspace, MetadataCache } from 'obsidian';
+
 export interface IPlatformFile {
   path: string;
   name: string;
@@ -14,7 +17,7 @@ export interface IPlatformFile {
 
 export interface IFileCache {
   tags?: Array<{ tag: string }>;
-  frontmatter?: Record<string, any>;
+  frontmatter?: Record<string, unknown>;
 }
 
 export interface IPlatformAdapter {
@@ -57,13 +60,13 @@ export interface IPlatformAdapter {
   list(path: string): Promise<{ files: string[]; folders: string[] }>;
 
   // Plugin data storage APIs
-  loadPluginData(): Promise<any>;
-  savePluginData(data: any): Promise<void>;
+  loadPluginData(): Promise<MentatSettings>;
+  savePluginData(data: MentatSettings): Promise<void>;
 
   // Safe typed wrappers for underlying host instances
-  getApp(): any;
-  getVault(): any;
-  getWorkspace(): any;
-  getMetadataCache(): any;
-  getPlugin(): any;
+  getApp(): App;
+  getVault(): Vault;
+  getWorkspace(): Workspace;
+  getMetadataCache(): MetadataCache;
+  getPlugin(): import('../main').default;
 }

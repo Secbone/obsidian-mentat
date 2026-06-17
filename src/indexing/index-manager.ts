@@ -252,15 +252,16 @@ export class IndexManager {
       } else {
         // Data migration from data.json
         const data = await this.platform.loadPluginData();
-        if (data?.index) {
+        const legacyIndex = (data as Record<string, unknown>).index as Record<string, unknown> | undefined;
+        if (legacyIndex) {
           console.log('[IndexManager] Migrating legacy global vector store...');
           
           // Deserialize vector store from old data.json format
           const oldVectorStore = new VectorStore();
-          oldVectorStore.deserialize(data.index.vectorStore);
+          oldVectorStore.deserialize(legacyIndex.vectorStore as string);
           
           // Legacy indexedFiles format was Map entries: [filePath, contentHash]
-          const legacyIndexedFiles: [string, string][] = data.index.indexedFiles || [];
+          const legacyIndexedFiles: [string, string][] = (legacyIndex.indexedFiles as [string, string][]) || [];
           const fileChunksMap = new Map<string, FileChunk[]>();
           
           for (const [filePath, contentHash] of legacyIndexedFiles) {

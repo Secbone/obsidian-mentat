@@ -76,7 +76,7 @@ OTHERWISE:
   async *execute(
     prompt: string,
     context: AgentContext
-  ): AsyncGenerator<AgentEvent, AgentResponse, any> {
+  ): AsyncGenerator<AgentEvent, AgentResponse, unknown> {
     const startTime = Date.now();
 
     yield { type: 'status', message: '✍️ Writer Agent 正在进行初始技术调研并起草内容...' };
@@ -91,8 +91,8 @@ OTHERWISE:
         result = await generator.next();
       }
       writerResponse = result.value as AgentResponse;
-    } catch (err: any) {
-      yield { type: 'error', message: `Writer Agent 初始写作阶段异常: ${err.message}` };
+    } catch (err: unknown) {
+      yield { type: 'error', message: `Writer Agent 初始写作阶段异常: ${err instanceof Error ? err.message : String(err)}` };
       throw err;
     }
 
@@ -114,8 +114,8 @@ OTHERWISE:
         revResult = await reviewerGen.next();
       }
       reviewerResponse = revResult.value as AgentResponse;
-    } catch (err: any) {
-      yield { type: 'status', message: `⚠️ Reviewer Agent 评估失败: ${err.message}，默认批准首版本。` };
+    } catch (err: unknown) {
+      yield { type: 'status', message: `⚠️ Reviewer Agent 评估失败: ${err instanceof Error ? err.message : String(err)}，默认批准首版本。` };
       return writerResponse;
     }
 
@@ -153,8 +153,8 @@ Please rewrite/revise your technical note to address every item on the list. Mai
         revWriteResult = await writerRevisionGen.next();
       }
       revisedWriterResponse = revWriteResult.value as AgentResponse;
-    } catch (err: any) {
-      yield { type: 'status', message: `⚠️ Writer 修订失败: ${err.message}，回退使用初始草稿。` };
+    } catch (err: unknown) {
+      yield { type: 'status', message: `⚠️ Writer 修订失败: ${err instanceof Error ? err.message : String(err)}，回退使用初始草稿。` };
       return writerResponse;
     }
 
@@ -176,8 +176,8 @@ Please rewrite/revise your technical note to address every item on the list. Mai
         finalRevResult = await finalReviewerGen.next();
       }
       finalReviewerResponse = finalRevResult.value as AgentResponse;
-    } catch (err: any) {
-      yield { type: 'status', message: `⚠️ Reviewer 最终审核异常: ${err.message}` };
+    } catch (err: unknown) {
+      yield { type: 'status', message: `⚠️ Reviewer 最终审核异常: ${err instanceof Error ? err.message : String(err)}` };
       return revisedWriterResponse;
     }
 

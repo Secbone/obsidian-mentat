@@ -1,6 +1,7 @@
 // Core types for Skill system
 
 import { ZodTypeAny } from 'zod';
+import { Vault, MetadataCache, Workspace } from 'obsidian';
 
 /**
  * Skill execution status
@@ -15,7 +16,7 @@ export type SkillNamespace = 'obsidian' | 'mcp' | 'meta' | 'guard';
 /**
  * Skill execution result
  */
-export interface SkillResult<T = any> {
+export interface SkillResult<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
@@ -23,7 +24,7 @@ export interface SkillResult<T = any> {
     executionTime?: number;
     filesModified?: string[];
     filesCreated?: string[];
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -34,7 +35,7 @@ export interface SkillCall {
   id: string;
   skillName: string;
   namespace: SkillNamespace;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   status: SkillStatus;
   result?: SkillResult;
   timestamp: number;
@@ -44,7 +45,7 @@ export interface SkillCall {
 /**
  * Core Skill Definition
  */
-export interface SkillDefinition<TInput = any, TOutput = any> {
+export interface SkillDefinition<TInput = unknown, TOutput = unknown> {
   // Identification
   name: string;
   namespace: SkillNamespace;
@@ -78,7 +79,7 @@ export interface OpenAIFunction {
   description: string;
   parameters: {
     type: 'object';
-    properties: Record<string, any>;
+    properties: Record<string, unknown>;
     required?: string[];
   };
 }
@@ -91,7 +92,7 @@ export interface AnthropicTool {
   description: string;
   input_schema: {
     type: 'object';
-    properties: Record<string, any>;
+    properties: Record<string, unknown>;
     required?: string[];
   };
 }
@@ -102,18 +103,18 @@ export interface AnthropicTool {
 export interface ToolCall {
   id: string;
   name: string;
-  arguments: string | Record<string, any>; // Can be JSON string or parsed object
+  arguments: string | Record<string, unknown>; // Can be JSON string or parsed object
 }
 
 /**
  * Skill execution context - provides access to plugin resources
  */
 export interface SkillContext {
-  vault: any; // Obsidian Vault
-  metadataCache: any; // Obsidian MetadataCache
-  workspace: any; // Obsidian Workspace
-  indexManager?: any; // IndexManager for RAG operations
-  plugin: any; // Main plugin instance
+  vault: Vault;
+  metadataCache: MetadataCache;
+  workspace: Workspace;
+  indexManager?: import('../indexing/index-manager').IndexManager;
+  plugin: import('../main').default;
 }
 
 /**
@@ -159,6 +160,8 @@ export interface DocumentationSkillDefinition {
     source?: string; // Source file path
   };
 }
+
+export type ToolDefinition = OpenAIFunction | AnthropicTool;
 
 /**
  * Union type for all skill types

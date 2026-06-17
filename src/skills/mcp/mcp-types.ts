@@ -26,7 +26,7 @@ export interface MCPServerConfig {
  */
 export interface MCPTransport {
   connect(): Promise<void>;
-  send(message: MCPMessage): Promise<any>;
+  send(message: MCPMessage): Promise<unknown>;
   receive(): Promise<MCPMessage>;
   close(): Promise<void>;
   isConnected(): boolean;
@@ -51,8 +51,8 @@ export interface MCPMessage {
   jsonrpc: '2.0';
   id?: string | number;
   method?: string;
-  params?: any;
-  result?: any;
+  params?: unknown;
+  result?: unknown;
   error?: MCPError;
 }
 
@@ -62,7 +62,7 @@ export interface MCPMessage {
 export interface MCPError {
   code: number;
   message: string;
-  data?: any;
+  data?: unknown;
 }
 
 /**
@@ -127,9 +127,9 @@ export interface MCPToolDefinition {
   description: string;
   inputSchema: {
     type: 'object';
-    properties?: Record<string, any>;
+    properties?: Record<string, unknown>;
     required?: string[];
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -150,7 +150,7 @@ export interface MCPToolCallRequest extends MCPMessage {
   method: 'tools/call';
   params: {
     name: string;
-    arguments: Record<string, any>;
+    arguments: Record<string, unknown>;
   };
 }
 

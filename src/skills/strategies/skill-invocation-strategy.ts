@@ -1,6 +1,6 @@
 // Skill Invocation Strategy - Abstract strategy pattern for skill invocation
 
-import { AnySkillDefinition, OpenAIFunction, AnthropicTool, isExecutableSkill } from '../skill-types';
+import { AnySkillDefinition, OpenAIFunction, AnthropicTool, isExecutableSkill, ToolDefinition } from '../skill-types';
 import { SkillRegistry } from '../core/skill-registry';
 import { SkillListGenerator } from '../generators/skill-list-generator';
 import { SkillDetailGenerator } from '../generators/skill-detail-generator';
@@ -8,6 +8,12 @@ import { getSpecTool, getInvokeTool } from '../meta-tools';
 import { PromptLoader } from '../../prompts/prompt-loader';
 import { PROMPT_PATHS, FALLBACK_PROMPTS, TEMPLATE_VARS } from '../../prompts/prompt-templates';
 import { IPlatformAdapter } from '../../types/platform';
+
+type MentatPluginRef = {
+  settings?: {
+    skillConfigurations?: Record<string, unknown>;
+  };
+};
 
 /**
  * Skill invocation mode
@@ -26,7 +32,7 @@ export interface SkillInvocationStrategy {
   /**
    * Get the tool/function definitions to send to the LLM
    */
-  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): any[];
+  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): ToolDefinition[];
 
   /**
    * Check if this is a meta-tool call (spec or invoke)
@@ -49,7 +55,7 @@ export class NativeFunctionCallingStrategy implements SkillInvocationStrategy {
     return registry.getDocumentationContent();
   }
 
-  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): any[] {
+  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): ToolDefinition[] {
     if (format === 'openai') {
       return registry.toOpenAIFunctions();
     } else {
@@ -90,12 +96,13 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
     content += registry.getDocumentationContent();
 
     // Filter enabled skills
-    const app = this.platform ? (this.platform as any).app : undefined;
-    const plugin = app ? app.plugins?.plugins?.['mentat'] : null;
-    const configurations = plugin?.settings?.skillConfigurations || {};
+    const app = this.platform ? this.platform.getApp() : undefined;
+    const plugin = (app as Record<string, unknown> | undefined)?.plugins as { plugins?: Record<string, MentatPluginRef> } | undefined;
+    const mentatPlugin = plugin?.plugins?.['mentat'];
+    const configurations = mentatPlugin?.settings?.skillConfigurations || {};
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
-      return configurations[fullName]?.enabled !== false;
+      return (configurations[fullName] as { enabled?: boolean } | undefined)?.enabled !== false;
     });
 
     // Generate skill list
@@ -171,7 +178,7 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
     return content;
   }
 
-  getToolDefinitions(_registry: SkillRegistry, format: 'openai' | 'anthropic'): any[] {
+  getToolDefinitions(_registry: SkillRegistry, format: 'openai' | 'anthropic'): ToolDefinition[] {
     // Return only the two meta-tools
     if (format === 'openai') {
       return [
@@ -231,19 +238,20 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
       'obsidian:web_fetch'
     ];
     
-    const app = this.platform ? (this.platform as any).app : undefined;
-    const plugin = app ? app.plugins?.plugins?.['mentat'] : null;
-    const configurations: Record<string, any> = plugin?.settings?.skillConfigurations || {};
+    const app = this.platform ? this.platform.getApp() : undefined;
+    const plugin = app ? (app as unknown as { plugins: { plugins: Record<string, { settings: { skillConfigurations?: Record<string, { enabled?: boolean }> } }> } }).plugins?.plugins?.['mentat'] : null;
+    const configurations: Record<string, unknown> = plugin?.settings?.skillConfigurations || {};
     
     // Base defaults
     for (const name of defaultCore) {
-      if (configurations[name]?.directCall !== false) {
+      if ((configurations[name] as { directCall?: boolean } | undefined)?.directCall !== false) {
         coreSkills.add(name);
       }
     }
     
     // Apply dynamic overrides
-    for (const [name, config] of Object.entries(configurations)) {
+    for (const [name, rawConfig] of Object.entries(configurations)) {
+      const config = rawConfig as { directCall?: boolean };
       if (config.directCall === true) {
         coreSkills.add(name);
       } else if (config.directCall === false) {
@@ -261,12 +269,13 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     content += registry.getDocumentationContent();
 
     // Filter enabled skills
-    const app = this.platform ? (this.platform as any).app : undefined;
-    const plugin = app ? app.plugins?.plugins?.['mentat'] : null;
-    const configurations = plugin?.settings?.skillConfigurations || {};
+    const app = this.platform ? this.platform.getApp() : undefined;
+    const plugin = (app as Record<string, unknown> | undefined)?.plugins as { plugins?: Record<string, MentatPluginRef> } | undefined;
+    const mentatPlugin = plugin?.plugins?.['mentat'];
+    const configurations = mentatPlugin?.settings?.skillConfigurations || {};
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
-      return configurations[fullName]?.enabled !== false;
+      return (configurations[fullName] as { enabled?: boolean } | undefined)?.enabled !== false;
     });
 
     const coreSkillsSet = this.getCoreSkillsSet();
@@ -308,16 +317,17 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     return content;
   }
 
-  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): any[] {
-    const tools: any[] = [];
+  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): ToolDefinition[] {
+    const tools: ToolDefinition[] = [];
 
     // Filter enabled skills
-    const app = this.platform ? (this.platform as any).app : undefined;
-    const plugin = app ? app.plugins?.plugins?.['mentat'] : null;
-    const configurations = plugin?.settings?.skillConfigurations || {};
+    const app = this.platform ? this.platform.getApp() : undefined;
+    const plugin = (app as Record<string, unknown> | undefined)?.plugins as { plugins?: Record<string, MentatPluginRef> } | undefined;
+    const mentatPlugin = plugin?.plugins?.['mentat'];
+    const configurations = mentatPlugin?.settings?.skillConfigurations || {};
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
-      return configurations[fullName]?.enabled !== false;
+      return (configurations[fullName] as { enabled?: boolean } | undefined)?.enabled !== false;
     });
 
     const coreSkillsSet = this.getCoreSkillsSet();
@@ -417,7 +427,7 @@ export class SkillInvocationContext {
   /**
    * Get tool definitions using current strategy
    */
-  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): any[] {
+  getToolDefinitions(registry: SkillRegistry, format: 'openai' | 'anthropic'): ToolDefinition[] {
     return this.strategy.getToolDefinitions(registry, format);
   }
 

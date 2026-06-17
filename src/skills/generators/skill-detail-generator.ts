@@ -58,12 +58,13 @@ class MarkdownFormatter implements SkillFormatter {
     output += '## Parameters\n\n';
     const schema = this.getSchemaInfo(skill);
 
-    if (schema.properties && Object.keys(schema.properties).length > 0) {
-      for (const [paramName, paramInfo] of Object.entries(schema.properties)) {
-        const isRequired = schema.required?.includes(paramName) || false;
+    if (schema.properties && Object.keys(schema.properties as Record<string, unknown>).length > 0) {
+      for (const [paramName, rawParam] of Object.entries(schema.properties as Record<string, unknown>)) {
+        const paramInfo = rawParam as Record<string, unknown>;
+        const isRequired = (schema.required as string[] | undefined)?.includes(paramName) || false;
         const requiredTag = isRequired ? '**required**' : 'optional';
         const typeInfo = this.getTypeInfo(paramInfo);
-        const description = (paramInfo as any).description || 'No description';
+        const description = (paramInfo as { description?: string }).description || 'No description';
 
         output += `- \`${paramName}\` (${typeInfo}, ${requiredTag}): ${description}\n`;
       }
@@ -93,20 +94,20 @@ class MarkdownFormatter implements SkillFormatter {
     return output;
   }
 
-  private getSchemaInfo(skill: SkillDefinition): any {
-    const jsonSchema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as any;
+  private getSchemaInfo(skill: SkillDefinition): Record<string, unknown> {
+    const jsonSchema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as Record<string, unknown>;
     return jsonSchema;
   }
 
-  private getTypeInfo(paramInfo: any): string {
+  private getTypeInfo(paramInfo: Record<string, unknown>): string {
     if (paramInfo.type) {
       if (paramInfo.type === 'array' && paramInfo.items) {
-        const itemType = paramInfo.items.type || 'any';
+        const itemType = (paramInfo.items as { type?: string })?.type || 'unknown';
         return `${itemType}[]`;
       }
-      return paramInfo.type;
+      return String(paramInfo.type);
     }
-    return 'any';
+    return 'unknown';
   }
 }
 
@@ -116,18 +117,19 @@ class MarkdownFormatter implements SkillFormatter {
 class XMLFormatter implements SkillFormatter {
   format(skill: SkillDefinition): string {
     const fullName = `${skill.namespace}:${skill.name}`;
-    const schema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as any;
+    const schema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as Record<string, unknown>;
 
     let output = `<skill>\n`;
     output += `  <name>${fullName}</name>\n`;
     output += `  <description>${this.escapeXml(skill.description)}</description>\n`;
     output += `  <parameters>\n`;
 
-    if (schema.properties && Object.keys(schema.properties).length > 0) {
-      for (const [paramName, paramInfo] of Object.entries(schema.properties)) {
-        const isRequired = schema.required?.includes(paramName) || false;
-        const typeInfo = (paramInfo as any).type || 'any';
-        const description = (paramInfo as any).description || '';
+    if (schema.properties && Object.keys(schema.properties as Record<string, unknown>).length > 0) {
+      for (const [paramName, rawParam] of Object.entries(schema.properties as Record<string, unknown>)) {
+        const paramInfo = rawParam as Record<string, unknown>;
+        const isRequired = (schema.required as string[] | undefined)?.includes(paramName) || false;
+        const typeInfo = (paramInfo as { type?: string }).type || 'unknown';
+        const description = (paramInfo as { description?: string }).description || '';
 
         output += `    <parameter name="${paramName}" type="${typeInfo}" required="${isRequired}">\n`;
         output += `      ${this.escapeXml(description)}\n`;
@@ -157,7 +159,7 @@ class XMLFormatter implements SkillFormatter {
 class JSONFormatter implements SkillFormatter {
   format(skill: SkillDefinition): string {
     const fullName = `${skill.namespace}:${skill.name}`;
-    const schema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as any;
+    const schema = zodToJsonSchema(skill.schema as any, { $refStrategy: 'none' }) as Record<string, unknown>;
 
     const output = {
       name: fullName,

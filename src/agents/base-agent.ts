@@ -5,8 +5,17 @@ import { AIProvider, ChatMessage, ToolCall, GenerateResponse } from '../types';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
 import { SkillInvocationContext } from '../skills/strategies/skill-invocation-strategy';
-import { SkillCall, isExecutableSkill } from '../skills/skill-types';
+import { SkillCall, isExecutableSkill, SkillResult, SkillNamespace } from '../skills/skill-types';
 import { AgentConfig, AgentContext, AgentResponse, AgentEvent, DiagnosticsLogger } from './agent-types';
+
+interface StreamOptions {
+  temperature?: number;
+  systemPrompt?: string;
+  skills?: unknown[];
+  toolChoice?: string;
+  abortSignal?: AbortSignal;
+  [key: string]: unknown;
+}
 
 /**
  * Dependencies required by BaseAgent
@@ -129,8 +138,8 @@ export class BaseAgent {
     const executedKeysHistory: string[] = [];
 
     // Configure cyclic loop detection parameters with safe defaults
-    const maxCycleLength = context.metadata?.maxCycleLength ?? 4;
-    const minRepeats = context.metadata?.minRepeats ?? 4;
+    const maxCycleLength = (context.metadata as Record<string, number> | undefined)?.maxCycleLength ?? 4;
+    const minRepeats = (context.metadata as Record<string, number> | undefined)?.minRepeats ?? 4;
 
     const userMessage: ChatMessage = {
       role: 'user',
@@ -138,10 +147,10 @@ export class BaseAgent {
       timestamp: Date.now()
     };
 
-    if (context.metadata?.sessionContextPayload) {
+    if ((context.metadata as Record<string, unknown> | undefined)?.sessionContextPayload) {
       userMessage.metadata = {
         ...userMessage.metadata,
-        sessionContextPayload: context.metadata.sessionContextPayload
+        sessionContextPayload: (context.metadata as Record<string, unknown>).sessionContextPayload
       };
     }
 
@@ -151,7 +160,7 @@ export class BaseAgent {
         userMessage
       ],
       systemPrompt,
-      maxTurns: Math.max(1, Math.min(99, context.metadata?.maxTurns ?? this.config.maxTurns ?? 20)),
+      maxTurns: Math.max(1, Math.min(99, (context.metadata as Record<string, number> | undefined)?.maxTurns ?? this.config.maxTurns ?? 20)),
       turnCount: 0,
       fullResponse: '',
       skillCalls: [],
@@ -372,13 +381,13 @@ export class BaseAgent {
    */
   private async *streamModel(
     messages: ChatMessage[],
-    options: any
+    options: StreamOptions
   ): AsyncGenerator<AgentEvent, GenerateResponse, unknown> {
     const queue: AgentEvent[] = [];
     let resolveNext: (() => void) | null = null;
     let completed = false;
     let finalResult: GenerateResponse | null = null;
-    let error: any = null;
+    let error: unknown = null;
 
     const onAbort = () => {
       completed = true;
@@ -451,12 +460,12 @@ export class BaseAgent {
 
   private async *streamModelSimple(
     prompt: string,
-    options: any
+    options: StreamOptions
   ): AsyncGenerator<AgentEvent, string, unknown> {
     const queue: AgentEvent[] = [];
     let resolveNext: (() => void) | null = null;
     let completed = false;
-    let error: any = null;
+    let error: unknown = null;
     let fullResponse = '';
 
     const onAbort = () => {
@@ -535,7 +544,7 @@ export class BaseAgent {
       skillCalls: update.skillCalls ? [...current.skillCalls, ...update.skillCalls] : current.skillCalls
     };
   }
-  private getNamespaceForTool(toolName: string): any {
+  private getNamespaceForTool(toolName: string): SkillNamespace {
     if (toolName === 'spec' || toolName === 'invoke') {
       return 'meta';
     }
@@ -551,7 +560,7 @@ export class BaseAgent {
     const toolName = toolCall.name;
 
     // Parse arguments
-    let args: any;
+    let args: unknown;
     try {
       args = safeParseJson(
         typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments),
@@ -589,19 +598,21 @@ export class BaseAgent {
       };
     }
 
+    const argsObj = args as Record<string, unknown>;
+
     let targetSkillName = toolName;
-    let targetParams = args;
+    let targetParams: unknown = argsObj;
     let isMeta = false;
     let isSpec = false;
 
     if (toolName === 'spec') {
       isMeta = true;
       isSpec = true;
-      targetSkillName = args.skill_name;
+      targetSkillName = argsObj.skill_name as string;
     } else if (toolName === 'invoke') {
       isMeta = true;
-      targetSkillName = args.skill_name;
-      targetParams = args.params || {};
+      targetSkillName = argsObj.skill_name as string;
+      targetParams = argsObj.params || {};
     }
 
     if (toolName === 'invoke' && !targetSkillName) {
@@ -648,9 +659,9 @@ export class BaseAgent {
         if (userFeedback?.modifiedParams) {
           targetParams = userFeedback.modifiedParams;
           if (toolName === 'invoke') {
-            args.params = userFeedback.modifiedParams;
+            (argsObj as Record<string, unknown>).params = userFeedback.modifiedParams;
           } else {
-            args = userFeedback.modifiedParams;
+            Object.assign(argsObj, userFeedback.modifiedParams as Record<string, unknown>);
           }
         }
       } else {
@@ -673,7 +684,7 @@ export class BaseAgent {
     }
 
     if (isSpec) {
-      yield { type: 'skill_call', name: `spec:${targetSkillName}`, params: args };
+      yield { type: 'skill_call', name: `spec:${targetSkillName}`, params: argsObj };
       try {
         const details = this.skillRegistry.getSkillDetails(targetSkillName, 'markdown');
         const isSuccess = !details.startsWith('Error:');
@@ -696,7 +707,7 @@ export class BaseAgent {
             id: toolCall.id,
             skillName: toolName,
             namespace: 'meta',
-            parameters: args,
+            parameters: argsObj,
             status: isSuccess ? 'success' : 'error',
             timestamp: Date.now(),
             result: { success: isSuccess, data: isSuccess ? details : undefined, error: isSuccess ? undefined : details }
@@ -721,12 +732,12 @@ export class BaseAgent {
     yield { type: 'skill_call', name: callNameForEvent, params: targetParams };
 
     try {
-      let runResult: any;
+      let runResult: SkillResult;
       if (isMeta) {
         const { namespace, name } = this.skillRegistry.parseName(targetSkillName);
-        runResult = await this.skillExecutor.execute(namespace, name, targetParams, { abortSignal: context.abortSignal });
+        runResult = await this.skillExecutor.execute(namespace, name, targetParams as Record<string, unknown>, { abortSignal: context.abortSignal });
       } else {
-        const execToolCall = { ...toolCall, arguments: targetParams };
+        const execToolCall = { ...toolCall, arguments: targetParams as Record<string, unknown> };
         runResult = await this.skillExecutor.executeFromToolCall(execToolCall, { skipConfirmation: true, abortSignal: context.abortSignal });
       }
 
@@ -747,7 +758,7 @@ export class BaseAgent {
             id: toolCall.id,
             skillName: toolName,
             namespace: this.getNamespaceForTool(toolName),
-            parameters: args,
+            parameters: argsObj,
             status: 'success',
             timestamp: Date.now(),
             result: runResult
@@ -769,7 +780,7 @@ export class BaseAgent {
             id: toolCall.id,
             skillName: toolName,
             namespace: this.getNamespaceForTool(toolName),
-            parameters: args,
+            parameters: argsObj,
             status: 'error',
             timestamp: Date.now(),
             result: runResult
@@ -792,7 +803,7 @@ export class BaseAgent {
           id: toolCall.id,
           skillName: toolCall.name,
           namespace: this.getNamespaceForTool(toolName),
-          parameters: args,
+          parameters: argsObj,
           status: 'error',
           timestamp: Date.now(),
           result: { success: false, error: err instanceof Error ? err.message : String(err) }
@@ -855,16 +866,16 @@ export class BaseAgent {
   /**
    * Helper to extract subagent messages and tag them with subagent metadata
    */
-  private getSubagentMessages(skillName: string, runResult: any, toolCallId?: string): ChatMessage[] {
+  private getSubagentMessages(skillName: string, runResult: SkillResult, toolCallId?: string): ChatMessage[] {
     const isDelegate = skillName === 'obsidian:delegate_task' || skillName === 'obsidian:spawn_subagent' || 
                        skillName === 'delegate_task' || skillName === 'spawn_subagent';
     if (isDelegate && runResult.metadata?.subagentMessages) {
-      return runResult.metadata.subagentMessages.map((m: ChatMessage) => ({
+      return (runResult.metadata.subagentMessages as ChatMessage[]).map((m: ChatMessage) => ({
         ...m,
         metadata: {
           ...m.metadata,
           isSubagent: true,
-          agentId: runResult.metadata.agentId || 'subagent',
+          agentId: runResult.metadata?.agentId as string || 'subagent',
           parentToolCallId: toolCallId
         }
       }));

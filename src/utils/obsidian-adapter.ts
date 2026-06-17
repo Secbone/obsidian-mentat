@@ -1,5 +1,6 @@
-import { App, Plugin, TFile } from 'obsidian';
+import { App, Plugin, Vault, Workspace, MetadataCache, TFile } from 'obsidian';
 import { IPlatformAdapter, IPlatformFile, IFileCache } from '../types/platform';
+import type { MentatSettings } from '../settings/settings';
 
 export class ObsidianAdapter implements IPlatformAdapter {
   readonly app: App;
@@ -75,31 +76,31 @@ export class ObsidianAdapter implements IPlatformAdapter {
     return await this.app.vault.adapter.list(path);
   }
 
-  async loadPluginData(): Promise<any> {
-    return await this.plugin.loadData();
+  async loadPluginData(): Promise<MentatSettings> {
+    return (await this.plugin.loadData()) as MentatSettings;
   }
 
-  async savePluginData(data: any): Promise<void> {
+  async savePluginData(data: MentatSettings): Promise<void> {
     await this.plugin.saveData(data);
   }
 
-  getApp(): any {
+  getApp(): App {
     return this.app;
   }
 
-  getVault(): any {
+  getVault(): Vault {
     return this.app.vault;
   }
 
-  getWorkspace(): any {
+  getWorkspace(): Workspace {
     return this.app.workspace;
   }
 
-  getMetadataCache(): any {
+  getMetadataCache(): MetadataCache {
     return this.app.metadataCache;
   }
 
-  getPlugin(): any {
-    return this.plugin;
+  getPlugin(): import('../main').default {
+    return this.plugin as import('../main').default;
   }
 }

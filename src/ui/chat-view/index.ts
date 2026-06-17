@@ -630,13 +630,13 @@ export class ChatView extends ItemView {
           );
           if (existingConfirmTask) {
             existingConfirmTask.status = 'executing';
-            existingConfirmTask.params = event.params;
+            existingConfirmTask.params = event.params as Record<string, unknown> | undefined;
           } else {
             activeTasks.push({
               id: event.name + Date.now(),
               name: event.name,
               status: 'executing',
-              params: event.params,
+              params: event.params as Record<string, unknown> | undefined,
               explanation: currentTurnResponse.trim() // Capture intermediate explanation
             });
           }
@@ -685,7 +685,7 @@ export class ChatView extends ItemView {
             id: event.skillName + Date.now(),
             name: event.skillName,
             status: 'confirm',
-            params: event.params,
+            params: event.params as Record<string, unknown> | undefined,
             explanation: currentTurnResponse.trim() // Capture explanation for confirm request too!
           };
           currentTurnResponse = ''; // Reset for next turn

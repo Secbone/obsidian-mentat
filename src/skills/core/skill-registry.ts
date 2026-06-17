@@ -23,7 +23,7 @@ export class SkillRegistry {
   /**
    * Register a skill
    */
-  register(skill: SkillDefinition): void {
+  register(skill: AnySkillDefinition): void {
     const fullName = this.getFullName(skill.namespace, skill.name);
 
     if (this.skills.has(fullName)) {
@@ -37,7 +37,7 @@ export class SkillRegistry {
   /**
    * Register multiple skills
    */
-  registerBulk(skills: SkillDefinition[]): void {
+  registerBulk(skills: AnySkillDefinition[]): void {
     skills.forEach(skill => this.register(skill));
   }
 

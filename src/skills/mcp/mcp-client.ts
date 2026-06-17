@@ -14,6 +14,7 @@ import {
 } from './mcp-types';
 import { createTransport } from './mcp-transport';
 import { SkillDefinition } from '../skill-types';
+import { ZodTypeAny } from 'zod';
 
 /**
  * MCP Client - Connects to and communicates with MCP servers
@@ -89,7 +90,7 @@ export class MCPClient {
     } catch (error) {
       console.error('[MCP] Connection failed:', error);
       this.state.status = 'error';
-      this.state.error = (error as any).message;
+      this.state.error = error instanceof Error ? error.message : String(error);
       throw error;
     }
   }
@@ -154,7 +155,7 @@ export class MCPClient {
   /**
    * Call a tool
    */
-  async callTool(toolName: string, args: Record<string, any>): Promise<any> {
+  async callTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
     if (!this.transport) {
       throw new Error('Not connected');
     }
@@ -219,18 +220,18 @@ export class MCPClient {
     // For MCP tools, we can't directly use Zod schemas
     // We'll create a pass-through validator
     const schema = {
-      parse: (input: any) => input, // Pass through
+      parse: (input: unknown) => input,
       _def: { typeName: 'ZodAny' }
-    } as any;
+    } as ZodTypeAny;
 
     return {
       name: tool.name,
       namespace: 'mcp',
       description: `[MCP:${this.config.id}] ${tool.description}`,
       schema,
-      execute: async (input: any) => {
+      execute: async (input: unknown) => {
         try {
-          const content = await this.callTool(tool.name, input);
+          const content = await this.callTool(tool.name, input as Record<string, unknown>);
           return {
             success: true,
             data: content
@@ -238,7 +239,7 @@ export class MCPClient {
         } catch (error) {
           return {
             success: false,
-            error: (error as any).message
+            error: error instanceof Error ? error.message : String(error)
           };
         }
       },

@@ -11,7 +11,7 @@ import { requestUrl } from 'obsidian';
  * Stdio Transport - Communicates with MCP servers via stdio
  */
 export class StdioTransport implements MCPTransport {
-  private process: any = null;
+  private process: import('child_process').ChildProcess | null = null;
   private messageQueue: MCPMessage[] = [];
   private responseHandlers: Map<string, (response: MCPMessage) => void> = new Map();
   private connected = false;
@@ -39,24 +39,28 @@ export class StdioTransport implements MCPTransport {
         stdio: ['pipe', 'pipe', 'pipe']
       });
 
+      const childProcess = this.process!;
+      const stdout = childProcess.stdout!;
+      const stderr = childProcess.stderr!;
+
       // Handle stdout (responses)
-      this.process.stdout.on('data', (data: Buffer) => {
+      stdout.on('data', (data: Buffer) => {
         this.handleData(data.toString());
       });
 
       // Handle stderr (errors)
-      this.process.stderr.on('data', (data: Buffer) => {
+      stderr.on('data', (data: Buffer) => {
         console.error(`[MCP Stdio] stderr: ${data.toString()}`);
       });
 
       // Handle process exit
-      this.process.on('exit', (code: number) => {
+      childProcess.on('exit', (code: number) => {
         console.log(`[MCP Stdio] Process exited with code ${code}`);
         this.connected = false;
       });
 
       // Handle errors
-      this.process.on('error', (error: Error) => {
+      childProcess.on('error', (error: Error) => {
         console.error('[MCP Stdio] Process error:', error);
         this.connected = false;
       });
@@ -69,13 +73,13 @@ export class StdioTransport implements MCPTransport {
     }
   }
 
-  async send(message: MCPMessage): Promise<any> {
+  async send(message: MCPMessage): Promise<unknown> {
     if (!this.connected || !this.process) {
       throw new Error('Not connected to MCP server');
     }
 
     const messageStr = JSON.stringify(message) + '\n';
-    this.process.stdin.write(messageStr);
+    this.process.stdin!.write(messageStr);
 
     // If message has an ID, wait for response
     if (message.id !== undefined) {
@@ -99,7 +103,7 @@ export class StdioTransport implements MCPTransport {
     return undefined;
   }
 
-  async receive(): Promise<any> {
+  async receive(): Promise<MCPMessage> {
     // Stdio transport uses event-driven model, not polling
     // This method is not used for stdio
     throw new Error('receive() not implemented for stdio transport');
@@ -196,7 +200,7 @@ export class HttpTransport implements MCPTransport {
     }
   }
 
-  async send(message: MCPMessage): Promise<any> {
+  async send(message: MCPMessage): Promise<unknown> {
     if (!this.connected) {
       throw new Error('Not connected to MCP server');
     }
@@ -236,7 +240,7 @@ export class HttpTransport implements MCPTransport {
     }
   }
 
-  async receive(): Promise<any> {
+  async receive(): Promise<MCPMessage> {
     throw new Error('receive() not implemented for HTTP transport (request/response model)');
   }
 

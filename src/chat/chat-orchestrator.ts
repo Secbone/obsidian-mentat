@@ -110,11 +110,11 @@ export class ChatOrchestrator {
   }
 
   private getApp(): App {
-    return (this.platform as unknown as { app: App }).app;
+    return this.platform.getApp();
   }
 
-  private getPlugin(): any {
-    return (this.platform as unknown as { plugin: any }).plugin;
+  private getPlugin(): import('../main').default {
+    return this.platform.getPlugin();
   }
 
   dispose(): void {
@@ -574,7 +574,7 @@ OBSIDIAN SYNTAX CHEAT SHEET:
 
     // Process the stats to compile structured metadata for the LLM
     onProgress?.('正在整理并分析热门标签与最新笔记样本...', 35);
-    const analyzedFolders: any[] = [];
+    const analyzedFolders: { folder: string; totalNoteCount: number; recentSampleFiles: string[]; topFrequentTags: string[] }[] = [];
     folderStats.forEach((stat, folder) => {
       // Sort files by modification time descending and pick top 5
       const recentFiles = stat.files
@@ -644,7 +644,7 @@ Return the finalized markdown content:`;
    */
   private getFileTags(file: IPlatformFile): string[] {
     const cache = this.platform.getFileCache(file);
-    const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
+    const fileTags = cache?.tags?.map((t: { tag: string }) => t.tag.replace('#', '')) || [];
     const frontmatterTagsRaw = cache?.frontmatter?.tags;
     let frontmatterTags: string[] = [];
     if (Array.isArray(frontmatterTagsRaw)) {
@@ -937,7 +937,7 @@ OTHERWISE:
     }
 
     // 4. Register delegate_task skill
-    const delegateTaskSkill: SkillDefinition = {
+    const delegateTaskSkill: SkillDefinition<{ agentId: string; prompt: string }> = {
       name: 'delegate_task',
       namespace: 'obsidian',
       description: 'Delegate a specific task or prompt to a specialized subagent (e.g. writer-agent, reviewer-agent) and get its output.',
@@ -982,7 +982,7 @@ OTHERWISE:
     this.skillRegistry.register(delegateTaskSkill);
 
     // 5. Register spawn_subagent skill
-    const spawnSubagentSkill: SkillDefinition = {
+    const spawnSubagentSkill: SkillDefinition<{ name: string; systemPrompt: string; prompt: string }> = {
       name: 'spawn_subagent',
       namespace: 'obsidian',
       description: 'Dynamically spawn a temporary subagent with custom roles and prompts to assist with a sub-task.',

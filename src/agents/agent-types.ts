@@ -22,14 +22,14 @@ export interface AgentConfig {
 export interface AgentContext {
   messages: ChatMessage[];
   sessionId: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   pendingSteerMessages?: string[];
   abortSignal?: AbortSignal;
   confirmHandler?: (
     skillName: string,
-    params: any,
+    params: unknown,
     message: string
-  ) => Promise<{ approved: boolean; modifiedParams?: any }>;
+  ) => Promise<{ approved: boolean; modifiedParams?: unknown }>;
 }
 
 /**
@@ -38,7 +38,7 @@ export interface AgentContext {
 export interface AgentResponse {
   content: string;
   messages: ChatMessage[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   skillCalls?: SkillCall[];
 }
 
@@ -49,10 +49,10 @@ export interface AgentResponse {
 export type AgentEvent =
   | { type: 'status'; message: string }
   | { type: 'chunk'; text: string }
-  | { type: 'skill_call'; name: string; params: any }
-  | { type: 'skill_success'; name: string; result: any }
+  | { type: 'skill_call'; name: string; params: unknown }
+  | { type: 'skill_success'; name: string; result: unknown }
   | { type: 'skill_error'; name: string; error: string }
-  | { type: 'confirm_request'; skillName: string; params: any; message: string }
+  | { type: 'confirm_request'; skillName: string; params: unknown; message: string }
   | { type: 'steer'; message: string }
   | { type: 'error'; message: string };
 
