@@ -368,7 +368,7 @@ export async function execute(
       // Extract backlinks
       let backlinks: string[] = [];
       if (input.includeBacklinks) {
-        const backlinkData = context.metadataCache.getBacklinksForFile(file);
+        const backlinkData = (context.metadataCache as any).getBacklinksForFile(file);
         if (backlinkData) {
           backlinks = Array.from(backlinkData.keys());
         }

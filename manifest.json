@@ -1,7 +1,7 @@
 {
   "id": "mentat",
   "name": "Mentat",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "minAppVersion": "1.8.0",
   "description": "Your local agentic cognitive partner, managing structured knowledge, local command operations, and deep mathematical reasoning.",
   "author": "Secbone",
