@@ -2,6 +2,7 @@
 
 import { AIProvider, GenerateOptions, GenerateResponse, ChatMessage, ToolCall } from '../types';
 import Anthropic from '@anthropic-ai/sdk';
+import { parseJson } from '../utils/json-healer';
 
 export interface AnthropicProviderConfig {
   id: string;
@@ -59,7 +60,7 @@ export class AnthropicProvider implements AIProvider {
     options?: GenerateOptions
   ): Promise<void> {
     try {
-      const stream = await this.client.messages.stream({
+      const stream = this.client.messages.stream({
         model: this.config.model,
         max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 4096,
         temperature: options?.temperature ?? this.config.temperature ?? 1.0,
@@ -221,7 +222,7 @@ export class AnthropicProvider implements AIProvider {
         }
       }
 
-      const stream = await this.client.messages.stream(
+      const stream = this.client.messages.stream(
         requestParams as unknown as Anthropic.MessageCreateParams,
         {
         signal: options?.abortSignal
@@ -335,7 +336,7 @@ export class AnthropicProvider implements AIProvider {
             let input;
             if (typeof tc.arguments === 'string') {
               try {
-                input = JSON.parse(tc.arguments);
+                input = parseJson<Record<string, unknown>>(tc.arguments);
               } catch (error: unknown) {
                 console.error('[AnthropicProvider convertMessages] Failed to parse tool arguments:', error);
                 console.error('[AnthropicProvider convertMessages] Tool name:', tc.name);

@@ -2,6 +2,7 @@
 
 import { AIProvider, GenerateOptions } from '../types';
 import { requestUrl } from 'obsidian';
+import { parseJson } from '../utils/json-healer';
 import {
   OllamaChatResponse,
   OllamaEmbeddingResponse,
@@ -140,11 +141,11 @@ export class OllamaProvider implements AIProvider {
 
         for (const line of lines) {
           try {
-            const data: OllamaStreamChunk = JSON.parse(line);
+            const data = parseJson<OllamaStreamChunk>(line);
             if (data.message?.content) {
               onChunk(data.message.content);
             }
-          } catch (e) {
+            } catch (_e) {
             // Skip invalid JSON lines
           }
         }

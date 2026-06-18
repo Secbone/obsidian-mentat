@@ -13,6 +13,7 @@ import {
   isExecutableSkill
 } from '../skill-types';
 import { ConfirmationModal } from '../../ui/confirmation-modal';
+import { parseJson } from '../../utils/json-healer';
 
 /**
  * Skill execution options
@@ -226,13 +227,13 @@ export class SkillExecutor {
     const argsString = toolCall.arguments as string;
 
     try {
-      return JSON.parse(argsString);
-    } catch (_error: unknown) {
+      return parseJson<Record<string, unknown>>(argsString);
+    } catch {
       console.warn(`[SkillExecutor] JSON strict parse failed for ${toolCall.name}, trying escape-healing...`);
 
       try {
         const healedArgsString = this.escapeLoneBackslashes(argsString);
-        return JSON.parse(healedArgsString);
+        return parseJson<Record<string, unknown>>(healedArgsString);
       } catch (healingError: unknown) {
         console.error('[SkillExecutor] JSON parse and healing failed for', toolCall.name, 'Error:', healingError instanceof Error ? healingError.message : String(healingError));
         return null;

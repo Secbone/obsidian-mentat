@@ -157,7 +157,7 @@ export class AgentOrchestrator {
           let currentEvent = await eventQueue.next();
           while (!currentEvent.done) {
             if (hasError) {
-              throw hasError;
+              throw hasError instanceof Error ? hasError : new Error(String(hasError));
             }
             if (currentEvent.value) {
               yield currentEvent.value;
@@ -166,7 +166,7 @@ export class AgentOrchestrator {
           }
         } catch (err) {
           tierAbortController.abort();
-          throw err;
+          throw err instanceof Error ? err : new Error(String(err));
         }
 
         if (hasError) {

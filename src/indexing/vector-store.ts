@@ -1,6 +1,7 @@
 // Vector Store - Stores vectors and performs similarity search
 
 import { FileChunk } from './chunk-processor';
+import { parseJson } from '../utils/json-healer';
 
 export interface SimilaritySearchResult {
   chunk: FileChunk;
@@ -142,7 +143,7 @@ export class VectorStore {
    * Deserialize from stored data
    */
   deserialize(data: string): void {
-    const parsed = JSON.parse(data);
+    const parsed = parseJson<{ chunks: [string, FileChunk[]][] }>(data);
     this.chunks = new Map(parsed.chunks);
     this.rebuildIndex();
   }

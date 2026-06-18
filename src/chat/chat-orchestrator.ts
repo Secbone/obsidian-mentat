@@ -3,6 +3,7 @@
 import { TaskType, ChatMessage } from '../types';
 import { Notice } from 'obsidian';
 import { SkillRegistry } from '../skills/core/skill-registry';
+import { parseJson } from '../utils/json-healer';
 import { SkillExecutor } from '../skills/core/skill-executor';
 import { SkillContext, SkillCall, isExecutableSkill, isDocumentationSkill, SkillDefinition } from '../skills/skill-types';
 import { MCPManager } from '../skills/mcp';
@@ -118,7 +119,7 @@ export class ChatOrchestrator {
   }
 
   dispose(): void {
-    this.mcpManager?.disconnectAll();
+    void this.mcpManager?.disconnectAll();
   }
 
   /**
@@ -180,7 +181,6 @@ export class ChatOrchestrator {
 
     this.defaultAgent = new BaseAgent(agentConfig, provider, dependencies);
     this.agentManager.registerAgent(this.defaultAgent);
-    this.agentManager.setCurrentAgent(this.defaultAgent.getId());
   }
 
   /**
@@ -920,7 +920,7 @@ OTHERWISE:
           if (filePath.endsWith('.json')) {
             try {
               const fileContent = await this.platform.read(filePath);
-              const customConfig: AgentConfig = JSON.parse(fileContent);
+              const customConfig = parseJson<AgentConfig>(fileContent);
               if (customConfig.id && customConfig.name) {
                 const customAgent = new BaseAgent(customConfig, provider, dependencies);
                 this.agentManager.registerAgent(customAgent);

@@ -8,6 +8,7 @@ import { ChatOrchestrator, ChatQueryResult } from '../../chat/chat-orchestrator'
 import { FileSelectorModal } from '../file-selector-modal';
 import { ConfirmationModal } from '../confirmation-modal';
 import { ChatMessage, ToolCall } from '../../types';
+import { parseJson } from '../../utils/json-healer';
 import { AgentEvent, AgentContext } from '../../agents/agent-types';
 import MentatPlugin from '../../main';
 
@@ -206,7 +207,7 @@ export class ChatView extends ItemView {
   }
 
   private addDocument(file: TFile): void {
-    this.chatManager.addDocument(file.path);
+    void this.chatManager.addDocument(file.path);
     this.renderDocumentList();
   }
 
@@ -253,7 +254,7 @@ export class ChatView extends ItemView {
       setIcon(removeBtn, 'x');
 
       removeBtn.addEventListener('click', () => {
-        this.chatManager.removeDocument(file.path);
+        void this.chatManager.removeDocument(file.path);
         this.renderDocumentList();
       });
     });
@@ -398,7 +399,7 @@ export class ChatView extends ItemView {
     });
 
     // Clear conversation
-    this.clearButton.addEventListener('click', () => this.handleClear());
+    this.clearButton.addEventListener('click', () => { void this.handleClear(); });
 
     // Export Session Diagnostics
     this.exportDiagnosticsButton.addEventListener('click', () => {
@@ -500,7 +501,7 @@ export class ChatView extends ItemView {
     }
 
     // 2. Add referenced files to context manager
-    referencedFiles.forEach(path => this.chatManager.addDocument(path));
+    referencedFiles.forEach(path => { void this.chatManager.addDocument(path); });
     this.renderDocumentList();
 
     // Clear input
@@ -833,19 +834,21 @@ export class ChatView extends ItemView {
   private setupCodeCopyButtons(messageEl: HTMLElement): void {
     const copyButtons = messageEl.querySelectorAll('.code-copy-button');
     copyButtons.forEach(button => {
-      button.addEventListener('click', async (e) => {
-        const target = e.currentTarget as HTMLElement;
-        const codeId = target.getAttribute('data-code-id');
-        const codeEl = activeDocument.getElementById(codeId!);
+      button.addEventListener('click', (e) => {
+        void (async () => {
+          const target = e.currentTarget as HTMLElement;
+          const codeId = target.getAttribute('data-code-id');
+          const codeEl = activeDocument.getElementById(codeId!);
 
-        if (codeEl) {
-          await navigator.clipboard.writeText(codeEl.textContent || '');
-          const originalText = target.textContent;
-          target.textContent = 'Copied!';
-          window.setTimeout(() => {
-            target.textContent = originalText;
-          }, 2000);
-        }
+          if (codeEl) {
+            await navigator.clipboard.writeText(codeEl.textContent || '');
+            const originalText = target.textContent;
+            target.textContent = 'Copied!';
+            window.setTimeout(() => {
+              target.textContent = originalText;
+            }, 2000);
+          }
+        })();
       });
     });
   }
@@ -1059,12 +1062,12 @@ export class ChatView extends ItemView {
               let displayName = tc.name;
               if (tc.name === 'spec' || tc.name === 'invoke') {
                 try {
-                  const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+                  const args = typeof tc.arguments === 'string' ? parseJson<Record<string, unknown>>(tc.arguments) : tc.arguments;
                   const skillName = args.skill_name;
                   if (skillName) {
                     displayName = `${tc.name}:${skillName}`;
                   }
-                } catch (e) {
+                } catch (_e) {
                   // Keep original if parsing fails
                 }
               }

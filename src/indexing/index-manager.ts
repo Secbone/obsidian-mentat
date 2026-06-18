@@ -6,6 +6,7 @@ import { VectorStore, SearchOptions, SimilaritySearchResult } from './vector-sto
 import { EmbeddingBatch } from './embedding-batch';
 import { FileIndex, AIProvider } from '../types';
 import { FileStorage } from '../utils/file-storage';
+import { parseJson } from '../utils/json-healer';
 import { IPlatformAdapter, IPlatformFile } from '../types/platform';
 
 export interface IndexingProgress {
@@ -244,15 +245,15 @@ export class IndexManager {
       if (await this.storage.exists('index_meta.json')) {
         // Load metadata
         const metaContent = await this.storage.read('index_meta.json');
-        const metaData = JSON.parse(metaContent);
+        const metaData = parseJson<{ indexedFiles: [string, IndexedFileMeta][] }>(metaContent);
         this.indexedFiles = new Map(metaData.indexedFiles);
 
         // Load cached chunks asynchronously in the background so it doesn't block startup
-        this.loadCachedChunksInBackground();
+        void this.loadCachedChunksInBackground();
       } else {
         // Data migration from data.json
         const data = await this.platform.loadPluginData();
-        const legacyIndex = (data as Record<string, unknown>).index as Record<string, unknown> | undefined;
+        const legacyIndex = data.index as Record<string, unknown> | undefined;
         if (legacyIndex) {
           console.log('[IndexManager] Migrating legacy global vector store...');
           
@@ -322,7 +323,7 @@ export class IndexManager {
           const filename = await this.getCacheFilename(filePath);
           if (await this.storage.exists(filename)) {
             const content = await this.storage.read(filename);
-            const chunks: FileChunk[] = JSON.parse(content);
+            const chunks = parseJson<FileChunk[]>(content);
             fileChunksMap.set(filePath, chunks);
           }
         } catch (error) {

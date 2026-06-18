@@ -3,6 +3,7 @@
 import { ChatMessage } from '../types';
 import { Context, Message, ContextOptions } from '../context';
 import { FileStorage } from '../utils/file-storage';
+import { parseJson } from '../utils/json-healer';
 import { IPlatformAdapter } from '../types/platform';
 
 interface ChatHistory {
@@ -177,7 +178,7 @@ export class ChatManager {
     try {
       if (await this.storage.exists('chat_history.json')) {
         const content = await this.storage.read('chat_history.json');
-        const data: ChatHistory = JSON.parse(content);
+        const data = parseJson<ChatHistory>(content);
 
         // Only load if session is recent (within 7 days)
         const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);

@@ -49,7 +49,7 @@ export class SkillLoader {
     private pluginId: string = 'mentat'
   ) {
     // Construct path to skills directory in plugin folder
-    this.skillsBasePath = `${app?.vault?.configDir || '.obsidian'}/plugins/${pluginId}/skills`;
+    this.skillsBasePath = `${app.vault.configDir}/plugins/${pluginId}/skills`;
 
     // Map skill names to their implementations (compile-time mapping)
     this.implementationMap = new Map<string, unknown>([

@@ -965,13 +965,13 @@ ${folderGuidelines}
         text: '🤖 AI 智能规划重建 (推荐)',
         cls: 'mod-cta'
       });
-      aiButton.addEventListener('click', () => this.runAIRebuild());
+      aiButton.addEventListener('click', () => { void this.runAIRebuild(); });
 
       // ⚡ 本地快速重建按钮
       const localButton = buttonContainer.createEl('button', {
         text: '⚡ 本地快速重建'
       });
-      localButton.addEventListener('click', () => this.runLocalRebuild());
+      localButton.addEventListener('click', () => { void this.runLocalRebuild(); });
 
       // 取消按钮
       const cancelButton = buttonContainer.createEl('button', { text: '取消' });
@@ -1031,9 +1031,11 @@ ${folderGuidelines}
         text: '👁️ 立即查看',
         cls: 'mod-cta'
       });
-      viewButton.addEventListener('click', async () => {
-        await this.openVaultMapFile();
-        this.close();
+      viewButton.addEventListener('click', () => {
+        void (async () => {
+          await this.openVaultMapFile();
+          this.close();
+        })();
       });
 
       // 仅关闭按钮
@@ -1066,7 +1068,7 @@ ${folderGuidelines}
         text: '⚡ 切换本地快速重建',
         cls: 'mod-neutral'
       });
-      localButton.addEventListener('click', () => this.runLocalRebuild());
+      localButton.addEventListener('click', () => { void this.runLocalRebuild(); });
 
       // 关闭按钮
       const closeButton = buttonContainer.createEl('button', {

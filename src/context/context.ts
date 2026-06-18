@@ -4,6 +4,7 @@
  */
 
 import { Message, MessageStatistics, calculateMessageStats, estimateTotalTokens } from './message';
+import { parseJson } from '../utils/json-healer';
 
 /**
  * Context metadata
@@ -297,7 +298,7 @@ export class Context {
     // 1. JSON Data detection & extraction
     if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
       try {
-        const parsed = JSON.parse(trimmed);
+        const parsed = parseJson<Record<string, unknown>>(trimmed);
         if (parsed && typeof parsed === 'object') {
           const keys = Object.keys(parsed);
           const success = parsed.success !== undefined ? parsed.success : undefined;
@@ -312,7 +313,7 @@ export class Context {
           summary += `]`;
           return summary;
         }
-      } catch (e) {
+      } catch (_e) {
         // Fall back to general text/html if JSON parsing fails
       }
     }

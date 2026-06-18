@@ -147,10 +147,10 @@ export class BaseAgent {
       timestamp: Date.now()
     };
 
-    if ((context.metadata as Record<string, unknown> | undefined)?.sessionContextPayload) {
+    if (context.metadata?.sessionContextPayload) {
       userMessage.metadata = {
         ...userMessage.metadata,
-        sessionContextPayload: (context.metadata as Record<string, unknown>).sessionContextPayload
+        sessionContextPayload: context.metadata.sessionContextPayload
       };
     }
 
@@ -160,7 +160,7 @@ export class BaseAgent {
         userMessage
       ],
       systemPrompt,
-      maxTurns: Math.max(1, Math.min(99, (context.metadata as Record<string, number> | undefined)?.maxTurns ?? this.config.maxTurns ?? 20)),
+      maxTurns: Math.max(1, Math.min(99, (context.metadata?.maxTurns as number | undefined) ?? this.config.maxTurns ?? 20)),
       turnCount: 0,
       fullResponse: '',
       skillCalls: [],
@@ -452,7 +452,7 @@ export class BaseAgent {
     }
 
     if (error) {
-      throw error;
+      throw error instanceof Error ? error : new Error(String(error));
     }
 
     return finalResult!;
@@ -530,7 +530,7 @@ export class BaseAgent {
     }
 
     if (error) {
-      throw error;
+      throw error instanceof Error ? error : new Error(String(error));
     }
 
     return fullResponse;
@@ -555,8 +555,6 @@ export class BaseAgent {
     toolCall: ToolCall,
     context: AgentContext
   ): AsyncGenerator<AgentEvent, { toolMessages: ChatMessage[]; skillCalls: SkillCall[] }, unknown> {
-    const _toolMessages: ChatMessage[] = [];
-    const _skillCalls: SkillCall[] = [];
     const toolName = toolCall.name;
 
     // Parse arguments
@@ -566,10 +564,10 @@ export class BaseAgent {
         typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments),
         (healedStr, errorMsg) => {
           console.log(`[BaseAgent] JSON parse healed successfully for ${toolName}`);
-          this.logDiagnosticIncident(toolName, typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments), errorMsg, 'Healed (JSON Preprocessor)', healedStr);
+          void this.logDiagnosticIncident(toolName, typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments), errorMsg, 'Healed (JSON Preprocessor)', healedStr);
         },
         (errorMsg) => {
-          this.logDiagnosticIncident(toolName, typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments), errorMsg, 'Failed (Strict Parsing)');
+          void this.logDiagnosticIncident(toolName, typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments), errorMsg, 'Failed (Strict Parsing)');
         }
       );
     } catch (err: unknown) {
@@ -659,7 +657,7 @@ export class BaseAgent {
         if (userFeedback?.modifiedParams) {
           targetParams = userFeedback.modifiedParams;
           if (toolName === 'invoke') {
-            (argsObj as Record<string, unknown>).params = userFeedback.modifiedParams;
+            argsObj.params = userFeedback.modifiedParams;
           } else {
             Object.assign(argsObj, userFeedback.modifiedParams as Record<string, unknown>);
           }

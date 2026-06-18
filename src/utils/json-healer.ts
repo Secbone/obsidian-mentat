@@ -74,6 +74,14 @@ export function normalizeJsonArguments(args: unknown): string {
 /**
  * Safely parses JSON string with path-healing and lenient fallback.
  */
+/**
+ * Typed wrapper around JSON.parse to avoid unsafe any-type propagation.
+ * Use this instead of raw JSON.parse() call sites.
+ */
+export function parseJson<T>(text: string): T {
+  return JSON.parse(text) as T;
+}
+
 export function safeParseJson(
   jsonStr: string,
   onHealed?: (healedStr: string, errorMsg: string) => void,
@@ -91,7 +99,7 @@ export function safeParseJson(
         onHealed(healedArgsString, error instanceof Error ? error.message : String(error));
       }
       return parsed;
-    } catch (_healingError: unknown) {
+    } catch {
       if (onFailed) {
         onFailed(error instanceof Error ? error.message : String(error));
       }

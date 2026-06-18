@@ -3,6 +3,7 @@
 import { App, Modal, Setting, Notice } from 'obsidian';
 import MentatPlugin from '../main';
 import { AIProviderConfig } from './settings';
+import { parseJson } from '../utils/json-healer';
 
 export class ProviderEditModal extends Modal {
   private plugin: MentatPlugin;
@@ -29,7 +30,7 @@ export class ProviderEditModal extends Modal {
     // Initialize tempConfig
     if (provider) {
       // Deep copy existing provider
-      this.tempConfig = JSON.parse(JSON.stringify(provider));
+      this.tempConfig = parseJson<AIProviderConfig>(JSON.stringify(provider));
     } else {
       // New provider with defaults
       this.tempConfig = {
@@ -63,7 +64,7 @@ export class ProviderEditModal extends Modal {
       text: '保存',
       cls: 'mod-cta'
     });
-    saveButton.addEventListener('click', () => this.handleSave());
+    saveButton.addEventListener('click', () => { void this.handleSave(); });
   }
 
   onClose(): void {

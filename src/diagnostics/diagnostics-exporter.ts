@@ -2,6 +2,16 @@ import { Notice, TFile } from 'obsidian';
 import MentatPlugin from '../main';
 import { ChatManager } from '../chat/chat-manager';
 import { ChatMessage } from '../types';
+import { parseJson } from '../utils/json-healer';
+
+interface DiagnosticLogEntry {
+  timestamp: number;
+  toolName: string;
+  errorMessage: string;
+  strategy: string;
+  originalArgs: string;
+  repairedArgs?: string;
+}
 
 export class DiagnosticsExporter {
   /**
@@ -368,10 +378,10 @@ export class DiagnosticsExporter {
         const lines = rawContent.split('\n').filter(Boolean);
         for (const line of lines) {
           try {
-            const entry = JSON.parse(line);
-            // Fallback: if startTime is 0 (first message not tracked), retrieve recent log incidents of this hour
+            const entry = parseJson<DiagnosticLogEntry>(line);
             const startLimit = startTime > 0 ? startTime : Date.now() - 3600000;
-            if (entry.timestamp >= startLimit && entry.timestamp <= endTime) {
+            const ts = entry.timestamp as number;
+            if (ts >= startLimit && ts <= endTime) {
               logs.push(entry);
             }
           } catch {
@@ -405,7 +415,7 @@ export class DiagnosticsExporter {
             let displayName = tc.name;
             let displayParams = '';
             try {
-              const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+              const args = typeof tc.arguments === 'string' ? parseJson<Record<string, unknown>>(tc.arguments) : tc.arguments;
               if (tc.name === 'spec' || tc.name === 'invoke') {
                 const skillName = args.skill_name;
                 if (skillName) displayName = `${tc.name}:${skillName}`;
@@ -413,17 +423,18 @@ export class DiagnosticsExporter {
               const keys = Object.keys(args).filter(k => k !== 'skill_name');
               if (keys.length > 0) {
                 displayParams = keys.map(k => {
-                  const val = args[k];
-                  if (typeof val === 'object' && val !== null) {
-                    if (val.path) return `${k}.path="${String(val.path).split('/').pop()}"`;
-                    if (val.query) return `${k}.query="${String(val.query).substring(0, 15)}"`;
-                    const subKeys = Object.keys(val);
+                    const val = args[k];
+                    if (typeof val === 'object' && val !== null) {
+                      const valObj = val as Record<string, unknown>;
+                      if (valObj.path) return `${k}.path="${String(valObj.path).split('/').pop()}"`;
+                      if (valObj.query) return `${k}.query="${String(valObj.query).substring(0, 15)}"`;
+                      const subKeys = Object.keys(valObj);
                     return `${k}={${subKeys.slice(0, 2).join(', ')}}`;
                   }
                   return `${k}=${String(val)}`;
                 }).join(', ');
               }
-            } catch (e) {
+            } catch {
               // Keep original displayName
             }
             const cleanName = displayName.split(':').pop() || displayName;
@@ -488,7 +499,7 @@ export class DiagnosticsExporter {
         return entry;
       });
       return JSON.stringify(cleanArray, null, 2);
-    } catch (e) {
+    } catch (_e) {
       return '[]';
     }
   }
@@ -527,7 +538,7 @@ export class DiagnosticsExporter {
       allLines.forEach(line => {
         if (!line.trim()) return;
         try {
-          const entry = JSON.parse(line);
+          const entry = parseJson<DiagnosticLogEntry>(line);
           if (entry.timestamp >= sevenDaysAgo) {
             totalIncidents++;
             toolFailures[entry.toolName] = (toolFailures[entry.toolName] || 0) + 1;
@@ -536,7 +547,7 @@ export class DiagnosticsExporter {
               dailyIncidents[dateKey]++;
             }
           }
-        } catch (e) {
+        } catch (_e) {
           // Ignore malformed
         }
       });
@@ -582,7 +593,7 @@ export class DiagnosticsExporter {
       } else {
         lines.forEach((line, index) => {
           try {
-            const entry = JSON.parse(line);
+            const entry = parseJson<DiagnosticLogEntry>(line);
             const timeStr = new Date(entry.timestamp).toLocaleString();
             markdownContent += `## Incident #${lines.length - index} [${timeStr}]\n`;
             markdownContent += `- **Tool / Skill**: \`${entry.toolName}\`\n`;
@@ -604,8 +615,8 @@ export class DiagnosticsExporter {
       
       // Open the note in workspace
       const tFile = plugin.app.vault.getAbstractFileByPath(debugNotePath);
-      if (tFile) {
-        await plugin.app.workspace.getLeaf().openFile(tFile as TFile);
+      if (tFile && tFile instanceof TFile) {
+        await plugin.app.workspace.getLeaf().openFile(tFile);
         new Notice('Diagnostics Log opened successfully');
       } else {
         new Notice('Log compiled. Please open "Mentat Debug Log.md" in your vault root.');

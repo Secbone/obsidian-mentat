@@ -6,6 +6,7 @@ import {
   MCPServerConfig
 } from './mcp-types';
 import { requestUrl } from 'obsidian';
+import { parseJson } from '../../utils/json-healer';
 
 /**
  * Stdio Transport - Communicates with MCP servers via stdio
@@ -130,7 +131,7 @@ export class StdioTransport implements MCPTransport {
       if (!line.trim()) continue;
 
       try {
-        const message: MCPMessage = JSON.parse(line);
+        const message = parseJson<MCPMessage>(line);
         this.handleMessage(message);
       } catch (error) {
         console.error('[MCP Stdio] Failed to parse message:', error, line);
