@@ -404,7 +404,12 @@ export class BaseAgent {
       options.abortSignal.addEventListener('abort', onAbort);
     }
 
-    this.provider.generateStreamWithSkills!(
+    if (!this.provider.generateStreamWithSkills) {
+      yield { type: 'error', message: '当前 AI 服务商不支持技能工具调用，请切换到 OpenAI 或 Anthropic 提供商。' };
+      return { content: '', toolCalls: [], finishReason: 'stop' };
+    }
+
+    this.provider.generateStreamWithSkills(
       messages,
       (chunk: string) => {
         queue.push({ type: 'chunk', text: chunk });

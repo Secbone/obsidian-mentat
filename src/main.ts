@@ -37,9 +37,15 @@ export default class MentatPlugin extends Plugin {
     this.indexManager = new IndexManager(platform, () => this.aiRouter.getProvider(TaskType.EMBEDDING));
     await this.indexManager.initialize();
 
-    // Initialize Chat Orchestrator
+    // Initialize Chat Orchestrator (may fail gracefully if no provider configured)
     this.chatOrchestrator = new ChatOrchestrator(platform, this.settings, this.aiRouter, this.indexManager);
-    await this.chatOrchestrator.initialize();
+    try {
+      await this.chatOrchestrator.initialize();
+    } catch (error: unknown) {
+      console.warn('Mentat: ChatOrchestrator initialization failed (will retry after provider config):', 
+        error instanceof Error ? error.message : String(error));
+      new Notice('Mentat: 未检测到 AI 服务商配置。请在设置中配置 API Key 后重启。No AI provider configured — add one in Mentat settings.');
+    }
 
     // Get AgentManager reference (for advanced usage)
     this.agentManager = this.chatOrchestrator.getAgentManager();
@@ -69,7 +75,11 @@ export default class MentatPlugin extends Plugin {
 
   onunload(): void {
     console.log('Unloading Mentat plugin');
-    this.chatOrchestrator?.dispose();
+    try {
+      this.chatOrchestrator?.dispose();
+    } catch (error: unknown) {
+      console.warn('Mentat: Error during dispose:', error instanceof Error ? error.message : String(error));
+    }
     this.openCodeIntegration?.dispose();
   }
 

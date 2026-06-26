@@ -41,7 +41,7 @@ export class IndexManager {
 
   constructor(
     private platform: IPlatformAdapter,
-    private getEmbeddingProvider: () => Promise<AIProvider>
+    private getEmbeddingProvider: () => Promise<AIProvider | null>
   ) {
     this.contentExtractor = new ContentExtractor(platform);
     this.chunkProcessor = new ChunkProcessor();
@@ -199,6 +199,10 @@ export class IndexManager {
   ): Promise<SimilaritySearchResult[]> {
     // Generate query embedding
     const provider = await this.getEmbeddingProvider();
+    if (!provider) {
+      console.warn('[IndexManager] No embedding provider configured - search unavailable');
+      return [];
+    }
     const { embedding } = await provider.generateEmbedding(query);
 
     // Search in vector store

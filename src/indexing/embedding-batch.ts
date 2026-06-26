@@ -10,7 +10,7 @@ export interface BatchEmbeddingResult {
 
 export class EmbeddingBatch {
   constructor(
-    private getEmbeddingProvider: () => Promise<AIProvider>,
+    private getEmbeddingProvider: () => Promise<AIProvider | null>,
     private batchSize: number = 100 // Larger batch size for native batching
   ) {}
 
@@ -23,6 +23,9 @@ export class EmbeddingBatch {
     }
 
     const provider = await this.getEmbeddingProvider();
+    if (!provider) {
+      return { embeddings: [], tokens: 0 };
+    }
 
     // If provider supports native batching (via generateEmbeddings method)
     if (provider.generateEmbeddings && typeof provider.generateEmbeddings === 'function') {

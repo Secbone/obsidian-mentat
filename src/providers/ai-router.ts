@@ -27,6 +27,16 @@ export class AIRouter {
 
         switch (config.type) {
           case 'openai':
+          case 'anthropic':
+            if (!config.apiKey) {
+              console.warn(`Skipping provider "${config.name}" (${config.id}): API key not configured`);
+              continue;
+            }
+            break;
+        }
+
+        switch (config.type) {
+          case 'openai':
             provider = new OpenAIProvider({
               id: config.id,
               apiKey: config.apiKey!,
@@ -74,7 +84,7 @@ export class AIRouter {
   /**
    * Get the best available provider for a specific task type
    */
-  async getProvider(taskType: TaskType): Promise<AIProvider> {
+  async getProvider(taskType: TaskType): Promise<AIProvider | null> {
     // 1. Try task-specific routing
     const taskProviderId = this.settings.taskRouting[taskType];
     if (taskProviderId) {
@@ -105,7 +115,7 @@ export class AIRouter {
       }
     }
 
-    throw new Error(`No available AI provider found for task: ${taskType}`);
+    return null;
   }
 
   /**

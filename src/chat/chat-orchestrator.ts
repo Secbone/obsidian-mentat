@@ -143,11 +143,15 @@ export class ChatOrchestrator {
     // Initialize MCP servers
     await this.initializeMCP();
 
-    // Create default agent
-    await this.createDefaultAgent();
-
-    // Initialize subagents
-    await this.initializeSubagents();
+    // Create default agent (skipped if no provider configured)
+    try {
+      await this.createDefaultAgent();
+      // Initialize subagents (only if default agent creation succeeded)
+      await this.initializeSubagents();
+    } catch (error: unknown) {
+      console.warn('[ChatOrchestrator] Default agent creation skipped - no AI provider configured:', 
+        error instanceof Error ? error.message : String(error));
+    }
 
     // Ensure vault-map.md exists (Cold-Start Engine)
     await this.ensureVaultMapExists();
@@ -158,6 +162,10 @@ export class ChatOrchestrator {
    */
   private async createDefaultAgent(): Promise<void> {
     const provider = await this.aiRouter.getProvider(TaskType.CHAT);
+    if (!provider) {
+      console.warn('[ChatOrchestrator] No AI provider configured - chat features will be unavailable until you configure one in settings.');
+      return;
+    }
 
     // Build system prompt with vault overview and skill information
     const systemPrompt = await this.buildSystemPrompt();
@@ -191,7 +199,7 @@ export class ChatOrchestrator {
     options: ChatQueryOptions = {}
   ): AsyncGenerator<AgentEvent, ChatQueryResult, unknown> {
     if (!this.defaultAgent) {
-      throw new Error('ChatOrchestrator not initialized');
+      throw new Error('请先在设置中配置 AI 服务商 (API Key)，然后重启 Obsidian。No AI provider configured. Please add one in Mentat settings and reload.');
     }
 
     const messages = options.contextMessages || [];
@@ -848,6 +856,9 @@ Write your custom style instructions and preferences here. This file is dynamica
    */
   private async initializeSubagents(): Promise<void> {
     const provider = await this.aiRouter.getProvider(TaskType.CHAT);
+    if (!provider) {
+      return;
+    }
     const dependencies: AgentDependencies = {
       skillRegistry: this.skillRegistry,
       skillExecutor: this.skillExecutor,
