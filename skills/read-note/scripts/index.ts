@@ -253,6 +253,61 @@ function addLineNumbersToHeadings(
 }
 
 /**
+ * Truncate read output to prevent overwhelming the context window.
+ * Limits: 2000 lines, 2000 chars per line, 50KB total.
+ */
+function truncateContent(content: string): {
+  content: string;
+  truncated: boolean;
+  linesShown: number;
+  totalLines: number;
+  bytesShown: number;
+  totalBytes: number;
+} {
+  const MAX_LINES = 2000;
+  const MAX_LINE_CHARS = 2000;
+  const MAX_BYTES = 50 * 1024;
+
+  let lines = content.split('\n');
+  const totalLines = lines.length;
+  let truncated = false;
+
+  if (lines.length > MAX_LINES) {
+    lines = lines.slice(0, MAX_LINES);
+    truncated = true;
+  }
+
+  lines = lines.map(line => {
+    if (line.length > MAX_LINE_CHARS) {
+      truncated = true;
+      return line.substring(0, MAX_LINE_CHARS) + '...';
+    }
+    return line;
+  });
+
+  let result = lines.join('\n');
+  const encoder = new TextEncoder();
+  let bytes = encoder.encode(result).length;
+  const totalBytes = encoder.encode(content).length;
+
+  while (bytes > MAX_BYTES && lines.length > 0) {
+    lines = lines.slice(0, lines.length - 1);
+    result = lines.join('\n');
+    bytes = encoder.encode(result).length;
+    truncated = true;
+  }
+
+  return {
+    content: result,
+    truncated,
+    linesShown: lines.length,
+    totalLines,
+    bytesShown: bytes,
+    totalBytes
+  };
+}
+
+/**
  * Execute read document
  */
 export async function execute(
@@ -395,11 +450,20 @@ export async function execute(
       };
     }
 
+    context.readTracker?.markRead(file.path, file.stat.mtime);
+
+    const truncated = truncateContent(result.content);
+    result.content = truncated.content;
+
     return {
       success: true,
       data: result,
       metadata: {
-        executionTime: Date.now() - startTime
+        executionTime: Date.now() - startTime,
+        truncated: truncated.truncated,
+        ...(truncated.truncated ? {
+          truncationNotice: `Output truncated. Showing ${truncated.linesShown} of ${truncated.totalLines} lines (${truncated.bytesShown} of ${truncated.totalBytes} bytes). Use startLine/endLine or section/sections to read specific portions.`
+        } : {})
       }
     };
   } catch (error) {

@@ -44,7 +44,7 @@ export default class MentatPlugin extends Plugin {
     } catch (error: unknown) {
       console.warn('Mentat: ChatOrchestrator initialization failed (will retry after provider config):', 
         error instanceof Error ? error.message : String(error));
-      new Notice('Mentat: 未检测到 AI 服务商配置。请在设置中配置 API Key 后重启。No AI provider configured — add one in Mentat settings.');
+      new Notice('Mentat: 未检测到 AI 服务商配置。请在设置中配置 API Key。No AI provider configured — add one in Mentat settings.');
     }
 
     // Get AgentManager reference (for advanced usage)
@@ -262,8 +262,11 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
       this.aiRouter.refresh(this.settings);
     }
 
-    // Refresh Skill Invocation Context when settings change
+    // Re-create default agent if provider was just configured (no restart needed)
     if (this.chatOrchestrator) {
+      await this.chatOrchestrator.refreshProvider();
+
+      // Refresh Skill Invocation Context
       const skillContext = this.chatOrchestrator.getSkillInvocationContext();
       if (skillContext) {
         skillContext.setMode(this.settings.skillInvocationMode || 'auto');

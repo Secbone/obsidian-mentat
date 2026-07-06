@@ -1,22 +1,22 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { execute, schema } from '../../../skills/edit-note/scripts/index';
+import { execute, schema } from '../../../skills/write-note/scripts/index';
 import { SkillContext } from '../../../src/skills/skill-types';
 import { TFile } from 'obsidian';
 
-describe('Edit-Note Rollback & Linter Guard Integration', () => {
+describe('Write-Note Rollback & Linter Guard Integration', () => {
   let mockFiles: Map<string, string>;
   let mockContext: SkillContext;
 
   beforeEach(() => {
     mockFiles = new Map<string, string>();
 
-    // Mock Vault using TFile and simple key-value structure
     const mockVault = {
       getAbstractFileByPath: (path: string) => {
         if (mockFiles.has(path)) {
           const file = new TFile();
           file.path = path;
           file.name = path.split('/').pop() || path;
+          file.basename = (path.split('/').pop() || path).replace(/\.md$/, '');
           return file;
         }
         return null;
@@ -32,6 +32,7 @@ describe('Edit-Note Rollback & Linter Guard Integration', () => {
         const file = new TFile();
         file.path = path;
         file.name = path.split('/').pop() || path;
+        file.basename = (path.split('/').pop() || path).replace(/\.md$/, '');
         return file;
       },
       modify: async (file: any, content: string) => {
@@ -40,7 +41,7 @@ describe('Edit-Note Rollback & Linter Guard Integration', () => {
       delete: async (file: any) => {
         mockFiles.delete(file.path);
       },
-      createFolder: async (path: string) => {}
+      createFolder: async (_path: string) => {}
     };
 
     mockContext = {
@@ -55,10 +56,10 @@ describe('Edit-Note Rollback & Linter Guard Integration', () => {
     };
   });
 
-  it('should succeed when writing valid technical markdown', async () => {
+  it('should succeed when creating valid technical markdown', async () => {
     const input = schema.parse({
       path: 'Research/valid-note.md',
-      content: `# Valid Markdown\n\nInline math $x$ and code block:\n\`\`\`python\nprint("Valid")\n\`\`\``
+      content: '# Valid Markdown\n\nInline math $x$ and code block:\n```python\nprint("Valid")\n```'
     });
 
     const result = await execute(input, mockContext);
@@ -70,7 +71,7 @@ describe('Edit-Note Rollback & Linter Guard Integration', () => {
   it('should fail and delete the file if creating a new note with unclosed LaTeX block', async () => {
     const input = schema.parse({
       path: 'Research/invalid-new-note.md',
-      content: `# Invalid Markdown\n\nUnclosed math:\n$$\nx^2 + y^2\n# Missing closing double dollar`
+      content: '# Invalid Markdown\n\nUnclosed math:\n$$\nx^2 + y^2\n# Missing closing double dollar'
     });
 
     const result = await execute(input, mockContext);
@@ -85,13 +86,13 @@ describe('Edit-Note Rollback & Linter Guard Integration', () => {
   it('should fail and roll back to previous content if appending malformed Markdown to an existing note', async () => {
     // 1. Establish pre-existing clean file
     const path = 'Research/existing-note.md';
-    const originalContent = `# Original Clean Note\n\nThis is clean.`;
+    const originalContent = '# Original Clean Note\n\nThis is clean.';
     mockFiles.set(path, originalContent);
 
     // 2. Attempt to append malformed code block
     const input = schema.parse({
       path,
-      content: `\n\nAdding some code:\n\`\`\`python\nprint("Broken block")\n# Oops forgot the closing backticks`,
+      content: '\n\nAdding some code:\n```python\nprint("Broken block")\n# Oops forgot the closing backticks',
       append: true
     });
 

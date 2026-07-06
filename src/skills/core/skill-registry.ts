@@ -164,7 +164,7 @@ export class SkillRegistry {
     }) as { properties?: Record<string, unknown>; required?: string[] };
 
     return {
-      name: this.getFullName(skill.namespace, skill.name),
+      name: this.getFullName(skill.namespace, skill.name).replace(/:/g, '__'),
       description: skill.description,
       parameters: {
         type: 'object',
@@ -183,7 +183,7 @@ export class SkillRegistry {
     }) as { properties?: Record<string, unknown>; required?: string[] };
 
     return {
-      name: this.getFullName(skill.namespace, skill.name),
+      name: this.getFullName(skill.namespace, skill.name).replace(/:/g, '__'),
       description: skill.description,
       input_schema: {
         type: 'object',
@@ -281,7 +281,8 @@ export class SkillRegistry {
    * Used by spec meta-tool
    */
   getSkillDetails(skillName: string, format: 'markdown' | 'xml' | 'json' = 'markdown'): string {
-    const skill = this.get(skillName);
+    // Handle both internal "namespace:name" and provider-safe "namespace__name" formats
+    const skill = this.get(skillName) || this.get(skillName.replace(/__/g, ':'));
 
     if (!skill) {
       return `Error: Skill "${skillName}" not found. Use the skill list to see available skills.`;

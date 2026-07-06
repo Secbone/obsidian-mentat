@@ -7,5 +7,6 @@
   "author": "Secbone",
   "authorUrl": "https://github.com/Secbone",
   "fundingUrl": "https://github.com/sponsors/Secbone",
+  "main": "main.js",
   "isDesktopOnly": false
 }

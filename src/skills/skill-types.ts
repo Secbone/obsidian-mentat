@@ -2,6 +2,7 @@
 
 import { ZodTypeAny } from 'zod';
 import { Vault, MetadataCache, Workspace } from 'obsidian';
+import { ReadTracker } from '../services/read-tracker';
 
 /**
  * Skill execution status
@@ -115,6 +116,7 @@ export interface SkillContext {
   workspace: Workspace;
   indexManager?: import('../indexing/index-manager').IndexManager;
   plugin: import('../main').default;
+  readTracker?: ReadTracker;
 }
 
 /**

@@ -166,7 +166,7 @@ export class AnthropicProvider implements AIProvider {
         } else if (block.type === 'tool_use') {
           toolCalls.push({
             id: block.id,
-            name: block.name,
+            name: block.name.replace(/__/g, ':'),
             arguments: block.input as Record<string, unknown>
           });
         }
@@ -258,7 +258,7 @@ export class AnthropicProvider implements AIProvider {
 
           const toolCall: ToolCall = {
             id: block.id,
-            name: block.name,
+            name: block.name.replace(/__/g, ':'),
             // Arguments can be either string or object - both are handled by downstream parsers
             arguments: block.input as Record<string, unknown>
           };

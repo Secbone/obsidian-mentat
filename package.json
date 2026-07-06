@@ -7,7 +7,7 @@
     "dev": "node esbuild.config.mjs",
     "typecheck": "tsc --project tsconfig.check.json --noEmit",
     "build": "npm run typecheck && node esbuild.config.mjs production",
-    "deploy:dev": "cp dist/main.js dist/styles.css dist/manifest.json . && mkdir -p ~/Documents/knowledge/.obsidian/plugins/mentat && cp dist/main.js dist/styles.css dist/manifest.json ~/Documents/knowledge/.obsidian/plugins/mentat/ && echo 'Deployed to vault 1 (self) + vault 2 (knowledge)'",
+    "deploy:dev": "cp dist/main.js dist/styles.css dist/manifest.json . && mkdir -p ~/Documents/knowledge/.obsidian/plugins/mentat && cp dist/main.js dist/styles.css dist/manifest.json ~/Documents/knowledge/.obsidian/plugins/mentat/ && cp -r skills ~/Documents/knowledge/.obsidian/plugins/mentat/ && echo 'Deployed to vault 1 (self) + vault 2 (knowledge)'",
     "lint": "eslint src --ext .ts",
     "test": "vitest",
     "test:ui": "vitest --ui",

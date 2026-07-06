@@ -16,6 +16,7 @@ import { BaseAgent, AgentDependencies } from '../agents/base-agent';
 import { AgentManager } from '../agents/agent-manager';
 import { AgentConfig, AgentContext, AgentEvent, AgentResponse } from '../agents/agent-types';
 import { VaultDiagnosticsLogger } from '../diagnostics/vault-diagnostics-logger';
+import { ReadTracker } from '../services/read-tracker';
 import { IPlatformAdapter, IPlatformFile } from '../types/platform';
 import { AIRouter } from '../providers/ai-router';
 import { IndexManager } from '../indexing/index-manager';
@@ -44,6 +45,7 @@ export class ChatOrchestrator {
   private agentManager: AgentManager;
   private defaultAgent: BaseAgent | null = null;
   private diagnosticsLogger: VaultDiagnosticsLogger;
+  private readTracker: ReadTracker;
   
   // Decoupled host & engine references
   private platform: IPlatformAdapter;
@@ -71,6 +73,7 @@ export class ChatOrchestrator {
     this.aiRouter = aiRouter;
     this.indexManager = indexManager;
     this.agentManager = new AgentManager();
+    this.readTracker = new ReadTracker();
 
     const app = this.getApp();
 
@@ -103,7 +106,8 @@ export class ChatOrchestrator {
       metadataCache: app?.metadataCache,
       workspace: app?.workspace,
       indexManager: indexManager,
-      plugin: this.getPlugin()
+      plugin: this.getPlugin(),
+      readTracker: this.readTracker
     };
 
     this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext);
@@ -120,6 +124,7 @@ export class ChatOrchestrator {
 
   dispose(): void {
     void this.mcpManager?.disconnectAll();
+    this.readTracker.clear();
   }
 
   /**
@@ -134,7 +139,8 @@ export class ChatOrchestrator {
       metadataCache: app?.metadataCache,
       workspace: app?.workspace,
       indexManager: this.indexManager,
-      plugin: this.getPlugin()
+      plugin: this.getPlugin(),
+      readTracker: this.readTracker
     };
 
     // Load all skills from skills directory
@@ -192,6 +198,25 @@ export class ChatOrchestrator {
   }
 
   /**
+   * Refresh provider after settings change — re-create default agent if a provider is now configured.
+   * Called from saveSettings() so no restart is required.
+   */
+  async refreshProvider(): Promise<void> {
+    try {
+      const provider = await this.aiRouter.getProvider(TaskType.CHAT);
+      if (!provider) return;
+
+      if (this.defaultAgent) {
+        this.agentManager.unregisterAgent('default-chat-agent');
+      }
+      await this.createDefaultAgent();
+    } catch (error: unknown) {
+      console.warn('[ChatOrchestrator] refreshProvider failed:', 
+        error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
    * Main query method - chat interface
    */
   async *query(
@@ -199,7 +224,7 @@ export class ChatOrchestrator {
     options: ChatQueryOptions = {}
   ): AsyncGenerator<AgentEvent, ChatQueryResult, unknown> {
     if (!this.defaultAgent) {
-      throw new Error('请先在设置中配置 AI 服务商 (API Key)，然后重启 Obsidian。No AI provider configured. Please add one in Mentat settings and reload.');
+      throw new Error('请先在设置中配置 AI 服务商 (API Key)。No AI provider configured. Please add one in Mentat settings.');
     }
 
     const messages = options.contextMessages || [];
@@ -323,7 +348,8 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
       metadataCache: app?.metadataCache,
       workspace: app?.workspace,
       indexManager: this.indexManager,
-      plugin: this.getPlugin()
+      plugin: this.getPlugin(),
+      readTracker: this.readTracker
     };
 
     // Clear existing skills

@@ -13,7 +13,7 @@ import {
   isExecutableSkill
 } from '../skill-types';
 import { ConfirmationModal } from '../../ui/confirmation-modal';
-import { parseJson } from '../../utils/json-healer';
+import { safeParseJson } from '../../utils/json-healer';
 
 /**
  * Skill execution options
@@ -186,59 +186,11 @@ export class SkillExecutor {
     return str.substring(0, maxPos);
   }
 
-  /**
-   * Scans a JSON string, identifies raw backslashes that do not form valid JSON
-   * escape sequences, and double-escapes them so they can be parsed successfully.
-   */
-  private escapeLoneBackslashes(jsonStr: string): string {
-    let result = '';
-    for (let i = 0; i < jsonStr.length; i++) {
-      const char = jsonStr[i];
-      if (char === '\\') {
-        const nextChar = jsonStr[i + 1];
-        if (nextChar === undefined) {
-          result += '\\\\';
-        } else if (['"', '\\', '/', 'b', 'f', 'n', 'r', 't'].includes(nextChar)) {
-          result += '\\' + nextChar;
-          i++;
-        } else if (nextChar === 'u') {
-          const hex = jsonStr.substring(i + 2, i + 6);
-          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
-            result += '\\u' + hex;
-            i += 5;
-          } else {
-            result += '\\\\';
-          }
-        } else {
-          result += '\\\\';
-        }
-      } else {
-        result += char;
-      }
-    }
-    return result;
-  }
-
-  private safeParseToolArguments(toolCall: ToolCall): Record<string, unknown> | null {
+  private safeParseToolArguments(toolCall: ToolCall): Record<string, unknown> {
     if (typeof toolCall.arguments !== 'string') {
       return toolCall.arguments;
     }
-
-    const argsString = toolCall.arguments as string;
-
-    try {
-      return parseJson<Record<string, unknown>>(argsString);
-    } catch {
-      console.warn(`[SkillExecutor] JSON strict parse failed for ${toolCall.name}, trying escape-healing...`);
-
-      try {
-        const healedArgsString = this.escapeLoneBackslashes(argsString);
-        return parseJson<Record<string, unknown>>(healedArgsString);
-      } catch (healingError: unknown) {
-        console.error('[SkillExecutor] JSON parse and healing failed for', toolCall.name, 'Error:', healingError instanceof Error ? healingError.message : String(healingError));
-        return null;
-      }
-    }
+    return safeParseJson(toolCall.arguments);
   }
 
   /**
@@ -249,12 +201,15 @@ export class SkillExecutor {
     options: ExecutionOptions = {}
   ): Promise<SkillResult> {
     // Parse parameters strictly
-    const parameters = this.safeParseToolArguments(toolCall);
-
-    if (parameters === null) {
+    let parameters: Record<string, unknown>;
+    try {
+      parameters = this.safeParseToolArguments(toolCall);
+    } catch (parseError: unknown) {
+      console.error('[SkillExecutor] JSON parse and healing failed for', toolCall.name);
+      const detail = parseError instanceof Error ? parseError.message : String(parseError);
       return {
         success: false,
-        error: `Failed to parse tool arguments for ${toolCall.name}. JSON is malformed.`
+        error: `Failed to parse tool arguments for ${toolCall.name}. ${detail} Please regenerate the tool call with valid JSON formatting.`
       };
     }
 

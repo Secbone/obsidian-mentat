@@ -234,7 +234,7 @@ export class OpenAIProvider implements AIProvider {
         for (const tc of message.tool_calls) {
           toolCalls.push({
             id: tc.id,
-            name: tc.function.name,
+            name: tc.function.name.replace(/__/g, ':'),
             arguments: tc.function.arguments
           });
         }
@@ -332,7 +332,7 @@ export class OpenAIProvider implements AIProvider {
             if (!toolCallsInProgress.has(index)) {
               toolCallsInProgress.set(index, {
                 id: tc.id || '',
-                name: tc.function?.name || '',
+                name: tc.function?.name?.replace(/__/g, ':') || '',
                 arguments: ''
               });
             }
@@ -340,7 +340,7 @@ export class OpenAIProvider implements AIProvider {
             const inProgress = toolCallsInProgress.get(index)!;
 
             if (tc.id) inProgress.id = tc.id;
-            if (tc.function?.name) inProgress.name = tc.function.name;
+            if (tc.function?.name) inProgress.name = tc.function.name.replace(/__/g, ':');
             if (tc.function?.arguments) inProgress.arguments += tc.function.arguments;
           }
         }

@@ -14,6 +14,7 @@ import * as AskUserImpl from '../../../skills/ask-user/scripts';
 import * as WebFetchImpl from '../../../skills/web-fetch/scripts';
 import * as WebSearchImpl from '../../../skills/web-search/scripts';
 import * as RunCommandImpl from '../../../skills/run-command/scripts';
+import * as WriteNoteImpl from '../../../skills/write-note/scripts';
 
 /**
  * Skill metadata from SKILL.md frontmatter
@@ -61,7 +62,8 @@ export class SkillLoader {
       ['ask_user', AskUserImpl],
       ['web_fetch', WebFetchImpl],
       ['web_search', WebSearchImpl],
-      ['run_command', RunCommandImpl]
+      ['run_command', RunCommandImpl],
+      ['write_note', WriteNoteImpl]
     ]);
   }
 
@@ -113,9 +115,10 @@ export class SkillLoader {
       const listing = await adapter.list(skillsPath);
       const skillDirs: string[] = [];
       for (const folder of listing.folders) {
-        const skillMdPath = `${skillsPath}/${folder}/SKILL.md`;
+        const folderName = folder.split('/').pop() || folder;
+        const skillMdPath = `${skillsPath}/${folderName}/SKILL.md`;
         if (await adapter.exists(skillMdPath)) {
-          skillDirs.push(folder);
+          skillDirs.push(folderName);
         }
       }
       return skillDirs;
