@@ -15,6 +15,7 @@ import * as WebFetchImpl from '../../../skills/web-fetch/scripts';
 import * as WebSearchImpl from '../../../skills/web-search/scripts';
 import * as RunCommandImpl from '../../../skills/run-command/scripts';
 import * as WriteNoteImpl from '../../../skills/write-note/scripts';
+import * as MoveNoteImpl from '../../../skills/move-note/scripts';
 
 /**
  * Skill metadata from SKILL.md frontmatter
@@ -63,7 +64,8 @@ export class SkillLoader {
       ['web_fetch', WebFetchImpl],
       ['web_search', WebSearchImpl],
       ['run_command', RunCommandImpl],
-      ['write_note', WriteNoteImpl]
+      ['write_note', WriteNoteImpl],
+      ['move_note', MoveNoteImpl]
     ]);
   }
 
