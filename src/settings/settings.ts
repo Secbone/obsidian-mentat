@@ -86,6 +86,10 @@ export interface MentatSettings {
   // Input area send options
   sendWithCmdEnter?: boolean;
 
+  // UI Theme
+  chatTheme?: string;
+  terminalPreset?: 'green' | 'amber' | 'github-dark' | 'dracula';
+
   [key: string]: unknown;
 }
 
@@ -202,5 +206,7 @@ export const DEFAULT_SETTINGS: MentatSettings = {
   userSystemPromptPreferences: '',
   userConfigFolder: 'Mentat/Config',
   draftReviewModeEnabled: true,
-  sendWithCmdEnter: false
+  sendWithCmdEnter: false,
+  chatTheme: 'terminal',
+  terminalPreset: 'green'
 };

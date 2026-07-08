@@ -439,6 +439,28 @@ ${folderGuidelines}
           this.plugin.settings.sendWithCmdEnter = value;
           await this.plugin.saveSettings();
         }));
+
+    new Setting(containerEl)
+      .setName('Chat UI Theme')
+      .setDesc('Switch between different chat interface styles.')
+      .addDropdown(dropdown => dropdown
+        .addOptions({ bubble: '经典气泡 (Bubble)', terminal: '终端式 (Terminal)' })
+        .setValue(this.plugin.settings.chatTheme || 'bubble')
+        .onChange(async (value) => {
+          this.plugin.settings.chatTheme = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Terminal Color Preset')
+      .setDesc('Color scheme for the terminal theme. Only applies when terminal theme is active.')
+      .addDropdown(dropdown => dropdown
+        .addOptions({ green: '绿色 (Green)', amber: '琥珀 (Amber)', 'github-dark': 'GitHub Dark', dracula: 'Dracula' })
+        .setValue(this.plugin.settings.terminalPreset || 'green')
+        .onChange(async (value) => {
+          this.plugin.settings.terminalPreset = value as 'green' | 'amber' | 'github-dark' | 'dracula';
+          await this.plugin.saveSettings();
+        }));
   }
 
   displayPerformanceSection(containerEl: HTMLElement): void {

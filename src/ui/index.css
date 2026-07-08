@@ -1,7 +1,11 @@
 /* Personal Agent - Component Styles Index */
 
-/* Chat UI components */
-@import './chat-view/style.css';
+/* Theme styles */
+@import './themes/bubble/style.css';
+@import './themes/terminal/style.css';
+@import './themes/smart-scroll.css';
+
+/* Chat UI components (shared structural styles, no visual theme) */
 @import './message-renderer/style.css';
 @import './skill-call-renderer/style.css';
 

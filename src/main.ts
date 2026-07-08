@@ -275,6 +275,16 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
         }
       }
     }
+
+    // Notify ChatView of theme change
+    const chatLeaf = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0];
+    if (chatLeaf) {
+      const chatView = chatLeaf.view as ChatView;
+      const newTheme = this.settings.chatTheme || 'bubble';
+      if (chatView && typeof chatView.switchTheme === 'function') {
+        void chatView.switchTheme(newTheme);
+      }
+    }
   }
 
   async activateChatView(): Promise<void> {

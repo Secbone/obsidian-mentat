@@ -1,0 +1,21 @@
+.smart-scroll-new-message {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  z-index: 50;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: background 0.15s, color 0.15s;
+}
+
+.smart-scroll-new-message:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
