@@ -41,6 +41,11 @@
   align-items: center;
 }
 
+[data-theme="terminal"] .term-header-icon svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+
 [data-theme="terminal"] .term-header h4 {
   margin: 0;
   font-size: 14px;
@@ -69,8 +74,8 @@
 }
 
 [data-theme="terminal"] .term-icon-button svg {
-  width: 16px !important;
-  height: 16px !important;
+  width: 20px !important;
+  height: 20px !important;
 }
 
 [data-theme="terminal"] .term-icon-button:hover {
