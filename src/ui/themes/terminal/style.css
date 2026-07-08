@@ -69,8 +69,8 @@
 }
 
 [data-theme="terminal"] .term-icon-button svg {
-  width: 16px;
-  height: 16px;
+  width: 16px !important;
+  height: 16px !important;
 }
 
 [data-theme="terminal"] .term-icon-button:hover {
