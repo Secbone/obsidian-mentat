@@ -16,6 +16,13 @@
   --term-font-prose: var(--font-text);
   --term-prompt-color: #58b258;
   --term-separator-color: var(--background-modifier-border);
+
+  --theme-icon-header: var(--icon-m);
+  --theme-icon-button: var(--icon-m);
+  --theme-icon-doc: var(--icon-s);
+  --theme-icon-doc-remove: var(--icon-xs);
+  --theme-icon-send: var(--icon-m);
+  --theme-icon-suggest: var(--icon-xs);
 }
 
 /* === Header === */
@@ -36,14 +43,10 @@
 }
 
 [data-theme="terminal"] .term-header-icon {
+  --icon-size: var(--theme-icon-header);
   color: var(--term-accent);
   display: flex;
   align-items: center;
-}
-
-[data-theme="terminal"] .term-header-icon svg {
-  width: 18px !important;
-  height: 18px !important;
 }
 
 [data-theme="terminal"] .term-header h4 {
@@ -60,6 +63,7 @@
 }
 
 [data-theme="terminal"] .term-icon-button {
+  --icon-size: var(--theme-icon-button);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -71,11 +75,6 @@
   border: none;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
-}
-
-[data-theme="terminal"] .term-icon-button svg {
-  width: 20px !important;
-  height: 20px !important;
 }
 
 [data-theme="terminal"] .term-icon-button:hover {
