@@ -68,6 +68,11 @@
   transition: background 0.15s, color 0.15s;
 }
 
+[data-theme="terminal"] .term-icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 [data-theme="terminal"] .term-icon-button:hover {
   background: var(--background-modifier-hover);
   color: var(--term-text);
