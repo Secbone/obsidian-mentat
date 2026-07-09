@@ -34,6 +34,8 @@ export class TerminalTheme implements ChatTheme {
   private exportDiagnosticsButton: HTMLButtonElement | null = null;
   private stopButton: HTMLButtonElement | null = null;
 
+  private contentEl: HTMLElement | null = null;
+
   private expandedTaskOutputs = new Set<string>();
   private lastRenderTime = 0;
   private renderTimeout: number | null = null;
@@ -51,6 +53,7 @@ export class TerminalTheme implements ChatTheme {
     this.callbacks = callbacks;
 
     const contentEl = container.children[1] as HTMLElement;
+    this.contentEl = contentEl;
     contentEl.empty();
     contentEl.addClass('mentat-chat-view');
     contentEl.setAttribute('data-theme', 'terminal');
@@ -80,6 +83,7 @@ export class TerminalTheme implements ChatTheme {
       window.clearTimeout(this.renderTimeout);
       this.renderTimeout = null;
     }
+    this.contentEl = null;
     this.messagesContainer = null;
     this.inputEls = null;
     this.settingsButton = null;
@@ -393,6 +397,16 @@ export class TerminalTheme implements ChatTheme {
 
   scrollToBottom(): void {
     this.smartScroller.scrollToBottom();
+  }
+
+  updatePreset(preset: string): void {
+    this.terminalPreset = preset;
+    if (!this.contentEl) return;
+    if (preset && preset !== 'green') {
+      this.contentEl.setAttribute('data-terminal-preset', preset);
+    } else {
+      this.contentEl.removeAttribute('data-terminal-preset');
+    }
   }
 
   createInputArea(): InputAreaElements {

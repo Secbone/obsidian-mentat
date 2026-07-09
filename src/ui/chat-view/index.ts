@@ -118,6 +118,12 @@ export class ChatView extends ItemView {
     await this.inputHandler?.restoreDraft();
   }
 
+  updateTerminalPreset(preset: string): void {
+    if (this.theme.updatePreset) {
+      this.theme.updatePreset(preset);
+    }
+  }
+
   private get inputArea(): HTMLDivElement {
     return this.theme.getInputArea();
   }

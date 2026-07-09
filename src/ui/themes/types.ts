@@ -28,6 +28,7 @@ export interface ChatTheme {
   getMessagesContainer(): HTMLElement;
   getInputArea(): HTMLDivElement;
   getSendButton(): HTMLButtonElement;
+  updatePreset?(preset: string): void;
 }
 
 export interface ThemeCallbacks {
