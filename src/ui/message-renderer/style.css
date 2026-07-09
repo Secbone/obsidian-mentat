@@ -52,7 +52,11 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  --icon-size: var(--theme-icon-avatar);
+}
+
+[data-theme="bubble"] .message-avatar svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* User message - avatar on right */
@@ -129,7 +133,11 @@
   opacity: 0;
   transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  --icon-size: var(--theme-icon-copy);
+}
+
+[data-theme="bubble"] .message-copy-button svg {
+  width: 14px;
+  height: 14px;
 }
 
 [data-theme="bubble"] .message-content:hover .message-copy-button {

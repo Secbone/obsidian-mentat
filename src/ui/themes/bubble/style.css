@@ -1,18 +1,6 @@
 /* Chat View - Main container, header, document panel, and input styles */
 
-/* ===== THEME VARIABLES ===== */
-[data-theme="bubble"] {
-  --theme-icon-header: var(--icon-s);
-  --theme-icon-button: var(--icon-s);
-  --theme-icon-doc: var(--icon-s);
-  --theme-icon-doc-remove: var(--icon-xs);
-  --theme-icon-send: var(--icon-s);
-  --theme-icon-avatar: var(--icon-xs);
-  --theme-icon-copy: var(--icon-xs);
-  --theme-icon-steer: var(--icon-s);
-  --theme-icon-warning: var(--icon-s);
-  --theme-icon-suggest: var(--icon-xs);
-}
+/* ===== CONTAINER ===== */
 
 /* ===== CONTAINER ===== */
 [data-theme="bubble"] .mentat-chat-view {
@@ -39,8 +27,16 @@
 }
 
 [data-theme="bubble"] .chat-header-icon {
-  --icon-size: var(--theme-icon-header);
   color: var(--text-muted);
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+[data-theme="bubble"] .chat-header-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 [data-theme="bubble"] .chat-header h4 {
@@ -56,7 +52,6 @@
 }
 
 [data-theme="bubble"] .chat-icon-button {
-  --icon-size: var(--theme-icon-button);
   width: 28px;
   height: 28px;
   padding: 0;
@@ -69,6 +64,11 @@
   color: var(--text-muted);
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+[data-theme="bubble"] .chat-icon-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 [data-theme="bubble"] .chat-icon-button:hover {
@@ -135,11 +135,18 @@
 }
 
 [data-theme="bubble"] .document-icon {
-  --icon-size: var(--theme-icon-doc);
   width: 16px;
   height: 16px;
   color: var(--text-muted);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+[data-theme="bubble"] .document-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 [data-theme="bubble"] .document-name {
@@ -152,7 +159,6 @@
 }
 
 [data-theme="bubble"] .document-remove-button {
-  --icon-size: var(--theme-icon-doc-remove);
   width: 20px;
   height: 20px;
   padding: 0;
@@ -171,6 +177,11 @@
 [data-theme="bubble"] .document-remove-button:hover {
   background-color: var(--background-modifier-error);
   color: var(--text-error);
+}
+
+[data-theme="bubble"] .document-remove-button svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* Document Status Badge */
@@ -378,12 +389,18 @@
 }
 
 [data-theme="bubble"] .mentat-suggest-item-icon {
-  --icon-size: var(--theme-icon-suggest);
   color: var(--text-muted);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+[data-theme="bubble"] .mentat-suggest-item-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 [data-theme="bubble"] .mentat-suggest-item-name {
@@ -423,7 +440,6 @@
 
 /* Send button (positioned inside input) */
 [data-theme="bubble"] .chat-send-button {
-  --icon-size: var(--theme-icon-send);
   position: absolute;
   right: 6px;
   bottom: 6px;
@@ -465,6 +481,11 @@
 
 [data-theme="bubble"] .chat-send-button.is-steer-mode:hover {
   background-color: #b45309;
+}
+
+[data-theme="bubble"] .chat-send-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* ===== TUI TERMINAL CONSOLE ===== */
@@ -698,13 +719,17 @@
 }
 
 [data-theme="bubble"] .chat-warning-callout-header {
-  --icon-size: var(--theme-icon-warning);
   font-weight: 600;
   color: var(--text-warning);
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
+}
+
+[data-theme="bubble"] .chat-warning-callout-header svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* ===== HUMAN STEER TIMELINE CARD ===== */
@@ -722,7 +747,6 @@
 }
 
 [data-theme="bubble"] .chat-steer-card .steer-card-icon {
-  --icon-size: var(--theme-icon-steer);
   width: 20px;
   height: 20px;
   color: #d97706;
@@ -730,6 +754,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+[data-theme="bubble"] .chat-steer-card .steer-card-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 [data-theme="bubble"] .chat-steer-card .steer-card-content {

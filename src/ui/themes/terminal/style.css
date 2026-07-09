@@ -16,13 +16,6 @@
   --term-font-prose: var(--font-text);
   --term-prompt-color: #58b258;
   --term-separator-color: var(--background-modifier-border);
-
-  --theme-icon-header: var(--icon-m);
-  --theme-icon-button: var(--icon-m);
-  --theme-icon-doc: var(--icon-s);
-  --theme-icon-doc-remove: var(--icon-xs);
-  --theme-icon-send: var(--icon-m);
-  --theme-icon-suggest: var(--icon-xs);
 }
 
 /* === Header === */
@@ -43,10 +36,16 @@
 }
 
 [data-theme="terminal"] .term-header-icon {
-  --icon-size: var(--theme-icon-header);
   color: var(--term-accent);
   display: flex;
   align-items: center;
+  width: 20px;
+  height: 20px;
+}
+
+[data-theme="terminal"] .term-header-icon svg {
+  width: 18px;
+  height: 18px;
 }
 
 [data-theme="terminal"] .term-header h4 {
@@ -63,18 +62,23 @@
 }
 
 [data-theme="terminal"] .term-icon-button {
-  --icon-size: var(--theme-icon-button);
   display: flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
+  padding: 0;
   border-radius: 4px;
   color: var(--term-text-muted);
   background: transparent;
   border: none;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+}
+
+[data-theme="terminal"] .term-icon-button svg {
+  width: 18px;
+  height: 18px;
 }
 
 [data-theme="terminal"] .term-icon-button:hover {
@@ -148,17 +152,10 @@
 
 /* User message line */
 [data-theme="terminal"] .term-line-user {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  border-left: 2px solid var(--term-prompt-color);
   padding: 4px 12px;
+  margin: 0 12px;
   font-family: var(--term-font-mono);
-}
-
-[data-theme="terminal"] .term-prompt {
-  color: var(--term-prompt-color);
-  font-weight: 700;
-  flex-shrink: 0;
 }
 
 [data-theme="terminal"] .term-user-text {
@@ -180,65 +177,65 @@
 
 /* Timeline */
 [data-theme="terminal"] .term-timeline {
-  padding: 4px 12px;
+  padding: 2px 12px;
   font-family: var(--term-font-mono);
-  font-size: 13px;
-  color: var(--term-text-muted);
+  font-size: 12px;
+  color: var(--term-text-faint);
 }
 
 [data-theme="terminal"] .term-timeline-item {
-  padding: 2px 0;
-  line-height: 1.5;
+  padding: 1px 0;
+  line-height: 1.4;
 }
 
 [data-theme="terminal"] .term-timeline-explanation {
   color: var(--term-text-muted);
   font-family: var(--term-font-prose);
-  font-size: 13px;
-  padding: 4px 0 4px 16px;
+  font-size: 12px;
+  padding: 2px 0 2px 12px;
   border-left: 2px solid var(--term-border);
-  margin-left: 8px;
+  margin-left: 6px;
 }
 
 /* Tool header line */
 [data-theme="terminal"] .term-tool-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 [data-theme="terminal"] .term-tool-icon {
-  font-size: 13px;
+  font-size: 11px;
 }
 
-[data-theme="terminal"] .term-icon-success { color: var(--term-accent); }
+[data-theme="terminal"] .term-icon-success { color: var(--term-text-faint); }
 [data-theme="terminal"] .term-icon-error { color: var(--term-error); }
 [data-theme="terminal"] .term-icon-pending { color: var(--term-text-faint); }
-[data-theme="terminal"] .term-icon-executing { color: var(--term-accent); }
+[data-theme="terminal"] .term-icon-executing { color: var(--term-text-faint); }
 [data-theme="terminal"] .term-icon-warning { color: var(--term-warning); }
 
 [data-theme="terminal"] .term-tool-name {
-  font-weight: 600;
-  color: var(--term-text);
+  font-weight: 400;
+  color: var(--term-text-muted);
 }
 
 /* Tool details */
 [data-theme="terminal"] .term-tool-details {
-  margin: 2px 0 2px 20px;
+  margin: 1px 0 1px 12px;
 }
 
-[data-theme="terminal"] .term-tool-summary {
+[data-theme="terminal"] .tool-summary {
   cursor: pointer;
   color: var(--term-text-faint);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 [data-theme="terminal"] .term-tool-body pre {
-  margin: 4px 0;
-  padding: 6px 8px;
+  margin: 2px 0;
+  padding: 4px 6px;
   background: var(--term-surface);
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: 3px;
+  font-size: 11px;
   overflow-x: auto;
   max-height: 200px;
   overflow-y: auto;
@@ -246,14 +243,14 @@
 
 [data-theme="terminal"] .term-tool-body code {
   font-family: var(--term-font-mono);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 /* Truncation button */
 [data-theme="terminal"] .term-truncation-btn {
   cursor: pointer;
-  color: var(--term-accent);
-  font-size: 12px;
+  color: var(--term-text-muted);
+  font-size: 11px;
   text-decoration: none;
 }
 
@@ -263,29 +260,29 @@
 
 /* Subagent trace */
 [data-theme="terminal"] .term-subagent {
-  margin: 4px 0 4px 20px;
+  margin: 2px 0 2px 12px;
 }
 
 [data-theme="terminal"] .term-subagent-summary {
   cursor: pointer;
   color: var(--term-text-faint);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 [data-theme="terminal"] .term-subagent-body {
-  padding-left: 12px;
+  padding-left: 10px;
   border-left: 2px solid var(--term-border);
 }
 
 [data-theme="terminal"] .term-subagent-msg {
-  padding: 4px 0;
-  font-size: 12px;
+  padding: 2px 0;
+  font-size: 11px;
 }
 
 [data-theme="terminal"] .term-subagent-role {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--term-text-muted);
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
 }
 
@@ -338,9 +335,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--term-accent);
+  color: var(--term-text-muted);
   font-family: var(--term-font-mono);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 [data-theme="terminal"] .term-spinner {
@@ -497,6 +494,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
+  padding: 0;
   border-radius: 4px;
   color: var(--term-accent);
   background: transparent;
@@ -504,6 +502,11 @@
   cursor: pointer;
   transition: background 0.15s;
   flex-shrink: 0;
+}
+
+[data-theme="terminal"] .term-send-button svg {
+  width: 18px;
+  height: 18px;
 }
 
 [data-theme="terminal"] .term-send-button:hover {

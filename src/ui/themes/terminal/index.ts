@@ -105,8 +105,6 @@ export class TerminalTheme implements ChatTheme {
     }
 
     const line = this.messagesContainer.createDiv('term-line term-line-user');
-    const prompt = line.createSpan('term-prompt');
-    prompt.setText('❯');
     const text = line.createSpan('term-user-text');
     text.setText(content);
     this.scrollToBottom();
