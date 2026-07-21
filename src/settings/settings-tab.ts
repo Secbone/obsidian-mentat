@@ -449,9 +449,12 @@ ${folderGuidelines}
         .onChange(async (value) => {
           this.plugin.settings.chatTheme = value;
           await this.plugin.saveSettings();
+          // Refresh to show/hide terminal preset
+          this.display();
         }));
 
-    new Setting(containerEl)
+    // Terminal preset: only show when terminal theme is active
+    const terminalPresetSetting = new Setting(containerEl)
       .setName('Terminal Color Preset')
       .setDesc('Color scheme for the terminal theme. Only applies when terminal theme is active.')
       .addDropdown(dropdown => dropdown
@@ -461,6 +464,9 @@ ${folderGuidelines}
           this.plugin.settings.terminalPreset = value as 'green' | 'amber' | 'github-dark' | 'dracula';
           await this.plugin.saveSettings();
         }));
+
+    const currentTheme = this.plugin.settings.chatTheme || 'bubble';
+    terminalPresetSetting.settingEl.toggle(currentTheme === 'terminal');
   }
 
   displayPerformanceSection(containerEl: HTMLElement): void {

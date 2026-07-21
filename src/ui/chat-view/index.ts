@@ -56,8 +56,8 @@ export class ChatView extends ItemView {
     this.chatOrchestrator = plugin.chatOrchestrator;
 
     this.themeRegistry = new ThemeRegistry(plugin.settings.chatTheme || 'bubble');
-    this.themeRegistry.register('bubble', () => new BubbleTheme(this.app, this.messageRenderer));
-    this.themeRegistry.register('terminal', () => new TerminalTheme(this.app, this.messageRenderer, this.plugin.settings.terminalPreset || 'green'));
+    this.themeRegistry.register('bubble', '经典气泡', '传统聊天气泡式界面，左右分列，工具调用折叠展示', () => new BubbleTheme(this.app, this.messageRenderer));
+    this.themeRegistry.register('terminal', '终端式', '终端时间线式界面，等宽工具区 + 比例字体回答区，内嵌确认按钮', () => new TerminalTheme(this.app, this.messageRenderer, this.plugin.settings.terminalPreset || 'green'));
     this.theme = this.themeRegistry.getCurrent();
   }
 
@@ -133,7 +133,7 @@ export class ChatView extends ItemView {
   }
 
   private get inputEls(): InputAreaElements {
-    return this.theme.createInputArea();
+    return this.theme.getInputAreaElements();
   }
 
   private setupInputHandler(): void {
@@ -616,16 +616,6 @@ export class ChatView extends ItemView {
       if (this.currentStreamingBubble) {
         const data: AssistantMessageData = {
           messages: currentTurnMessages,
-          toolCalls: activeTasks.map(t => ({
-            id: t.id,
-            name: t.name,
-            status: t.status as ToolCallRender['status'],
-            params: t.params,
-            result: t.result,
-            explanation: t.explanation,
-          })),
-          explanation: currentTurnResponse || undefined,
-          finalAnswer: finalAnswer || undefined,
         };
         this.theme.finalizeStreaming(this.currentStreamingBubble, data);
         this.currentStreamingBubble = null;

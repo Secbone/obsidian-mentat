@@ -106,6 +106,7 @@ export interface SkillConfig {
   enabled?: boolean;
   directCall?: boolean;
   requireConfirmation?: boolean;
+  allowedPermissions?: string[]; // 限制技能可用的权限级别
 }
 
 export interface AIProviderConfig {

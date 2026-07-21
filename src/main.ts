@@ -22,6 +22,10 @@ export default class MentatPlugin extends Plugin {
   platform: ObsidianAdapter;
   extensionManager: ExtensionManager;
 
+  // Track previous values for selective save-settings updates
+  private prevTheme: string = '';
+  private prevPreset: string = '';
+
   async onload() {
     console.log('Loading Mentat plugin');
 
@@ -263,6 +267,8 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.prevTheme = this.settings.chatTheme || 'bubble';
+    this.prevPreset = this.settings.terminalPreset || 'green';
   }
 
   async saveSettings() {
@@ -287,17 +293,23 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
       }
     }
 
-    // Notify ChatView of theme/preset change
-    const chatLeaf = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0];
-    if (chatLeaf) {
-      const chatView = chatLeaf.view as ChatView;
-      const newTheme = this.settings.chatTheme || 'bubble';
-      if (chatView) {
-        void chatView.switchTheme(newTheme);
-        if (newTheme === 'terminal' && this.settings.terminalPreset) {
-          chatView.updateTerminalPreset(this.settings.terminalPreset);
+    // Notify ChatView of theme/preset change (only if actually changed)
+    const newTheme = this.settings.chatTheme || 'bubble';
+    const newPreset = this.settings.terminalPreset || 'green';
+
+    if (newTheme !== this.prevTheme || newPreset !== this.prevPreset) {
+      const chatLeaf = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0];
+      if (chatLeaf) {
+        const chatView = chatLeaf.view as ChatView;
+        if (chatView) {
+          void chatView.switchTheme(newTheme);
+          if (newTheme === 'terminal') {
+            chatView.updateTerminalPreset(newPreset);
+          }
         }
       }
+      this.prevTheme = newTheme;
+      this.prevPreset = newPreset;
     }
   }
 

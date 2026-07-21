@@ -11,20 +11,9 @@ import {
   InputAreaElements,
   InputState,
 } from '../types';
-import { parseFinalAnswer, resolveToolDisplayName, getToolShortName, truncateText, valueToString } from '../message-utils';
+import { parseFinalAnswer, resolveToolDisplayName, getToolShortName, truncateText, valueToString, BRAILLE_DOTS, getSpinnerChar, getSpinnerPrefix } from '../message-utils';
 import { SmartScroller } from '../smart-scroller';
 import { AnswerRenderer } from '../answer-renderer';
-
-const BRAILLE_DOTS = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-function getSpinnerChar(): string {
-  const idx = Math.floor((Date.now() / 80) % BRAILLE_DOTS.length);
-  return BRAILLE_DOTS[idx];
-}
-
-function getSpinnerPrefix(): string {
-  return getSpinnerChar();
-}
 
 export class BubbleTheme implements ChatTheme {
   readonly id = 'bubble';
@@ -539,7 +528,7 @@ export class BubbleTheme implements ChatTheme {
     this.smartScroller.scrollToBottom();
   }
 
-  createInputArea(): InputAreaElements {
+  getInputAreaElements(): InputAreaElements {
     if (this.inputEls) return this.inputEls;
     throw new Error('InputArea not initialized — call mount() first');
   }

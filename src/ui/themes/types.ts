@@ -22,7 +22,7 @@ export interface ChatTheme {
 
   scrollToBottom(): void;
 
-  createInputArea(): InputAreaElements;
+  getInputAreaElements(): InputAreaElements;
   updateInputState(state: InputState): void;
 
   getMessagesContainer(): HTMLElement;
@@ -46,11 +46,6 @@ export interface ThemeCallbacks {
 }
 
 export interface AssistantMessageData {
-  toolCalls?: ToolCallRender[];
-  explanation?: string;
-  finalAnswer?: string;
-  interrupted?: boolean;
-  subagentTraces?: SubagentTrace[];
   messages?: ChatMessage[];
 }
 
@@ -103,17 +98,4 @@ export interface InputState {
   isStreaming: boolean;
   charCount: number;
   documentCount: number;
-}
-
-export interface SubagentTrace {
-  role: string;
-  content: string;
-  toolCalls?: Array<{ name: string; status: string; result?: unknown }>;
-}
-
-export interface DocumentItem {
-  path: string;
-  basename: string;
-  extension: string;
-  indexed: boolean;
 }

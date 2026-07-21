@@ -11,7 +11,7 @@ import {
   InputAreaElements,
   InputState,
 } from '../types';
-import { parseFinalAnswer, resolveToolDisplayName, getToolShortName, truncateText, valueToString } from '../message-utils';
+import { parseFinalAnswer, resolveToolDisplayName, getToolShortName, truncateText, valueToString, BRAILLE_DOTS, getSpinnerChar } from '../message-utils';
 import { SmartScroller } from '../smart-scroller';
 import { AnswerRenderer } from '../answer-renderer';
 
@@ -38,10 +38,14 @@ export class TerminalTheme implements ChatTheme {
 
   private expandedTaskOutputs = new Set<string>();
   private lastRenderTime = 0;
+  private lastAnswerRenderTime = 0;
+
+  // Console dedup tracking
+  private lastConsoleStatus = '';
+  private lastConsoleTasksJson = '';
+  private lastConsoleExplanation = '';
   private renderTimeout: number | null = null;
   private smartScroller = new SmartScroller();
-
-  private static readonly BRAILLE_DOTS = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
   constructor(app: App, messageRenderer: MessageRenderer, terminalPreset: string = 'green') {
     this.app = app;
@@ -93,11 +97,10 @@ export class TerminalTheme implements ChatTheme {
     this.callbacks = null;
     this.expandedTaskOutputs.clear();
     this.lastRenderTime = 0;
-  }
-
-  private getSpinnerChar(): string {
-    const idx = Math.floor((Date.now() / 80) % TerminalTheme.BRAILLE_DOTS.length);
-    return TerminalTheme.BRAILLE_DOTS[idx];
+    this.lastAnswerRenderTime = 0;
+    this.lastConsoleStatus = '';
+    this.lastConsoleTasksJson = '';
+    this.lastConsoleExplanation = '';
   }
 
   renderUserMessage(content: string): HTMLElement {
@@ -111,6 +114,8 @@ export class TerminalTheme implements ChatTheme {
     const line = this.messagesContainer.createDiv('term-line term-line-user');
     const text = line.createSpan('term-user-text');
     text.setText(content);
+    this.addCopyButtonToMessage(line);
+    this.setupMessageCopyButtons(line);
     this.scrollToBottom();
     return line;
   }
@@ -172,7 +177,7 @@ export class TerminalTheme implements ChatTheme {
               const header = item.createDiv('term-tool-header');
 
               const iconSpan = header.createSpan('term-tool-icon');
-              iconSpan.setText(isSuccess ? '✔' : (responseMsg ? '✗' : this.getSpinnerChar()));
+              iconSpan.setText(isSuccess ? '✔' : (responseMsg ? '✗' : getSpinnerChar()));
               iconSpan.addClass(isSuccess ? 'term-icon-success' : (responseMsg ? 'term-icon-error' : 'term-icon-pending'));
 
               header.createSpan('term-tool-name').setText(shortName);
@@ -220,6 +225,8 @@ export class TerminalTheme implements ChatTheme {
     if (parsedAnswer.trim()) {
       const answerEl = block.createDiv('term-answer');
       this.renderAnswer(parsedAnswer, answerEl);
+      this.addCopyButtonToMessage(block);
+      this.setupMessageCopyButtons(block);
     }
 
     this.scrollToBottom();
@@ -246,16 +253,24 @@ export class TerminalTheme implements ChatTheme {
     const { statusMessage, activeTasks, explanation, finalAnswer, force } = data;
 
     const now = Date.now();
-    const shouldUpdate = force || (now - this.lastRenderTime > 100);
+    const tasksJson = JSON.stringify(activeTasks);
+    const cleanExplanation = (explanation || '').trim();
+    const shouldUpdateConsole = force ||
+      statusMessage !== this.lastConsoleStatus ||
+      tasksJson !== this.lastConsoleTasksJson ||
+      (cleanExplanation !== this.lastConsoleExplanation && activeTasks.length > 0);
 
-    if (shouldUpdate) {
+    if (shouldUpdateConsole) {
+      this.lastConsoleStatus = statusMessage;
+      this.lastConsoleTasksJson = tasksJson;
+      this.lastConsoleExplanation = cleanExplanation;
       this.lastRenderTime = now;
       consoleContainer.empty();
 
       if (statusMessage || activeTasks.length > 0) {
         const statusLine = consoleContainer.createDiv('term-timeline-item term-status-line');
         const spinner = statusLine.createSpan('term-spinner');
-        spinner.setText(this.getSpinnerChar());
+        spinner.setText(getSpinnerChar());
         statusLine.createSpan('term-status-text').setText(statusMessage || '思考中...');
       }
 
@@ -270,9 +285,9 @@ export class TerminalTheme implements ChatTheme {
         const header = item.createDiv('term-tool-header');
 
         const iconSpan = header.createSpan('term-tool-icon');
-        let icon = this.getSpinnerChar();
+        let icon = getSpinnerChar();
         let iconClass = 'term-icon-pending';
-        if (task.status === 'executing') { icon = this.getSpinnerChar(); iconClass = 'term-icon-executing'; }
+        if (task.status === 'executing') { icon = getSpinnerChar(); iconClass = 'term-icon-executing'; }
         else if (task.status === 'success') { icon = '✔'; iconClass = 'term-icon-success'; }
         else if (task.status === 'error') { icon = '✗'; iconClass = 'term-icon-error'; }
         else if (task.status === 'confirm') { icon = '⚠️'; iconClass = 'term-icon-warning'; }
@@ -307,15 +322,14 @@ export class TerminalTheme implements ChatTheme {
         }
       }
 
-      const cleanExplanation = (explanation || '').trim();
       if (cleanExplanation && activeTasks.length > 0) {
         const expLine = consoleContainer.createDiv('term-timeline-item term-timeline-explanation');
         expLine.empty();
-        expLine.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(cleanExplanation) + `<span class="term-spinner">${this.getSpinnerChar()}</span>`));
+        expLine.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(cleanExplanation) + `<span class="term-spinner">${getSpinnerChar()}</span>`));
       }
     }
 
-    const throttleInterval = 150;
+    // Answer text: 150ms throttle (independent from console)
     const performRenderText = () => {
       if (!answerContainer) return;
       const text = finalAnswer || '';
@@ -329,17 +343,19 @@ export class TerminalTheme implements ChatTheme {
       this.scrollToBottom();
     };
 
-    if (force || shouldUpdate || (now - this.lastRenderTime > throttleInterval)) {
+    if (force || shouldUpdateConsole || (now - this.lastAnswerRenderTime > 150)) {
       if (this.renderTimeout) {
         window.clearTimeout(this.renderTimeout);
         this.renderTimeout = null;
       }
       performRenderText();
+      this.lastAnswerRenderTime = now;
     } else if (!this.renderTimeout) {
       this.renderTimeout = window.setTimeout(() => {
         performRenderText();
+        this.lastAnswerRenderTime = Date.now();
         this.renderTimeout = null;
-      }, throttleInterval);
+      }, 150);
     }
   }
 
@@ -409,7 +425,7 @@ export class TerminalTheme implements ChatTheme {
     }
   }
 
-  createInputArea(): InputAreaElements {
+  getInputAreaElements(): InputAreaElements {
     if (this.inputEls) return this.inputEls;
     throw new Error('InputArea not initialized — call mount() first');
   }
@@ -587,6 +603,54 @@ export class TerminalTheme implements ChatTheme {
         this.expandedTaskOutputs.add(typeKey);
         pre.remove();
         this.renderTruncatedText(container, label, value, typeKey);
+      });
+    }
+  }
+
+  private addCopyButtonToMessage(messageEl: HTMLElement): void {
+    const btn = messageEl.createEl('button', { cls: 'term-copy-button' });
+    btn.setText('📋');
+    btn.setAttribute('aria-label', '复制消息');
+  }
+
+  private setupCodeCopyButtons(messageEl: HTMLElement): void {
+    const codeCopyButtons = messageEl.findAll('.code-copy-button');
+    codeCopyButtons.forEach(button => {
+      button.addEventListener('click', (e) => {
+        void (async () => {
+          const target = e.currentTarget as HTMLElement;
+          const codeId = target.getAttribute('data-code-id');
+          const codeEl = activeDocument.getElementById(codeId!);
+          if (codeEl) {
+            await navigator.clipboard.writeText(codeEl.textContent || '');
+            const originalText = target.textContent;
+            target.textContent = '已复制!';
+            window.setTimeout(() => {
+              target.textContent = originalText;
+            }, 2000);
+          }
+        })();
+      });
+    });
+  }
+
+  private setupMessageCopyButtons(wrapper: HTMLElement): void {
+    const copyButton = wrapper.querySelector('.term-copy-button') as HTMLButtonElement;
+    const messageContent = wrapper.querySelector('.term-answer, .term-user-text') as HTMLElement;
+
+    if (copyButton && messageContent) {
+      copyButton.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const textContent = messageContent.textContent || '';
+        try {
+          await navigator.clipboard.writeText(textContent);
+          copyButton.setText('✓');
+          window.setTimeout(() => {
+            copyButton.setText('📋');
+          }, 2000);
+        } catch {
+          // clipboard not available
+        }
       });
     }
   }

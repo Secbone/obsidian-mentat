@@ -1,7 +1,16 @@
 import { ChatTheme, ThemeCallbacks } from './types';
 
+class ThemeMetadata {
+  constructor(
+    readonly id: string,
+    readonly name: string,
+    readonly description: string,
+    readonly factory: () => ChatTheme,
+  ) {}
+}
+
 export class ThemeRegistry {
-  private factories: Map<string, () => ChatTheme> = new Map();
+  private themes: Map<string, ThemeMetadata> = new Map();
   private current: ChatTheme | null = null;
   private currentId: string;
   private container: HTMLElement | null = null;
@@ -11,8 +20,8 @@ export class ThemeRegistry {
     this.currentId = defaultThemeId;
   }
 
-  register(id: string, factory: () => ChatTheme): void {
-    this.factories.set(id, factory);
+  register(id: string, name: string, description: string, factory: () => ChatTheme): void {
+    this.themes.set(id, new ThemeMetadata(id, name, description, factory));
   }
 
   init(container: HTMLElement, callbacks: ThemeCallbacks): void {
@@ -23,7 +32,7 @@ export class ThemeRegistry {
 
   switchTo(id: string): void {
     if (id === this.currentId && this.current) return;
-    if (!this.factories.has(id)) return;
+    if (!this.themes.has(id)) return;
 
     this.unmountCurrent();
     this.currentId = id;
@@ -43,9 +52,8 @@ export class ThemeRegistry {
 
   list(): Array<{ id: string; name: string; description: string }> {
     const result: Array<{ id: string; name: string; description: string }> = [];
-    for (const [id, factory] of this.factories) {
-      const theme = factory();
-      result.push({ id, name: theme.name, description: theme.description });
+    for (const meta of this.themes.values()) {
+      result.push({ id: meta.id, name: meta.name, description: meta.description });
     }
     return result;
   }
@@ -70,12 +78,12 @@ export class ThemeRegistry {
   }
 
   private createTheme(id: string): ChatTheme {
-    const factory = this.factories.get(id);
-    if (!factory) {
-      const fallback = this.factories.values().next().value;
-      if (fallback) return fallback();
+    const meta = this.themes.get(id);
+    if (!meta) {
+      const fallback = this.themes.values().next().value;
+      if (fallback) return fallback.factory();
       throw new Error(`No theme registered with id "${id}" and no fallback available`);
     }
-    return factory();
+    return meta.factory();
   }
 }

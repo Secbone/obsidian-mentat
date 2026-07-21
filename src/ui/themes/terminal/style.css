@@ -419,6 +419,28 @@
   font-family: var(--term-font-mono);
 }
 
+/* Copy button */
+[data-theme="terminal"] .term-copy-button {
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: var(--term-text-faint);
+  font-size: 12px;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  line-height: 1;
+}
+
+[data-theme="terminal"] .term-line-user:hover .term-copy-button,
+[data-theme="terminal"] .term-block-assistant:hover .term-copy-button {
+  opacity: 1;
+}
+
+[data-theme="terminal"] .term-copy-button:hover {
+  color: var(--term-accent);
+}
+
 /* Streaming indicator */
 [data-theme="terminal"] .term-block-streaming {
   border-left: 2px solid var(--term-accent);

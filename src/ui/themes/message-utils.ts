@@ -42,7 +42,7 @@ export function truncateText(text: string, threshold: number = 500): {
     return { display: text, isTruncated: false, fullText: text };
   }
   return {
-    display: text.slice(0, 400) + '...',
+    display: text.slice(0, threshold) + '...',
     isTruncated: true,
     fullText: text,
   };
@@ -50,4 +50,16 @@ export function truncateText(text: string, threshold: number = 500): {
 
 export function valueToString(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+}
+
+// Braille dot spinner shared by both themes
+export const BRAILLE_DOTS = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+export function getSpinnerChar(): string {
+  const idx = Math.floor((Date.now() / 80) % BRAILLE_DOTS.length);
+  return BRAILLE_DOTS[idx];
+}
+
+export function getSpinnerPrefix(): string {
+  return getSpinnerChar();
 }

@@ -108,6 +108,27 @@ export class SkillExecutor {
       // Validate input
       const validatedInput = this.validateInput(skill, parameters);
 
+      // Check permissions (skills declare required permissions, user settings can restrict)
+      const declaredPermissions = skill.metadata?.permissions;
+      if (declaredPermissions && declaredPermissions.length > 0) {
+        const skillConfig = this.context.plugin?.settings?.skillConfigurations?.[fullName];
+        const allowedPermissions = skillConfig?.allowedPermissions as string[] | undefined;
+        if (allowedPermissions) {
+          // User has explicitly allowed only certain permissions
+          const denied = declaredPermissions.filter(p => !allowedPermissions.includes(p));
+          if (denied.length > 0) {
+            const result: SkillResult = {
+              success: false,
+              error: `Skill requires permissions [${denied.join(', ')}] which are not granted in settings`,
+              metadata: { executionTime: Date.now() - startTime }
+            };
+            skillCall.result = result;
+            skillCall.status = 'error';
+            return result;
+          }
+        }
+      }
+
       // Check if confirmation is required (settings override takes precedence)
       const skillConfig = this.context.plugin?.settings?.skillConfigurations?.[fullName];
       const requiresConfirmation = skillConfig?.requireConfirmation !== undefined
