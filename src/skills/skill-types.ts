@@ -68,6 +68,12 @@ export interface SkillDefinition<TInput = unknown, TOutput = unknown> {
       description: string;
     }>;
     requiresConfirmation?: boolean; // Whether to ask user before executing
+    executionCategory?: 'read' | 'write' | 'mutate' | 'external';
+    // read     → 纯读取，完全并行安全
+    // write    → 文件写入，同组串行
+    // mutate   → 修改 vault 结构（move/delete/rename），与 write 互斥
+    // external → 外部 API 调用，单独分组
+    permissions?: SkillPermission[]; // 声明所需权限
     documentation?: string;
   };
 }

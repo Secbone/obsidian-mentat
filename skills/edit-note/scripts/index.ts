@@ -16,6 +16,8 @@ export const metadata = {
   version: '2.0.0',
   tags: ['edit', 'replace', 'update'],
   requiresConfirmation: true,
+  executionCategory: 'write',
+  permissions: ['read', 'write'],
   performance: 'fast',
   category: 'file-operations'
 };

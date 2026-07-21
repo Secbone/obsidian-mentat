@@ -14,6 +14,8 @@ export interface AgentConfig {
   maxTurns?: number;
   temperature?: number;
   enableSkills?: boolean;  // Whether to enable skill calling
+  toolExecutionMode?: 'sequential' | 'parallel';  // 默认 'parallel'
+  maxParallelTools?: number;                       // 默认 5
 }
 
 /**
@@ -47,14 +49,36 @@ export interface AgentResponse {
  * Designed for responsive UI and human-in-the-loop interactions
  */
 export type AgentEvent =
+  // 状态与错误
   | { type: 'status'; message: string }
+  | { type: 'error'; message: string }
+
+  // Agent 生命周期
+  | { type: 'agent_start' }
+  | { type: 'agent_end'; messages: ChatMessage[] }
+
+  // Turn 生命周期（一次 LLM 调用 + 可能的工具执行）
+  | { type: 'turn_start'; turnIndex: number }
+  | { type: 'turn_end'; turnIndex: number; message: ChatMessage; toolResults: unknown[] }
+
+  // 消息生命周期
+  | { type: 'message_start'; role: string }
+  | { type: 'message_update'; delta: string; accumulatedText?: string }
+  | { type: 'message_end'; role: string; content: string }
+
+  // 工具调用生命周期（替代旧的 skill_call / skill_success / skill_error）
+  | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: unknown }
+  | { type: 'tool_execution_end'; toolCallId: string; result: unknown; isError: boolean }
+
+  // 【旧事件 — 向后兼容】
   | { type: 'chunk'; text: string }
   | { type: 'skill_call'; name: string; params: unknown }
   | { type: 'skill_success'; name: string; result: unknown }
   | { type: 'skill_error'; name: string; error: string }
+
+  // 确认请求与引导
   | { type: 'confirm_request'; skillName: string; params: unknown; message: string }
-  | { type: 'steer'; message: string }
-  | { type: 'error'; message: string };
+  | { type: 'steer'; message: string };
 
 /**
  * DiagnosticsLogger - Decoupled interface for logging tool execution failures

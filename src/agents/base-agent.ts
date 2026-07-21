@@ -8,6 +8,27 @@ import { SkillInvocationContext } from '../skills/strategies/skill-invocation-st
 import { SkillCall, isExecutableSkill, SkillResult, SkillNamespace } from '../skills/skill-types';
 import { AgentConfig, AgentContext, AgentResponse, AgentEvent, DiagnosticsLogger } from './agent-types';
 
+interface ToolCallResult {
+  toolMessages: ChatMessage[];
+  skillCalls: SkillCall[];
+}
+
+/**
+ * Collects all events from an AsyncGenerator and returns the final return value.
+ * Used for parallel tool execution where yield* cannot be used across concurrent tasks.
+ */
+async function collectGeneratorEvents<TEvent, TReturn>(
+  gen: AsyncGenerator<TEvent, TReturn, unknown>
+): Promise<{ events: TEvent[]; result: TReturn }> {
+  const events: TEvent[] = [];
+  let next = await gen.next();
+  while (!next.done) {
+    events.push(next.value);
+    next = await gen.next();
+  }
+  return { events, result: next.value as TReturn };
+}
+
 interface StreamOptions {
   temperature?: number;
   systemPrompt?: string;
@@ -81,6 +102,7 @@ export class BaseAgent {
     const startTime = Date.now();
     const systemPrompt = this.buildSystemPrompt();
 
+    yield { type: 'agent_start' };
     yield { type: 'status', message: '初始化智能体...' };
 
     if (context.abortSignal?.aborted) {
@@ -198,6 +220,9 @@ export class BaseAgent {
 
       yield { type: 'status', message: `正在思考 (第 ${state.turnCount} 轮)...` };
 
+      yield { type: 'turn_start', turnIndex: state.turnCount };
+      yield { type: 'message_start', role: 'assistant' };
+
       // Node A: Stream Model
       let result: GenerateResponse;
       try {
@@ -240,7 +265,9 @@ export class BaseAgent {
         timestamp: Date.now(),
         tool_calls: result.toolCalls
       };
-      
+
+      yield { type: 'message_end', role: 'assistant', content: result.content };
+
       state = this.mergeState(state, {
         fullResponse: state.fullResponse + result.content,
         messages: [assistantMessage]
@@ -252,83 +279,23 @@ export class BaseAgent {
       }
 
       // Node B: Execute Tools
-      const newMessages: ChatMessage[] = [];
-      const newSkillCalls: SkillCall[] = [];
+      const toolResults = yield* this.executeToolCalls(
+        result.toolCalls,
+        context,
+        executedKeysHistory,
+        maxCycleLength,
+        minRepeats
+      );
 
-      for (const toolCall of result.toolCalls) {
-        if (context.abortSignal?.aborted) {
-          throw new DOMException('The user aborted a request.', 'AbortError');
-        }
-
-        let normalizedArgs = '';
-        try {
-          const parsed = typeof toolCall.arguments === 'string' ? safeParseJson(toolCall.arguments) : toolCall.arguments;
-          normalizedArgs = normalizeJsonArguments(parsed);
-        } catch {
-          normalizedArgs = typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments);
-        }
-        const callKey = `${toolCall.name}:${normalizedArgs}`;
-
-        // Cyclic pattern detection algorithm
-        const tempHistory = [...executedKeysHistory, callKey];
-        let isLoop = false;
-        for (let L = 1; L <= maxCycleLength; L++) {
-          if (tempHistory.length < L * minRepeats) continue;
-          let patternMatch = true;
-          const pattern = tempHistory.slice(tempHistory.length - L);
-          for (let r = 1; r < minRepeats; r++) {
-            const slice = tempHistory.slice(
-              tempHistory.length - L * (r + 1),
-              tempHistory.length - L * r
-            );
-            if (slice.join('|') !== pattern.join('|')) {
-              patternMatch = false;
-              break;
-            }
-          }
-          if (patternMatch) {
-            isLoop = true;
-            break;
-          }
-        }
-
-        if (isLoop) {
-          yield { type: 'status', message: `⚠️ 检测到工具调用 [${toolCall.name}] 陷入推理死循环，正在强制干预引导自愈...` };
-          yield { type: 'skill_error', name: toolCall.name, error: 'Reasoning loop detected by AP6 Guard' };
-
-          newMessages.push({
-            role: 'tool',
-            content: `⚠️ SYSTEM ALERT: You have executed the tool '${toolCall.name}' with the identical arguments consecutive times. This indicates you are caught in a repetitive reasoning loop. DO NOT repeat the same tool call with the same arguments. Please reconsider your plan, try a different parameter, use another tool (e.g. search or edit), or ask the user for clarification using 'obsidian:ask_user'.`,
-            timestamp: Date.now(),
-            tool_call_id: toolCall.id,
-            name: toolCall.name
-          });
-
-          newSkillCalls.push({
-            id: toolCall.id,
-            skillName: toolCall.name,
-            namespace: 'guard',
-            parameters: typeof toolCall.arguments === 'string' ? { raw: toolCall.arguments } : toolCall.arguments,
-            status: 'error',
-            timestamp: Date.now(),
-            result: { success: false, error: 'Loop detected and prevented by AP6 Guard' }
-          });
-          continue;
-        }
-
-        // Add to history
-        executedKeysHistory.push(callKey);
-
-        // Execute tool call via unified helper
-        const runRes = yield* this.executeSingleToolCall(toolCall, context);
-        newMessages.push(...runRes.toolMessages);
-        newSkillCalls.push(...runRes.skillCalls);
-      }
+      const newMessages = toolResults.map(r => r.toolMessages).flat();
+      const newSkillCalls = toolResults.map(r => r.skillCalls).flat();
 
       state = this.mergeState(state, {
         messages: newMessages,
         skillCalls: newSkillCalls
       });
+
+      yield { type: 'turn_end', turnIndex: state.turnCount, message: assistantMessage, toolResults };
     }
 
     const isLimitReached = state.turnCount >= state.maxTurns;
@@ -338,6 +305,9 @@ export class BaseAgent {
     }
 
     yield { type: 'status', message: '任务完成！' };
+
+    // 在新事件中附加 metadata
+    yield { type: 'agent_end', messages: state.messages };
 
     // Attach usage stats to the last assistant message
     const assistantMsgs = state.messages.filter(m => m.role === 'assistant');
@@ -554,6 +524,155 @@ export class BaseAgent {
       return 'meta';
     }
     return toolName.startsWith('mcp:') ? 'mcp' : 'obsidian';
+  }
+
+  private async *executeToolCalls(
+    toolCalls: ToolCall[],
+    context: AgentContext,
+    executedKeysHistory: string[],
+    maxCycleLength: number,
+    minRepeats: number
+  ): AsyncGenerator<AgentEvent, ToolCallResult[], unknown> {
+    const results: Array<{ toolMessages: ChatMessage[]; skillCalls: SkillCall[] }> = [];
+
+    // Phase 1: 检测循环（所有 toolCall 同步检测，不执行）
+    const validCalls: Array<{ toolCall: ToolCall; isLoop: boolean }> = [];
+    for (const toolCall of toolCalls) {
+      if (context.abortSignal?.aborted) {
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+
+      let normalizedArgs = '';
+      try {
+        const parsed = typeof toolCall.arguments === 'string' ? safeParseJson(toolCall.arguments) : toolCall.arguments;
+        normalizedArgs = normalizeJsonArguments(parsed);
+      } catch {
+        normalizedArgs = typeof toolCall.arguments === 'string' ? toolCall.arguments : JSON.stringify(toolCall.arguments);
+      }
+      const callKey = `${toolCall.name}:${normalizedArgs}`;
+
+      // Cyclic pattern detection algorithm (AP6 Guard)
+      const tempHistory = [...executedKeysHistory, callKey];
+      let isLoop = false;
+      for (let L = 1; L <= maxCycleLength; L++) {
+        if (tempHistory.length < L * minRepeats) continue;
+        let patternMatch = true;
+        const pattern = tempHistory.slice(tempHistory.length - L);
+        for (let r = 1; r < minRepeats; r++) {
+          const slice = tempHistory.slice(
+            tempHistory.length - L * (r + 1),
+            tempHistory.length - L * r
+          );
+          if (slice.join('|') !== pattern.join('|')) {
+            patternMatch = false;
+            break;
+          }
+        }
+        if (patternMatch) {
+          isLoop = true;
+          break;
+        }
+      }
+
+      if (isLoop) {
+        yield { type: 'status', message: `⚠️ 检测到工具调用 [${toolCall.name}] 陷入推理死循环，正在强制干预引导自愈...` };
+        yield { type: 'tool_execution_start', toolCallId: toolCall.id, toolName: toolCall.name, args: toolCall.arguments };
+        yield { type: 'skill_error', name: toolCall.name, error: 'Reasoning loop detected by AP6 Guard' };
+        yield { type: 'tool_execution_end', toolCallId: toolCall.id, result: null, isError: true };
+
+        results.push({
+          toolMessages: [{
+            role: 'tool',
+            content: `⚠️ SYSTEM ALERT: You have executed the tool '${toolCall.name}' with the identical arguments consecutive times. This indicates you are caught in a repetitive reasoning loop. DO NOT repeat the same tool call with the same arguments. Please reconsider your plan, try a different parameter, use another tool (e.g. search or edit), or ask the user for clarification using 'obsidian:ask_user'.`,
+            timestamp: Date.now(),
+            tool_call_id: toolCall.id,
+            name: toolCall.name
+          }],
+          skillCalls: [{
+            id: toolCall.id,
+            skillName: toolCall.name,
+            namespace: 'guard',
+            parameters: typeof toolCall.arguments === 'string' ? { raw: toolCall.arguments } : toolCall.arguments,
+            status: 'error',
+            timestamp: Date.now(),
+            result: { success: false, error: 'Loop detected and prevented by AP6 Guard' }
+          }]
+        });
+      } else {
+        executedKeysHistory.push(callKey);
+        validCalls.push({ toolCall, isLoop: false });
+      }
+    }
+
+    const executableCalls = validCalls.filter(c => !c.isLoop).map(c => c.toolCall);
+    if (executableCalls.length === 0) return results;
+
+    const mode = this.config.toolExecutionMode || 'parallel';
+    const limit = this.config.maxParallelTools || 5;
+
+    if (mode === 'parallel') {
+      // Phase 2: 按 executionCategory 分组
+      // read → 完全并行安全
+      // write / mutate / external / unknown → 各自组内串行，组间互斥
+      const readCalls: ToolCall[] = [];
+      const serialCalls: ToolCall[] = [];
+
+      for (const tc of executableCalls) {
+        const cat = this.getToolCategory(tc.name);
+        if (cat === 'read') {
+          readCalls.push(tc);
+        } else {
+          serialCalls.push(tc);
+        }
+      }
+
+      // 先并行执行所有只读调用
+      if (readCalls.length > 0) {
+        const readCollected = await Promise.all(
+          readCalls.map(tc =>
+            collectGeneratorEvents(this.executeSingleToolCall(tc, context))
+          )
+        );
+
+        for (let i = 0; i < readCalls.length; i++) {
+          const tc = readCalls[i];
+          const { events, result: runResult } = readCollected[i];
+          yield { type: 'tool_execution_start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
+          for (const event of events) yield event;
+          yield { type: 'tool_execution_end', toolCallId: tc.id, result: runResult, isError: false };
+          results.push(runResult);
+        }
+      }
+
+      // 再串行执行所有写操作（保持原始顺序）
+      for (const tc of serialCalls) {
+        yield { type: 'tool_execution_start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
+        const runRes = yield* this.executeSingleToolCall(tc, context);
+        yield { type: 'tool_execution_end', toolCallId: tc.id, result: runRes, isError: false };
+        results.push(runRes);
+      }
+    } else {
+      // 串行执行（保持原始 toolCalls 顺序）
+      for (const tc of executableCalls) {
+        yield { type: 'tool_execution_start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
+        const runRes = yield* this.executeSingleToolCall(tc, context);
+        yield { type: 'tool_execution_end', toolCallId: tc.id, result: runRes, isError: false };
+        results.push(runRes);
+      }
+    }
+
+    return results;
+  }
+
+  private getToolCategory(toolName: string): string | undefined {
+    if (toolName === 'spec' || toolName === 'invoke') return 'read';
+    if (toolName.startsWith('mcp:')) return 'external';
+
+    const skill = this.skillRegistry.get(toolName) || this.skillRegistry.get(toolName.replace(/__/g, ':'));
+    if (skill && isExecutableSkill(skill)) {
+      return skill.metadata?.executionCategory;
+    }
+    return undefined;
   }
 
   private async *executeSingleToolCall(

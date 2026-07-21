@@ -435,6 +435,7 @@
 }
 
 [data-theme="terminal"] .term-input-wrapper {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;

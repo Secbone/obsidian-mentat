@@ -14,6 +14,8 @@ export const metadata = {
   version: '1.0.0',
   tags: ['vault', 'structure', 'overview'],
   performance: 'variable',
+  executionCategory: 'read',
+  permissions: ['read'],
   category: 'vault-info'
 };
 

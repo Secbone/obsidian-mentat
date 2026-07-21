@@ -6,7 +6,9 @@ export const metadata = {
   name: 'web_search',
   description: 'Search the web and return relevant results with automatic engine selection and fallback',
   version: '1.0.0',
-  tags: ['web', 'search', 'external']
+  tags: ['web', 'search', 'external'],
+  executionCategory: 'external',
+  permissions: ['read']
 };
 
 const InputSchema = z.object({

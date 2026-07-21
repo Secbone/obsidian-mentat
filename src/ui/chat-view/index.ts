@@ -388,112 +388,195 @@ export class ChatView extends ItemView {
       while (!current.done) {
         const event = current.value as AgentEvent;
 
-        if (event.type === 'steer') {
-          currentTurnResponse = '';
-          const steerEl = this.theme.renderSteerCard(event.message);
-          if (this.currentStreamingBubble) {
-            this.currentStreamingBubble.el.appendChild(steerEl);
-          }
-          this.theme.scrollToBottom();
-        } else if (event.type === 'status') {
-          currentStatus = event.message;
-          this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse);
-        } else if (event.type === 'chunk') {
-          currentTurnResponse += event.text;
+        switch (event.type) {
 
-          if (currentTurnResponse.includes('<final_answer>')) {
-            hasFinalAnswerTag = true;
-            const parts = currentTurnResponse.split('<final_answer>');
-            const explanationPart = parts[0];
-            let answerPart = parts[1] || '';
+          // --- 生命周期（可忽略，不需要 UI 响应） ---
+          case 'agent_start':
+          case 'agent_end':
+          case 'turn_start':
+          case 'turn_end':
+          case 'message_start':
+          case 'message_update':
+          case 'message_end':
+            break;
 
-            if (answerPart.includes('</final_answer>')) {
-              answerPart = answerPart.split('</final_answer>')[0];
+          // --- 引导消息 ---
+          case 'steer': {
+            currentTurnResponse = '';
+            const steerEl = this.theme.renderSteerCard(event.message);
+            if (this.currentStreamingBubble) {
+              this.currentStreamingBubble.el.appendChild(steerEl);
             }
+            this.theme.scrollToBottom();
+            break;
+          }
 
-            finalAnswer = answerPart;
-            this.updateStreaming(activeTasks, currentStatus, finalAnswer, explanationPart);
-          } else {
-            if (activeTasks.length === 0) {
-              this.updateStreaming(activeTasks, currentStatus, currentTurnResponse, currentTurnResponse);
+          // --- 状态 ---
+          case 'status':
+            currentStatus = event.message;
+            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse);
+            break;
+
+          // --- 文本流 ---
+          case 'chunk': {
+            currentTurnResponse += event.text;
+
+            if (currentTurnResponse.includes('<final_answer>')) {
+              hasFinalAnswerTag = true;
+              const parts = currentTurnResponse.split('<final_answer>');
+              const explanationPart = parts[0];
+              let answerPart = parts[1] || '';
+
+              if (answerPart.includes('</final_answer>')) {
+                answerPart = answerPart.split('</final_answer>')[0];
+              }
+
+              finalAnswer = answerPart;
+              this.updateStreaming(activeTasks, currentStatus, finalAnswer, explanationPart);
             } else {
-              this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse);
+              if (activeTasks.length === 0) {
+                this.updateStreaming(activeTasks, currentStatus, currentTurnResponse, currentTurnResponse);
+              } else {
+                this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse);
+              }
             }
+            break;
           }
-        } else if (event.type === 'skill_call') {
-          const shortName = event.name.split(':').pop() || event.name;
-          lastToolStatus = { name: shortName, status: 'pending' };
 
-          const existingConfirmTask = activeTasks.find(t =>
-            t.status === 'confirm' &&
-            (t.name === event.name || `invoke:${t.name}` === event.name)
-          );
-          if (existingConfirmTask) {
-            existingConfirmTask.status = 'executing';
-            existingConfirmTask.params = event.params as Record<string, unknown> | undefined;
-          } else {
-            activeTasks.push({
-              id: event.name + Date.now(),
-              name: event.name,
-              status: 'executing',
+          // --- 新事件：工具开始 ---
+          case 'tool_execution_start': {
+            const shortName = event.toolName.split(':').pop() || event.toolName;
+            lastToolStatus = { name: shortName, status: 'pending' };
+
+            const existingConfirmTask = activeTasks.find(t =>
+              t.status === 'confirm' &&
+              (t.name === event.toolName || `invoke:${t.name}` === event.toolName)
+            );
+            if (existingConfirmTask) {
+              existingConfirmTask.status = 'executing';
+              existingConfirmTask.params = event.args as Record<string, unknown> | undefined;
+            } else {
+              activeTasks.push({
+                id: event.toolCallId,
+                name: event.toolName,
+                status: 'executing',
+                params: event.args as Record<string, unknown> | undefined,
+                explanation: currentTurnResponse.trim()
+              });
+            }
+            currentTurnResponse = '';
+            currentStatus = `执行工具: ${shortName}`;
+            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
+            break;
+          }
+
+          // --- 新事件：工具结束 ---
+          case 'tool_execution_end': {
+            const shortName = activeTasks.find(t => t.id === event.toolCallId)?.name.split(':').pop() || '';
+            if (shortName === lastToolStatus.name) {
+              lastToolStatus.status = event.isError ? 'error' : 'success';
+            }
+
+            const task = activeTasks.find(t => t.id === event.toolCallId);
+            if (task) {
+              task.status = event.isError ? 'error' : 'success';
+              task.result = event.result;
+            }
+            currentStatus = '';
+            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
+            break;
+          }
+
+          // --- 旧事件：技能调用（向后兼容） ---
+          case 'skill_call': {
+            const shortName = event.name.split(':').pop() || event.name;
+            lastToolStatus = { name: shortName, status: 'pending' };
+
+            const existingConfirmTask = activeTasks.find(t =>
+              t.status === 'confirm' &&
+              (t.name === event.name || `invoke:${t.name}` === event.name)
+            );
+            if (existingConfirmTask) {
+              existingConfirmTask.status = 'executing';
+              existingConfirmTask.params = event.params as Record<string, unknown> | undefined;
+            } else {
+              activeTasks.push({
+                id: event.name + Date.now(),
+                name: event.name,
+                status: 'executing',
+                params: event.params as Record<string, unknown> | undefined,
+                explanation: currentTurnResponse.trim()
+              });
+            }
+            currentTurnResponse = '';
+            currentStatus = `执行工具: ${shortName}`;
+            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
+            break;
+          }
+
+          case 'skill_success': {
+            const shortName = event.name.split(':').pop() || event.name;
+            if (shortName === lastToolStatus.name) {
+              lastToolStatus.status = 'success';
+            }
+
+            const task = activeTasks.find(t =>
+              (t.name === event.name || `invoke:${t.name}` === event.name) &&
+              t.status === 'executing'
+            );
+            if (task) {
+              task.status = 'success';
+              task.result = event.result;
+            }
+            currentStatus = '';
+            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
+            break;
+          }
+
+          case 'skill_error': {
+            const shortName = event.name.split(':').pop() || event.name;
+            if (shortName === lastToolStatus.name) {
+              lastToolStatus.status = 'error';
+            }
+
+            const task = activeTasks.find(t =>
+              (t.name === event.name || `invoke:${t.name}` === event.name) &&
+              (t.status === 'executing' || t.status === 'confirm')
+            );
+            if (task) {
+              task.status = 'error';
+              task.result = event.error;
+            }
+            currentStatus = '';
+            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
+            break;
+          }
+
+          // --- 确认请求 ---
+          case 'confirm_request': {
+            const shortName = event.skillName.split(':').pop() || event.skillName;
+            lastToolStatus = { name: shortName, status: 'pending' };
+
+            const task: ActiveTask = {
+              id: event.skillName + Date.now(),
+              name: event.skillName,
+              status: 'confirm',
               params: event.params as Record<string, unknown> | undefined,
               explanation: currentTurnResponse.trim()
-            });
-          }
-          currentTurnResponse = '';
-          currentStatus = `执行工具: ${shortName}`;
-          this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-        } else if (event.type === 'skill_success') {
-          const shortName = event.name.split(':').pop() || event.name;
-          if (shortName === lastToolStatus.name) {
-            lastToolStatus.status = 'success';
-          }
+            };
+            currentTurnResponse = '';
+            activeTasks.push(task);
 
-          const task = activeTasks.find(t =>
-            (t.name === event.name || `invoke:${t.name}` === event.name) &&
-            t.status === 'executing'
-          );
-          if (task) {
-            task.status = 'success';
-            task.result = event.result;
-          }
-          currentStatus = '';
-          this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-        } else if (event.type === 'skill_error') {
-          const shortName = event.name.split(':').pop() || event.name;
-          if (shortName === lastToolStatus.name) {
-            lastToolStatus.status = 'error';
+            currentStatus = `等待授权: ${shortName}`;
+            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
+
+            current = await stream.next();
+            continue;
           }
 
-          const task = activeTasks.find(t =>
-            (t.name === event.name || `invoke:${t.name}` === event.name) &&
-            (t.status === 'executing' || t.status === 'confirm')
-          );
-          if (task) {
-            task.status = 'error';
-            task.result = event.error;
-          }
-          currentStatus = '';
-          this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-        } else if (event.type === 'confirm_request') {
-          const shortName = event.skillName.split(':').pop() || event.skillName;
-          lastToolStatus = { name: shortName, status: 'pending' };
-
-          const task: ActiveTask = {
-            id: event.skillName + Date.now(),
-            name: event.skillName,
-            status: 'confirm',
-            params: event.params as Record<string, unknown> | undefined,
-            explanation: currentTurnResponse.trim()
-          };
-          currentTurnResponse = '';
-          activeTasks.push(task);
-
-          currentStatus = `等待授权: ${shortName}`;
-          this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-
-          current = await stream.next();
-          continue;
+          // --- 错误 ---
+          case 'error':
+            break;
         }
 
         current = await stream.next();

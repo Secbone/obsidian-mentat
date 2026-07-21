@@ -14,6 +14,8 @@ export const metadata = {
   version: '1.0.0',
   tags: ['batch', 'bulk', 'update'],
   requiresConfirmation: true,
+  executionCategory: 'write',
+  permissions: ['read', 'write', 'delete'],
   performance: 'slow',
   category: 'file-operations'
 };

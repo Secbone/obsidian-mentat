@@ -16,6 +16,9 @@ export const metadata = {
   version: '1.0.0',
   tags: ['terminal', 'execution', 'automation'],
   performance: 'medium',
+  requiresConfirmation: true,
+  executionCategory: 'external',
+  permissions: ['external'],
   category: 'system-operations'
 };
 

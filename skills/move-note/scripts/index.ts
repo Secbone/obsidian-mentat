@@ -8,6 +8,8 @@ export const metadata = {
   version: '1.0.0',
   tags: ['move', 'rename', 'delete', 'trash', 'organize'],
   requiresConfirmation: true,
+  executionCategory: 'mutate',
+  permissions: ['read', 'write'],
   performance: 'fast',
   category: 'file-operations'
 };

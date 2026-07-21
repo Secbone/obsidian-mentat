@@ -14,6 +14,8 @@ export const metadata = {
   version: '1.0.0',
   tags: ['interaction', 'guidance', 'clarification'],
   performance: 'fast',
+  executionCategory: 'read',
+  permissions: ['read'],
   category: 'user-interaction'
 };
 

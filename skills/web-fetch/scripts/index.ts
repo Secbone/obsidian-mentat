@@ -7,7 +7,9 @@ export const metadata = {
   name: 'web_fetch',
   description: 'Fetch content from web URLs using multiple strategies: Jina AI Reader for clean content extraction, Browserless for JavaScript-rendered pages, or direct HTTP requests.',
   version: '3.0.0',
-  tags: ['web', 'http', 'fetch', 'network', 'scraping']
+  tags: ['web', 'http', 'fetch', 'network', 'scraping'],
+  executionCategory: 'external',
+  permissions: ['read']
 };
 
 const InputSchema = z.object({
