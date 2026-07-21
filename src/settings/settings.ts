@@ -59,6 +59,15 @@ export interface MentatSettings {
     cacheTTL?: number; // Cache time-to-live in milliseconds
   };
 
+  // Automatic Context Compaction
+  compaction?: {
+    enabled: boolean;           // 默认 true
+    threshold: number;          // 触发比例 (0-1, 默认 0.75)
+    keepRecentMessages: number; // 保留最新消息数 (默认 6)
+    maxContextTokens: number;   // 上下文 token 上限 (默认 32000)
+    checkInterval: number;      // 每 N 轮检查一次 (默认 3)
+  };
+
   // Performance Configuration
   indexingBatchSize: number;  // Default 50
   cacheExpiryDays: number;     // Default 7
@@ -207,6 +216,13 @@ export const DEFAULT_SETTINGS: MentatSettings = {
   userConfigFolder: 'Mentat/Config',
   draftReviewModeEnabled: true,
   sendWithCmdEnter: false,
+  compaction: {
+    enabled: true,
+    threshold: 0.75,
+    keepRecentMessages: 6,
+    maxContextTokens: 32000,
+    checkInterval: 3
+  },
   chatTheme: 'terminal',
   terminalPreset: 'green'
 };

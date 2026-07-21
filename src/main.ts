@@ -7,6 +7,7 @@ import { IndexManager } from './indexing/index-manager';
 import { ChatView, CHAT_VIEW_TYPE } from './ui/chat-view';
 import { ChatOrchestrator } from './chat/chat-orchestrator';
 import { AgentManager } from './agents/agent-manager';
+import { ExtensionManager } from './extensions';
 import { TaskType } from './types';
 import { ObsidianAdapter } from './utils/obsidian-adapter';
 import { DiagnosticsExporter } from './diagnostics/diagnostics-exporter';
@@ -19,6 +20,7 @@ export default class MentatPlugin extends Plugin {
   chatOrchestrator: ChatOrchestrator;
   agentManager: AgentManager;
   platform: ObsidianAdapter;
+  extensionManager: ExtensionManager;
 
   async onload() {
     console.log('Loading Mentat plugin');
@@ -49,6 +51,15 @@ export default class MentatPlugin extends Plugin {
 
     // Get AgentManager reference (for advanced usage)
     this.agentManager = this.chatOrchestrator.getAgentManager();
+
+    // Initialize extension system
+    this.extensionManager = new ExtensionManager(
+      this.app,
+      this.chatOrchestrator.getSkillRegistry(),
+      this.chatOrchestrator.getSkillExecutor(),
+      this.settings
+    );
+    this.extensionManager.loadAll();
 
     // Initialize integrations
     this.openCodeIntegration = new OpenCodeIntegration(this);

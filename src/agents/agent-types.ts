@@ -70,6 +70,10 @@ export type AgentEvent =
   | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: unknown }
   | { type: 'tool_execution_end'; toolCallId: string; result: unknown; isError: boolean }
 
+  // 上下文压缩
+  | { type: 'compaction_start' }
+  | { type: 'compaction_end'; summaryLength: number }
+
   // 【旧事件 — 向后兼容】
   | { type: 'chunk'; text: string }
   | { type: 'skill_call'; name: string; params: unknown }

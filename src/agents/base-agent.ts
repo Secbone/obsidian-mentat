@@ -7,6 +7,7 @@ import { SkillExecutor } from '../skills/core/skill-executor';
 import { SkillInvocationContext } from '../skills/strategies/skill-invocation-strategy';
 import { SkillCall, isExecutableSkill, SkillResult, SkillNamespace } from '../skills/skill-types';
 import { AgentConfig, AgentContext, AgentResponse, AgentEvent, DiagnosticsLogger } from './agent-types';
+import { Compactor } from './compactor';
 
 interface ToolCallResult {
   toolMessages: ChatMessage[];
@@ -46,6 +47,7 @@ export interface AgentDependencies {
   skillExecutor: SkillExecutor;
   skillInvocationContext: SkillInvocationContext;
   diagnosticsLogger?: DiagnosticsLogger;
+  compactor?: Compactor;
 }
 
 /**
@@ -73,6 +75,7 @@ export class BaseAgent {
   protected skillExecutor: SkillExecutor;
   protected skillInvocationContext: SkillInvocationContext;
   protected diagnosticsLogger?: DiagnosticsLogger;
+  protected compactor: Compactor;
 
   constructor(
     config: AgentConfig,
@@ -85,6 +88,7 @@ export class BaseAgent {
     this.skillExecutor = dependencies.skillExecutor;
     this.skillInvocationContext = dependencies.skillInvocationContext;
     this.diagnosticsLogger = dependencies.diagnosticsLogger;
+    this.compactor = dependencies.compactor ?? new Compactor(provider);
   }
 
   /**
@@ -215,6 +219,31 @@ export class BaseAgent {
             content: `[HUMAN DYNAMIC INTERVENTION]: ${steerText}`,
             timestamp: Date.now()
           });
+        }
+      }
+
+      // 自动上下文压缩检查
+      if (this.compactor && state.turnCount > 1 && state.turnCount % 3 === 0) {
+        const totalTokens = Compactor.estimateTokens(state.messages);
+        const budget = (context.metadata as Record<string, unknown>)?.maxContextTokens as number ?? 32000;
+        if (totalTokens > budget * 0.75) {
+          yield { type: 'status', message: `正在压缩上下文 (${Math.round(totalTokens / 1000)}k tokens)...` };
+          yield { type: 'compaction_start' };
+
+          const summary = await this.compactor.compact(state.messages, { keepRecent: 6 });
+          if (summary) {
+            const keepRecent = 6;
+            const recentMessages = state.messages.slice(-keepRecent);
+            state.messages = [
+              {
+                role: 'system',
+                content: `--- Context Summary ---\n${summary}\n\n--- Continuing Conversation ---`,
+                timestamp: Date.now()
+              } as ChatMessage,
+              ...recentMessages
+            ];
+            yield { type: 'compaction_end', summaryLength: summary.length };
+          }
         }
       }
 

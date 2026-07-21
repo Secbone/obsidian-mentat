@@ -552,6 +552,15 @@ export class ChatView extends ItemView {
             break;
           }
 
+          // --- 上下文压缩 ---
+          case 'compaction_start':
+            this.theme.renderInfoBanner('正在压缩上下文...');
+            this.theme.scrollToBottom();
+            break;
+
+          case 'compaction_end':
+            break;
+
           // --- 确认请求 ---
           case 'confirm_request': {
             const shortName = event.skillName.split(':').pop() || event.skillName;
