@@ -173,17 +173,15 @@ export class TerminalTheme implements ChatTheme {
               const displayName = resolveToolDisplayName(tc.name, tc.arguments);
               const shortName = getToolShortName(displayName);
 
-              const item = timeline.createDiv('term-timeline-item');
-              const header = item.createDiv('term-tool-header');
+              const details = timeline.createEl('details', { cls: 'term-timeline-item term-tool-details' });
+              const summary = details.createEl('summary', { cls: 'term-tool-header' });
 
-              const iconSpan = header.createSpan('term-tool-icon');
+              const iconSpan = summary.createSpan('term-tool-icon');
               iconSpan.setText(isSuccess ? '✔' : (responseMsg ? '✗' : getSpinnerChar()));
               iconSpan.addClass(isSuccess ? 'term-icon-success' : (responseMsg ? 'term-icon-error' : 'term-icon-pending'));
 
-              header.createSpan('term-tool-name').setText(shortName);
+              summary.createSpan('term-tool-name').setText(shortName);
 
-              const details = item.createEl('details', { cls: 'term-tool-details' });
-              details.createEl('summary', { cls: 'term-tool-summary', text: '详情' });
               const detailsBody = details.createDiv('term-tool-body');
 
               if (tc.arguments) {
@@ -281,10 +279,10 @@ export class TerminalTheme implements ChatTheme {
           expLine.appendChild(sanitizeHTMLToDom(this.messageRenderer.render(task.explanation)));
         }
 
-        const item = consoleContainer.createDiv('term-timeline-item');
-        const header = item.createDiv('term-tool-header');
+        const details = consoleContainer.createEl('details', { cls: 'term-timeline-item term-tool-details' });
+        const summary = details.createEl('summary', { cls: 'term-tool-header' });
 
-        const iconSpan = header.createSpan('term-tool-icon');
+        const iconSpan = summary.createSpan('term-tool-icon');
         let icon = getSpinnerChar();
         let iconClass = 'term-icon-pending';
         if (task.status === 'executing') { icon = getSpinnerChar(); iconClass = 'term-icon-executing'; }
@@ -295,10 +293,20 @@ export class TerminalTheme implements ChatTheme {
         iconSpan.addClass(iconClass);
 
         const shortName = task.name.split(':').pop() || task.name;
-        header.createSpan('term-tool-name').setText(shortName);
+        summary.createSpan('term-tool-name').setText(shortName);
+
+        if (task.params || task.result) {
+          const detailsBody = details.createDiv('term-tool-body');
+          if (task.params) {
+            this.renderTruncatedText(detailsBody, 'Parameters', task.params, `${task.id}-params`);
+          }
+          if (task.result) {
+            this.renderTruncatedText(detailsBody, 'Response', task.result, `${task.id}-result`);
+          }
+        }
 
         if (task.status === 'confirm') {
-          const btnContainer = item.createDiv('term-confirm-buttons');
+          const btnContainer = details.createDiv('term-confirm-buttons');
           const approveBtn = btnContainer.createEl('button', { cls: 'term-confirm-approve mod-cta', text: '允许 [Y]' });
           const rejectBtn = btnContainer.createEl('button', { cls: 'term-confirm-reject', text: '拒绝 [N]' });
           approveBtn.addEventListener('click', () => {
@@ -307,18 +315,6 @@ export class TerminalTheme implements ChatTheme {
           rejectBtn.addEventListener('click', () => {
             if (this.callbacks) this.callbacks.onConfirmReject(task.id);
           });
-        }
-
-        if (task.params || task.result) {
-          const details = item.createEl('details', { cls: 'term-tool-details' });
-          details.createEl('summary', { cls: 'term-tool-summary', text: '详情' });
-          const detailsBody = details.createDiv('term-tool-body');
-          if (task.params) {
-            this.renderTruncatedText(detailsBody, 'Parameters', task.params, `${task.id}-params`);
-          }
-          if (task.result) {
-            this.renderTruncatedText(detailsBody, 'Response', task.result, `${task.id}-result`);
-          }
         }
       }
 
@@ -609,8 +605,8 @@ export class TerminalTheme implements ChatTheme {
 
   private addCopyButtonToMessage(messageEl: HTMLElement): void {
     const btn = messageEl.createEl('button', { cls: 'term-copy-button' });
-    btn.setText('📋');
     btn.setAttribute('aria-label', '复制消息');
+    setIcon(btn, 'copy');
   }
 
   private setupCodeCopyButtons(messageEl: HTMLElement): void {

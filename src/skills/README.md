@@ -374,7 +374,7 @@ npm run build
 
 Enable debug logging:
 ```typescript
-// In rag-orchestrator.ts
+// In chat-orchestrator.ts
 console.debug('Loaded skills:', this.skillRegistry.list());
 console.debug('Executing skill:', skillName, input);
 ```
@@ -418,6 +418,35 @@ console.debug('Executing skill:', skillName, input);
 - Single source of truth for metadata
 - Easier to update documentation
 - AI can read skill definitions directly
+
+### 5. executionCategory (Parallelism Control)
+
+Each skill declares an `executionCategory` in its metadata that controls how multiple tools are executed in a single turn:
+
+| Category | Parallelism | Examples |
+|----------|-------------|----------|
+| `read` | Fully parallel | `read_note`, `query_notes`, `web_search` |
+| `write` | Serial within group | `edit_note`, `write_note`, `batch_operation` |
+| `mutate` | Serial within group | `move_note` (vault structure changes) |
+| `external` | Serial within group | `run_command`, `web_fetch` |
+
+Read operations execute concurrently (safe). Write/mutate/external operations execute serially (prevent race conditions).
+
+### 6. permissions and SkillSecurity
+
+Skills declare required permissions via `metadata.permissions`. The `SkillExecutor` checks these against user configuration before execution:
+
+```typescript
+enum SkillPermission {
+  READ = 'read',
+  WRITE = 'write',
+  CREATE = 'create',
+  DELETE = 'delete',
+  EXTERNAL = 'external'
+}
+```
+
+User settings can restrict via `skillConfigurations[fullName].allowedPermissions`. Currently permissions are advisory; full enforcement is planned.
 
 ## Security Considerations
 

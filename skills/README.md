@@ -28,11 +28,17 @@ Executable skills contain both metadata/documentation (SKILL.md) and implementat
 - **scripts/index.ts**: Contains schema and execute function
 
 **Executable skills in this directory:**
-- `query-notes`: Search and filter documents with semantic search
-- `read-note`: Read document content with metadata
-- `edit-note`: Create or update documents with intelligent operation detection
-- `batch-operation`: Batch operations on multiple documents
-- `list-notes`: Get vault structure overview
+- `query-notes`: Search and filter documents with semantic search, tags, folders, glob, dates, frontmatter
+- `read-note`: Read document content with flexible range options (lines, sections, characters)
+- `edit-note`: Replace text in existing files using SEARCH/REPLACE blocks
+- `write-note`: Create new files or update existing ones (append, prepend, section operations)
+- `move-note`: Move/rename files with automatic internal link fixing
+- `batch-operation`: Bulk operations (add/remove tags, frontmatter update, append content)
+- `list-notes`: Get vault structure overview (folders, tag statistics, recent files)
+- `web-fetch`: Fetch web page content with multiple strategies (Jina, Browserless, direct)
+- `web-search`: Search the web via Brave Search API (with DuckDuckGo fallback)
+- `run-command`: Execute shell commands within vault root (with blacklist security)
+- `ask-user`: Display a modal to ask the user a question with optional predefined choices
 
 ### Documentation-Only Skills
 
@@ -53,13 +59,19 @@ Each skill must have a `SKILL.md` file with YAML frontmatter and Markdown docume
 ---
 name: skill_name
 description: Brief description of what the skill does
-metadata:
-  version: "1.0.0"
-  author: mentat
-  tags: [tag1, tag2]
-  executable: true  # false for documentation-only skills
-  implementation: scripts/index.ts
-  requiresConfirmation: true  # optional, for destructive operations
+  metadata:
+    version: "1.0.0"
+    author: mentat
+    tags: [tag1, tag2]
+    executable: true  # false for documentation-only skills
+    implementation: scripts/index.ts
+    requiresConfirmation: true  # optional, for destructive operations
+    executionCategory: 'read' | 'write' | 'mutate' | 'external'
+    # read     → pure read, safe to run in parallel
+    # write    → file modification, serial within group
+    # mutate   → vault structure changes (move/delete)
+    # external → network/command execution
+    permissions: ['read']  # declared required permissions
 ---
 
 # Skill Name
@@ -160,7 +172,8 @@ interface SkillContext {
   metadataCache: MetadataCache;    // File metadata and cache
   workspace: Workspace;            // Workspace API
   indexManager: IndexManager;      // Semantic search index
-  plugin: MentatPlugin;     // Main plugin instance
+  plugin: MentatPlugin;            // Main plugin instance
+  readTracker?: ReadTracker;       // Document read tracking
 }
 ```
 
@@ -180,7 +193,7 @@ interface SkillContext {
 Skills are loaded by `SkillLoader` and registered in `SkillRegistry`:
 
 ```typescript
-// In RAGOrchestrator
+// In ChatOrchestrator
 const skillLoader = new SkillLoader(app, 'skills');
 const allSkills = await skillLoader.loadAllSkills(context);
 

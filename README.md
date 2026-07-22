@@ -1,172 +1,94 @@
 # Mentat - Obsidian Plugin
 
-AI-powered personal assistant for Obsidian that helps organize notes, create knowledge links, and build your personal knowledge base.
+Your local agentic cognitive partner for Obsidian. Mentat is an AI agent that lives in your vault — it reads, writes, searches, researches, and summarizes your notes through conversation.
 
-## Features
+## What you can do with it
 
-- **Auto Classification**: Automatically classify and tag your notes with AI
-- **Smart Link Suggestions**: Get intelligent suggestions for linking related notes
-- **AI Chat**: Chat with your knowledge base using RAG (Retrieval-Augmented Generation)
-- **Knowledge Graph**: Visualize your notes in an interactive 3D graph
-- **Review System**: Spaced repetition algorithm for effective knowledge review
+- **💬 Chat with your vault**: "Find my notes about RAG from last week and summarize them"
+- **🔍 Deep research**: Create structured research plans, search the web, fetch pages, and save findings
+- **✍️ Write and edit notes**: "Write a technical summary of this paper to Research/"
+- **🛠️ Automate tasks**: Bulk operations, frontmatter updates, file moves with link fixing
+- **🎨 Two UI themes**: Classic bubble chat or terminal-style timeline — switch anytime
+- **🧩 Extensible**: Extension system, skill framework, MCP support
 
-## AI Provider Support
+## AI Providers
 
-Mentat supports multiple AI providers:
+| Provider | Chat + Tools | Embedding | Local |
+|----------|-------------|-----------|-------|
+| OpenAI (and compatible) | ✅ | ✅ | ❌ |
+| Anthropic Claude | ✅ | ❌ | ❌ |
+| Ollama | ❌ (no tool support) | ✅ | ✅ |
 
-- **OpenAI-compatible APIs**: OpenAI, DeepSeek, and any OpenAI-compatible endpoint
-- **Anthropic**: Native support for Claude models
-- **Ollama**: Local AI models for privacy and speed
+Set up in Settings → Mentat → Add AI Provider.
 
-## Installation
+## Quick start
 
-### For Development
+```bash
+# Install
+cd /path/to/vault/.obsidian/plugins
+git clone https://github.com/Secbone/obsidian-mentat mentat
+cd mentat && npm install && npm run build
 
-1. Clone this repository into your Obsidian vault's plugins folder:
-   ```bash
-   cd /path/to/your/vault/.obsidian/plugins
-   git clone https://github.com/Secbone/obsidian-mentat mentat
-   cd mentat
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Build the plugin:
-   ```bash
-   npm run build
-   ```
-
-4. Reload Obsidian and enable "Mentat" in Settings → Community plugins
-
-### For Users
-
-1. Open Obsidian Settings
-2. Go to Community plugins and browse
-3. Search for "Mentat"
-4. Install and enable the plugin
-
-## Configuration
-
-### Setting up AI Providers
-
-1. Go to Settings → Mentat
-2. Click "Add AI Provider"
-3. Configure your provider:
-   - **Name**: Give it a descriptive name
-   - **Type**: Select OpenAI, Anthropic, or Ollama
-   - **API Key**: Your API key (if required)
-   - **Base URL**: Custom endpoint URL (for OpenAI-compatible APIs)
-   - **Model**: The model to use
-
-### Task Routing
-
-You can assign different AI providers to specific tasks:
-
-- **Embedding**: For generating note embeddings (usually Ollama)
-- **Classification**: For classifying and tagging notes
-- **Linking**: For suggesting links between notes
-- **Chat**: For conversational queries
-- **Review**: For generating review questions
-
-### Optional Integrations
-
-- **OpenCode**: Enable advanced automation features
-- **Obsidian Skills**: Register and use Skills commands
-
-## Usage
-
-### Commands
-
-- `/classify-note`: Classify the current note
-- `/suggest-links`: Get link suggestions for the current note
-- `/open-chat`: Open AI chat interface
-- `/open-graph`: View knowledge graph
-- `/start-review`: Begin a review session
-
-### Skills Integration
-
-When Skills integration is enabled, you can use:
-- `/pa-classify`: Classify note (callable by other skills)
-- `/pa-link`: Suggest links (callable by other skills)
-- `/pa-chat`: Chat interface (callable by other skills)
+# Enable in Obsidian: Settings → Community plugins → Mentat
+# Configure: Settings → Mentat → Add AI Provider
+# Open chat: Ctrl/Cmd+P → "Open AI Chat"
+```
 
 ## Development
 
-### Project Structure
+```bash
+npm run build        # Type check + bundle → dist/
+npm run deploy:dev   # Copy to ~/Documents/obsidian/.obsidian/plugins/
+npm run lint         # ESLint
+npm test             # Vitest
+```
+
+### Project structure
 
 ```
 src/
-├── main.ts                 # Plugin entry point
-├── settings/               # Settings management
-├── ai/                     # AI providers and routing
-├── features/               # Core features
-│   ├── classification/
-│   ├── linking/
-│   ├── chat/
-│   ├── graph/
-│   └── review/
-├── indexing/               # Vector indexing system
-├── ui/                     # UI components
-└── types/                  # TypeScript definitions
+├── agents/          # Agent runtime (BaseAgent, Compactor, events)
+├── chat/            # Chat orchestration (session, query, subagents)
+├── context/         # Message windowing, token estimation
+├── extensions/      # Extension system (EventBus, ExtensionManager)
+├── providers/       # AI providers (OpenAI, Anthropic, Ollama)
+├── prompts/         # System prompts, skill prompts, vault context
+├── settings/        # Plugin settings & settings UI
+├── skills/          # Skill framework (registry, executor, MCP, strategies)
+├── ui/              # Themed UI (ChatView, bubble theme, terminal theme)
+└── types/           # Shared type definitions
 ```
 
-### Building
+## In-depth docs
 
-```bash
-npm run dev    # Development mode with watch
-npm run build  # Production build
-npm run lint   # Run ESLint
-```
+| Doc | What it covers |
+|-----|----------------|
+| [`src/ui/themes/README.md`](src/ui/themes/README.md) | Theme system architecture, creating new themes |
+| [`src/ui/README.md`](src/ui/README.md) | UI system overview, CSS conventions, icon sizing |
+| [`src/agents/README.md`](src/agents/README.md) | Agent system, events, streaming, tool execution |
+| [`src/skills/README.md`](src/skills/README.md) | Skill framework internals, MCP integration |
+| [`skills/README.md`](skills/README.md) | Adding and documenting skills |
+| [`prompts/README.md`](prompts/README.md) | Prompt system, template variables |
+| [`docs/agent-system-improvements.md`](docs/agent-system-improvements.md) | Agent improvement roadmap |
+| [`docs/theme-system-refactor.md`](docs/theme-system-refactor.md) | Theme system refactoring history |
 
-### Testing
+## Roadmap
 
-```bash
-npm test
-```
+- [x] Phase 1: Agent system — conversation, tool calling, multi-turn reasoning
+- [x] Phase 2: Skill framework — 12 built-in skills, progressive/native/auto modes, MCP
+- [x] Phase 3: Themed UI — BubbleTheme, TerminalTheme, smart scroll, terminal presets
+- [x] Phase 4: Extension system v1 + automatic context compaction
+- [ ] Phase 5: Tree-structured sessions with branching and comparison
+- [ ] Phase 6: Extension system v2 — dynamic loading, permission sandbox
+- [ ] Phase 7: i18n, plugin marketplace, community extension registry
 
-## Performance
+## Built with
 
-- Optimized for vaults with 100-1000 notes
-- Batch processing to avoid UI blocking
-- Incremental indexing for fast updates
-- LRU cache for embeddings
-
-## Privacy
-
-- Use Ollama for local, private AI processing
-- All data stays in your vault
-- No data sent to cloud unless you configure cloud AI providers
+- [Obsidian](https://obsidian.md/) plugin API
+- [Anthropic Claude](https://anthropic.com/) · [OpenAI](https://openai.com/) · [Ollama](https://ollama.ai/)
+- [PI Agent](https://pi.dev) design influence (minimal core, extensibility)
+- [OpenCode](https://opencode.ai) design influence (event-driven agent, permissions)
 
 ## License
 
 MIT
-
-## Support
-
-- GitHub Issues: [Report bugs or request features](https://github.com/Secbone/obsidian-mentat/issues)
-- Documentation: [Full documentation](https://github.com/Secbone/obsidian-mentat/wiki)
-
-## Roadmap
-
-- [ ] Phase 1: Project setup ✓
-- [ ] Phase 2: AI providers integration
-- [ ] Phase 3: Indexing system
-- [ ] Phase 4: Auto classification
-- [ ] Phase 5: Link suggestions
-- [ ] Phase 6: Chat interface
-- [ ] Phase 7: Knowledge graph
-- [ ] Phase 8: Review system
-- [ ] Phase 9: UI/UX polish
-- [ ] Phase 10: Testing and release
-
-## Credits
-
-Built with:
-- [Obsidian](https://obsidian.md/)
-- [Anthropic Claude](https://anthropic.com/)
-- [OpenAI](https://openai.com/)
-- [Ollama](https://ollama.ai/)
-- [3D Force Graph](https://github.com/vasturiano/3d-force-graph)
