@@ -8,6 +8,7 @@ import { SkillInvocationContext } from '../skills/strategies/skill-invocation-st
 import { SkillCall, isExecutableSkill, SkillResult, SkillNamespace } from '../skills/skill-types';
 import { AgentConfig, AgentContext, AgentResponse, AgentEvent, DiagnosticsLogger } from './agent-types';
 import { Compactor } from './compactor';
+import { EventBus } from '../extensions/event-bus';
 
 interface ToolCallResult {
   toolMessages: ChatMessage[];
@@ -48,6 +49,7 @@ export interface AgentDependencies {
   skillInvocationContext: SkillInvocationContext;
   diagnosticsLogger?: DiagnosticsLogger;
   compactor?: Compactor;
+  eventBus?: EventBus;
 }
 
 /**
@@ -76,6 +78,7 @@ export class BaseAgent {
   protected skillInvocationContext: SkillInvocationContext;
   protected diagnosticsLogger?: DiagnosticsLogger;
   protected compactor: Compactor;
+  protected eventBus?: EventBus;
 
   constructor(
     config: AgentConfig,
@@ -89,17 +92,30 @@ export class BaseAgent {
     this.skillInvocationContext = dependencies.skillInvocationContext;
     this.diagnosticsLogger = dependencies.diagnosticsLogger;
     this.compactor = dependencies.compactor ?? new Compactor(provider);
+    this.eventBus = dependencies.eventBus;
   }
 
   /**
-   * Main entry point for RAGP event-driven execution.
-   * Returns an AsyncGenerator yielding AgentEvents and returning AgentResponse.
+   * Main entry point for RAGP execution.
+   * Returns Promise<AgentResponse>. Emits events to EventBus for UI and extensions.
    */
+  async execute(
+    prompt: string,
+    context: AgentContext
+  ): Promise<AgentResponse> {
+    const gen = this.executeGenerator(prompt, context);
+    let result = await gen.next();
+    while (!result.done) {
+      this.eventBus?.emit(result.value as AgentEvent);
+      result = await gen.next();
+    }
+    return result.value as AgentResponse;
+  }
+
   /**
-   * Main entry point for RAGP event-driven execution.
-   * Returns an AsyncGenerator yielding AgentEvents and returning AgentResponse.
+   * Internal generator — yields AgentEvent, returns AgentResponse.
    */
-  async *execute(
+  private async *executeGenerator(
     prompt: string,
     context: AgentContext
   ): AsyncGenerator<AgentEvent, AgentResponse, unknown> {
@@ -781,59 +797,6 @@ export class BaseAgent {
       };
     }
 
-    let executeApproved = true;
-    const skill = this.skillRegistry.get(targetSkillName);
-    const requiresConfirmation = skill && isExecutableSkill(skill) && skill.metadata?.requiresConfirmation;
-
-    if (requiresConfirmation && !isSpec) {
-      const displayName = skill.description || targetSkillName;
-      yield { type: 'status', message: `等待授权: ${targetSkillName}` };
-
-      // Yield confirm_request event as a pure data notice
-      yield {
-        type: 'confirm_request',
-        skillName: targetSkillName,
-        params: targetParams,
-        message: `智能体申请执行操作: 【${displayName}】。是否批准？`
-      };
-
-      if (context.confirmHandler) {
-        if (context.abortSignal?.aborted) {
-          throw new DOMException('The user aborted a request.', 'AbortError');
-        }
-        const userFeedback = await context.confirmHandler(
-          targetSkillName,
-          targetParams,
-          `智能体申请执行操作: 【${displayName}】。是否批准？`
-        );
-        executeApproved = userFeedback?.approved ?? true;
-        if (userFeedback?.modifiedParams) {
-          targetParams = userFeedback.modifiedParams;
-          if (toolName === 'invoke') {
-            argsObj.params = userFeedback.modifiedParams;
-          } else {
-            Object.assign(argsObj, userFeedback.modifiedParams as Record<string, unknown>);
-          }
-        }
-      } else {
-        console.warn(`[BaseAgent] confirmHandler is not defined in AgentContext. Automatically approving.`);
-      }
-    }
-
-    if (!executeApproved) {
-      yield { type: 'status', message: `用户已拒绝: ${targetSkillName}` };
-      return {
-        toolMessages: [{
-          role: 'tool',
-          content: 'Error: Execution cancelled by user.',
-          timestamp: Date.now(),
-          tool_call_id: toolCall.id,
-          name: toolName
-        }],
-        skillCalls: []
-      };
-    }
-
     if (isSpec) {
       yield { type: 'skill_call', name: `spec:${targetSkillName}`, params: argsObj };
       try {
@@ -889,7 +852,7 @@ export class BaseAgent {
         runResult = await this.skillExecutor.execute(namespace, name, targetParams as Record<string, unknown>, { abortSignal: context.abortSignal });
       } else {
         const execToolCall = { ...toolCall, arguments: targetParams as Record<string, unknown> };
-        runResult = await this.skillExecutor.executeFromToolCall(execToolCall, { skipConfirmation: true, abortSignal: context.abortSignal });
+        runResult = await this.skillExecutor.executeFromToolCall(execToolCall, { abortSignal: context.abortSignal });
       }
 
       if (runResult.success) {

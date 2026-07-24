@@ -2,9 +2,8 @@ import { ItemView, WorkspaceLeaf, setIcon, TFile, Notice } from 'obsidian';
 import { DiagnosticsExporter } from '../../diagnostics/diagnostics-exporter';
 import { ChatManager } from '../../chat/chat-manager';
 import { MessageRenderer } from '../message-renderer';
-import { ChatOrchestrator, ChatQueryResult } from '../../chat/chat-orchestrator';
+import { ChatOrchestrator } from '../../chat/chat-orchestrator';
 import { FileSelectorModal } from '../file-selector-modal';
-import { ConfirmationModal } from '../confirmation-modal';
 import { ChatMessage } from '../../types';
 import { AgentEvent, AgentContext } from '../../agents/agent-types';
 import MentatPlugin from '../../main';
@@ -20,6 +19,8 @@ import {
   InputAreaElements,
 } from '../themes/types';
 import { InputHandler, InputHandlerCallbacks } from './input-handler';
+import { ConfirmationModal } from '../confirmation-modal';
+import { EventBus } from '../../extensions/event-bus';
 
 export const CHAT_VIEW_TYPE = 'mentat-chat';
 
@@ -47,6 +48,16 @@ export class ChatView extends ItemView {
   private activeContext: AgentContext | null = null;
 
   private inputHandler: InputHandler | null = null;
+  private eventBus: EventBus;
+  private streamUnsubscribe: (() => void) | null = null;
+  private streamState: {
+    currentTurnResponse: string;
+    finalAnswer: string;
+    hasFinalAnswerTag: boolean;
+    activeTasks: ActiveTask[];
+    currentStatus: string;
+    lastToolStatus: { name: string; status: 'success' | 'error' | 'pending' };
+  } | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: MentatPlugin) {
     super(leaf);
@@ -59,6 +70,7 @@ export class ChatView extends ItemView {
     this.themeRegistry.register('bubble', '经典气泡', '传统聊天气泡式界面，左右分列，工具调用折叠展示', () => new BubbleTheme(this.app, this.messageRenderer));
     this.themeRegistry.register('terminal', '终端式', '终端时间线式界面，等宽工具区 + 比例字体回答区，内嵌确认按钮', () => new TerminalTheme(this.app, this.messageRenderer, this.plugin.settings.terminalPreset || 'green'));
     this.theme = this.themeRegistry.getCurrent();
+    this.eventBus = plugin.extensionManager.getEventBus();
   }
 
   getViewType(): string {
@@ -343,8 +355,16 @@ export class ChatView extends ItemView {
     this.inputHandler.clearInput();
 
     this.theme.renderUserMessage(userMessage);
-
     this.currentStreamingBubble = this.theme.createStreamingBubble();
+
+    this.streamState = {
+      currentTurnResponse: '',
+      finalAnswer: '',
+      hasFinalAnswerTag: false,
+      activeTasks: [],
+      currentStatus: '初始化智能体...',
+      lastToolStatus: { name: '', status: 'pending' },
+    };
 
     this.isStreaming = true;
     this.theme.updateInputState({
@@ -353,309 +373,230 @@ export class ChatView extends ItemView {
       documentCount: this.inputHandler.getContextPillPaths().length,
     });
 
-    try {
-      const contextMessages = await this.chatManager.getContextForLLM({ maxMessages: 50 });
-      const activeTasks: ActiveTask[] = [];
-      let currentStatus = '初始化智能体...';
-      let lastToolStatus: { name: string; status: 'success' | 'error' | 'pending' } = { name: '', status: 'pending' };
+    this.currentAbortController = new AbortController();
+    this.activeContext = {
+      messages: (await this.chatManager.getContextForLLM({ maxMessages: 50 })) as ChatMessage[],
+      sessionId: this.chatManager.getSessionInfo().sessionId || Date.now().toString(),
+      metadata: { maxTurns: this.plugin.settings.maxTurns || 20 },
+      pendingSteerMessages: [],
+      abortSignal: this.currentAbortController.signal,
+    };
 
-      this.currentAbortController = new AbortController();
+    this.streamUnsubscribe = this.eventBus.on('*', (event) => this.handleStreamEvent(event));
 
-      this.activeContext = {
-        messages: contextMessages as ChatMessage[],
-        sessionId: this.chatManager.getSessionInfo().sessionId || Date.now().toString(),
-        metadata: {
-          maxTurns: this.plugin.settings.maxTurns || 20
-        },
-        pendingSteerMessages: [],
-        abortSignal: this.currentAbortController.signal
-      };
+    this.chatOrchestrator.sendMessage(userMessage, {
+      enableSkills: this.plugin.settings.skillsEnabled,
+      maxTurns: this.plugin.settings.maxTurns || 20,
+      context: this.activeContext ?? undefined,
+    });
+  }
 
-      const stream = this.chatOrchestrator.query(
-        userMessage,
-        {
-          enableSkills: this.plugin.settings.skillsEnabled,
-          maxTurns: this.plugin.settings.maxTurns || 20,
-          context: this.activeContext ?? undefined
-        }
-      );
+  private handleStreamEvent(event: AgentEvent): void {
+    const s = this.streamState;
+    if (!s) return;
 
-      let currentTurnResponse = '';
-      let finalAnswer = '';
-      let hasFinalAnswerTag = false;
-      let current = await stream.next();
+    switch (event.type) {
 
-      while (!current.done) {
-        const event = current.value as AgentEvent;
+      case 'chunk': {
+        s.currentTurnResponse += event.text;
 
-        switch (event.type) {
-
-          // --- 生命周期（可忽略，不需要 UI 响应） ---
-          case 'agent_start':
-          case 'agent_end':
-          case 'turn_start':
-          case 'turn_end':
-          case 'message_start':
-          case 'message_update':
-          case 'message_end':
-            break;
-
-          // --- 引导消息 ---
-          case 'steer': {
-            currentTurnResponse = '';
-            const steerEl = this.theme.renderSteerCard(event.message);
-            if (this.currentStreamingBubble) {
-              this.currentStreamingBubble.el.appendChild(steerEl);
-            }
-            this.theme.scrollToBottom();
-            break;
+        if (s.currentTurnResponse.includes('<final_answer>')) {
+          s.hasFinalAnswerTag = true;
+          const parts = s.currentTurnResponse.split('<final_answer>');
+          const explanationPart = parts[0];
+          let answerPart = parts[1] || '';
+          if (answerPart.includes('</final_answer>')) {
+            answerPart = answerPart.split('</final_answer>')[0];
           }
-
-          // --- 状态 ---
-          case 'status':
-            currentStatus = event.message;
-            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse);
-            break;
-
-          // --- 文本流 ---
-          case 'chunk': {
-            currentTurnResponse += event.text;
-
-            if (currentTurnResponse.includes('<final_answer>')) {
-              hasFinalAnswerTag = true;
-              const parts = currentTurnResponse.split('<final_answer>');
-              const explanationPart = parts[0];
-              let answerPart = parts[1] || '';
-
-              if (answerPart.includes('</final_answer>')) {
-                answerPart = answerPart.split('</final_answer>')[0];
-              }
-
-              finalAnswer = answerPart;
-              this.updateStreaming(activeTasks, currentStatus, finalAnswer, explanationPart);
-            } else {
-              if (activeTasks.length === 0) {
-                this.updateStreaming(activeTasks, currentStatus, currentTurnResponse, currentTurnResponse);
-              } else {
-                this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse);
-              }
-            }
-            break;
-          }
-
-          // --- 新事件：工具开始 ---
-          case 'tool_execution_start': {
-            const shortName = event.toolName.split(':').pop() || event.toolName;
-            lastToolStatus = { name: shortName, status: 'pending' };
-
-            const existingConfirmTask = activeTasks.find(t =>
-              t.status === 'confirm' &&
-              (t.name === event.toolName || `invoke:${t.name}` === event.toolName)
-            );
-            if (existingConfirmTask) {
-              existingConfirmTask.status = 'executing';
-              existingConfirmTask.params = event.args as Record<string, unknown> | undefined;
-            } else {
-              activeTasks.push({
-                id: event.toolCallId,
-                name: event.toolName,
-                status: 'executing',
-                params: event.args as Record<string, unknown> | undefined,
-                explanation: currentTurnResponse.trim()
-              });
-            }
-            currentTurnResponse = '';
-            currentStatus = `执行工具: ${shortName}`;
-            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-            break;
-          }
-
-          // --- 新事件：工具结束 ---
-          case 'tool_execution_end': {
-            const shortName = activeTasks.find(t => t.id === event.toolCallId)?.name.split(':').pop() || '';
-            if (shortName === lastToolStatus.name) {
-              lastToolStatus.status = event.isError ? 'error' : 'success';
-            }
-
-            const task = activeTasks.find(t => t.id === event.toolCallId);
-            if (task) {
-              task.status = event.isError ? 'error' : 'success';
-              task.result = event.result;
-            }
-            currentStatus = '';
-            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-            break;
-          }
-
-          // --- 旧事件：技能调用（向后兼容） ---
-          case 'skill_call': {
-            const shortName = event.name.split(':').pop() || event.name;
-            lastToolStatus = { name: shortName, status: 'pending' };
-
-            const existingConfirmTask = activeTasks.find(t =>
-              t.status === 'confirm' &&
-              (t.name === event.name || `invoke:${t.name}` === event.name)
-            );
-            if (existingConfirmTask) {
-              existingConfirmTask.status = 'executing';
-              existingConfirmTask.params = event.params as Record<string, unknown> | undefined;
-            } else {
-              activeTasks.push({
-                id: event.name + Date.now(),
-                name: event.name,
-                status: 'executing',
-                params: event.params as Record<string, unknown> | undefined,
-                explanation: currentTurnResponse.trim()
-              });
-            }
-            currentTurnResponse = '';
-            currentStatus = `执行工具: ${shortName}`;
-            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-            break;
-          }
-
-          case 'skill_success': {
-            const shortName = event.name.split(':').pop() || event.name;
-            if (shortName === lastToolStatus.name) {
-              lastToolStatus.status = 'success';
-            }
-
-            const task = activeTasks.find(t =>
-              (t.name === event.name || `invoke:${t.name}` === event.name) &&
-              t.status === 'executing'
-            );
-            if (task) {
-              task.status = 'success';
-              task.result = event.result;
-            }
-            currentStatus = '';
-            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-            break;
-          }
-
-          case 'skill_error': {
-            const shortName = event.name.split(':').pop() || event.name;
-            if (shortName === lastToolStatus.name) {
-              lastToolStatus.status = 'error';
-            }
-
-            const task = activeTasks.find(t =>
-              (t.name === event.name || `invoke:${t.name}` === event.name) &&
-              (t.status === 'executing' || t.status === 'confirm')
-            );
-            if (task) {
-              task.status = 'error';
-              task.result = event.error;
-            }
-            currentStatus = '';
-            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-            break;
-          }
-
-          // --- 上下文压缩 ---
-          case 'compaction_start':
-            this.theme.renderInfoBanner('正在压缩上下文...');
-            this.theme.scrollToBottom();
-            break;
-
-          case 'compaction_end':
-            break;
-
-          // --- 确认请求 ---
-          case 'confirm_request': {
-            const shortName = event.skillName.split(':').pop() || event.skillName;
-            lastToolStatus = { name: shortName, status: 'pending' };
-
-            const task: ActiveTask = {
-              id: event.skillName + Date.now(),
-              name: event.skillName,
-              status: 'confirm',
-              params: event.params as Record<string, unknown> | undefined,
-              explanation: currentTurnResponse.trim()
-            };
-            currentTurnResponse = '';
-            activeTasks.push(task);
-
-            currentStatus = `等待授权: ${shortName}`;
-            this.updateStreaming(activeTasks, currentStatus, finalAnswer, currentTurnResponse, true, lastToolStatus);
-
-            current = await stream.next();
-            continue;
-          }
-
-          // --- 错误 ---
-          case 'error':
-            break;
-        }
-
-        current = await stream.next();
-      }
-
-      if (hasFinalAnswerTag) {
-        const parts = currentTurnResponse.split('<final_answer>');
-        const explanationPart = parts[0].trim();
-        let answerPart = parts[1] || '';
-        if (answerPart.includes('</final_answer>')) {
-          answerPart = answerPart.split('</final_answer>')[0];
-        }
-        finalAnswer = answerPart.trim();
-        currentTurnResponse = explanationPart;
-      } else {
-        if (currentTurnResponse) {
-          finalAnswer = finalAnswer ? `${finalAnswer}\n\n${currentTurnResponse}` : currentTurnResponse;
-        }
-      }
-      this.updateStreaming(activeTasks, currentStatus, finalAnswer, '', true);
-
-      const result = current.value as ChatQueryResult;
-      await this.chatManager.replaceMessages(result.messages);
-
-      const lastUserIndex = result.messages.map(m => m.role).lastIndexOf('user');
-      const currentTurnMessages = lastUserIndex !== -1 ? result.messages.slice(lastUserIndex + 1) : result.messages;
-
-      if (this.currentStreamingBubble) {
-        const data: AssistantMessageData = {
-          messages: currentTurnMessages,
-        };
-        this.theme.finalizeStreaming(this.currentStreamingBubble, data);
-        this.currentStreamingBubble = null;
-      }
-
-    } catch (error) {
-      console.error('Chat error:', error);
-      const errMsg = error instanceof Error ? error.message : String(error);
-      const isAbort = (error instanceof DOMException && error.name === 'AbortError') ||
-        (error instanceof Error && error.name === 'AbortError') ||
-        errMsg.toLowerCase().includes('aborted') ||
-        errMsg.toLowerCase().includes('cancel');
-
-      if (this.currentStreamingBubble) {
-        if (isAbort) {
-          const infoEl = this.theme.renderInfoBanner('已终止生成');
-          this.currentStreamingBubble.answerContainer.appendChild(infoEl);
+          s.finalAnswer = answerPart;
+          this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, explanationPart);
         } else {
-          const errorEl = this.theme.renderError(`${errMsg}. Please check your AI provider settings.`);
-          this.currentStreamingBubble.answerContainer.appendChild(errorEl);
+          if (s.activeTasks.length === 0) {
+            this.updateStreaming(s.activeTasks, s.currentStatus, s.currentTurnResponse, s.currentTurnResponse);
+          } else {
+            this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse);
+          }
         }
-      }
-    } finally {
-      this.currentAbortController = null;
-
-      if (this.currentStreamingBubble) {
-        this.currentStreamingBubble.el.removeClass('streaming');
+        break;
       }
 
-      this.isStreaming = false;
-      this.theme.updateInputState({
-        isStreaming: false,
-        charCount: this.inputHandler?.getRawTextContent().length ?? 0,
-        documentCount: this.inputHandler?.getContextPillPaths().length ?? 0,
-      });
+      case 'tool_execution_start': {
+        const shortName = event.toolName.split(':').pop() || event.toolName;
+        s.lastToolStatus = { name: shortName, status: 'pending' };
 
-      this.currentStreamingBubble = null;
-      this.activeContext = null;
-      this.inputHandler?.focusInput();
+        const existingConfirmTask = s.activeTasks.find(t =>
+          t.status === 'confirm' &&
+          (t.name === event.toolName || `invoke:${t.name}` === event.toolName)
+        );
+        if (existingConfirmTask) {
+          existingConfirmTask.status = 'executing';
+          existingConfirmTask.params = event.args as Record<string, unknown> | undefined;
+        } else {
+          s.activeTasks.push({
+            id: event.toolCallId,
+            name: event.toolName,
+            status: 'executing',
+            params: event.args as Record<string, unknown> | undefined,
+            explanation: s.currentTurnResponse.trim(),
+          });
+        }
+        s.currentTurnResponse = '';
+        s.currentStatus = `执行工具: ${shortName}`;
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
+        break;
+      }
+
+      case 'tool_execution_end': {
+        const shortName = s.activeTasks.find(t => t.id === event.toolCallId)?.name.split(':').pop() || '';
+        if (shortName === s.lastToolStatus.name) {
+          s.lastToolStatus.status = event.isError ? 'error' : 'success';
+        }
+        const task = s.activeTasks.find(t => t.id === event.toolCallId);
+        if (task) {
+          task.status = event.isError ? 'error' : 'success';
+          task.result = event.result;
+        }
+        s.currentStatus = '';
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
+        break;
+      }
+
+      case 'skill_call': {
+        const shortName = event.name.split(':').pop() || event.name;
+        s.lastToolStatus = { name: shortName, status: 'pending' };
+        s.activeTasks.push({
+          id: event.name + Date.now(),
+          name: event.name,
+          status: 'executing',
+          params: event.params as Record<string, unknown> | undefined,
+          explanation: s.currentTurnResponse.trim(),
+        });
+        s.currentTurnResponse = '';
+        s.currentStatus = `执行工具: ${shortName}`;
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
+        break;
+      }
+
+      case 'skill_success': {
+        const shortName = event.name.split(':').pop() || event.name;
+        if (shortName === s.lastToolStatus.name) s.lastToolStatus.status = 'success';
+        const task = s.activeTasks.find(t =>
+          (t.name === event.name || `invoke:${t.name}` === event.name) && t.status === 'executing'
+        );
+        if (task) { task.status = 'success'; task.result = event.result; }
+        s.currentStatus = '';
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
+        break;
+      }
+
+      case 'skill_error': {
+        const shortName = event.name.split(':').pop() || event.name;
+        if (shortName === s.lastToolStatus.name) s.lastToolStatus.status = 'error';
+        const task = s.activeTasks.find(t =>
+          (t.name === event.name || `invoke:${t.name}` === event.name) &&
+          (t.status === 'executing' || t.status === 'confirm')
+        );
+        if (task) { task.status = 'error'; task.result = event.error; }
+        s.currentStatus = '';
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
+        break;
+      }
+
+      case 'confirm_request': {
+        const shortName = event.skillName.split(':').pop() || event.skillName;
+        s.lastToolStatus = { name: shortName, status: 'pending' };
+        s.activeTasks.push({
+          id: event.skillName + Date.now(),
+          name: event.skillName,
+          status: 'confirm',
+          params: event.params as Record<string, unknown> | undefined,
+          explanation: s.currentTurnResponse.trim(),
+        });
+        s.currentTurnResponse = '';
+        s.currentStatus = `等待授权: ${shortName}`;
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
+        break;
+      }
+
+      case 'status':
+        s.currentStatus = event.message;
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse);
+        break;
+
+      case 'steer': {
+        const steerEl = this.theme.renderSteerCard(event.message);
+        if (this.currentStreamingBubble) {
+          this.currentStreamingBubble.el.appendChild(steerEl);
+        }
+        this.theme.scrollToBottom();
+        break;
+      }
+
+      case 'agent_end':
+        this.finalizeStream(s);
+        break;
+
+      case 'error':
+        this.showError(event.message);
+        break;
     }
+  }
+
+  private finalizeStream(s: NonNullable<typeof this.streamState>): void {
+    this.streamUnsubscribe?.();
+
+    if (s.hasFinalAnswerTag) {
+      const parts = s.currentTurnResponse.split('<final_answer>');
+      const explanationPart = parts[0].trim();
+      let answerPart = parts[1] || '';
+      if (answerPart.includes('</final_answer>')) answerPart = answerPart.split('</final_answer>')[0];
+      s.finalAnswer = answerPart.trim();
+      s.currentTurnResponse = explanationPart;
+    } else if (s.currentTurnResponse) {
+      s.finalAnswer = s.finalAnswer ? `${s.finalAnswer}\n\n${s.currentTurnResponse}` : s.currentTurnResponse;
+    }
+
+    this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, '', true);
+    this.streamState = null;
+    this.currentStreamingBubble = null;
+    this.isStreaming = false;
+    this.currentAbortController = null;
+    this.activeContext = null;
+
+    this.theme.updateInputState({
+      isStreaming: false,
+      charCount: this.inputHandler?.getRawTextContent().length ?? 0,
+      documentCount: this.inputHandler?.getContextPillPaths().length ?? 0,
+    });
+
+    this.inputHandler?.focusInput();
+  }
+
+  private showError(message: string): void {
+    this.streamUnsubscribe?.();
+    const isAbort = message.toLowerCase().includes('abort') || message.toLowerCase().includes('cancel');
+    if (this.currentStreamingBubble) {
+      if (isAbort) {
+        this.currentStreamingBubble.answerContainer.appendChild(this.theme.renderInfoBanner('已终止生成'));
+      } else {
+        this.currentStreamingBubble.answerContainer.appendChild(
+          this.theme.renderError(`${message}. 请检查 AI 服务商设置。`)
+        );
+      }
+    }
+    this.currentStreamingBubble = null;
+    this.isStreaming = false;
+    this.currentAbortController = null;
+    this.activeContext = null;
+    this.streamState = null;
+
+    this.theme.updateInputState({
+      isStreaming: false,
+      charCount: this.inputHandler?.getRawTextContent().length ?? 0,
+      documentCount: this.inputHandler?.getContextPillPaths().length ?? 0,
+    });
+
+    this.inputHandler?.focusInput();
   }
 
   private updateStreaming(

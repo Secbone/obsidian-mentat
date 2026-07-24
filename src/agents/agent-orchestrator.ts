@@ -114,7 +114,7 @@ export class AgentOrchestrator {
           return {
             id: task.id,
             context: taskContextWithSignal,
-            stream: agent.execute(task.prompt, taskContextWithSignal)
+            execute: agent.execute(task.prompt, taskContextWithSignal)
           };
         });
 
@@ -122,26 +122,17 @@ export class AgentOrchestrator {
         let activeTaskCount = activeStreams.length;
         let hasError: unknown = null;
 
-        // Start background runners for each stream to collect events in parallel
-        activeStreams.forEach(({ id, context, stream }) => {
+        // Start background runners for each task to collect results
+        activeStreams.forEach(({ id, context, execute }) => {
           void (async () => {
             try {
-              let current = await stream.next();
-              while (!current.done) {
-                eventQueue.push({ ...(current.value as AgentEvent), taskId: id });
-                if (context.abortSignal?.aborted) {
-                  break;
-                }
-                current = await stream.next();
-              }
+              const result = await execute;
               if (!context.abortSignal?.aborted && !hasError) {
-                const result = current.value as AgentResponse;
                 results.set(id, result);
                 completed.add(id);
               }
             } catch (err) {
               hasError = err;
-              // Abort all other tasks in this tier immediately on error to prevent resource leaks
               tierAbortController.abort();
             } finally {
               activeTaskCount--;
@@ -211,16 +202,7 @@ export class AgentOrchestrator {
         throw new Error(`Agent not found: ${agentId}`);
       }
 
-      const stream = agent.execute(currentPrompt, currentContext);
-      let current = await stream.next();
-
-      while (!current.done) {
-        const event = current.value as AgentEvent;
-        yield { ...event, activeAgentId: agentId };
-        current = await stream.next();
-      }
-
-      const response = current.value as AgentResponse;
+      const response = await agent.execute(currentPrompt, currentContext);
 
       currentContext = {
         ...currentContext,

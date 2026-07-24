@@ -1,12 +1,13 @@
 // ExtensionAPI - Interface and types for extensions
 
 import { App } from 'obsidian';
-import { EventBus, ExtensionEvents } from './event-bus';
+import { EventBus } from './event-bus';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
 import { MentatSettings } from '../settings/settings';
 import { SkillDefinition } from '../skills/skill-types';
 import { SkillNamespace } from '../skills/skill-types';
+import { AgentEvent } from '../agents/agent-types';
 
 /**
  * Extension context — what extensions see when they're loaded.
@@ -30,7 +31,7 @@ export interface ExtensionAPI {
   unregisterSkill(namespace: SkillNamespace, name: string): void;
 
   /** Subscribe to lifecycle events */
-  on<K extends keyof ExtensionEvents>(event: K, handler: (data: ExtensionEvents[K]) => void): () => void;
+  on(event: string, handler: (event: AgentEvent) => void): () => void;
 
   /** Access services */
   getSkillRegistry(): SkillRegistry;

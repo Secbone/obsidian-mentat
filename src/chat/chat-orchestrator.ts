@@ -15,6 +15,7 @@ import { PROMPT_PATHS, FALLBACK_PROMPTS, TEMPLATE_VARS } from '../prompts/prompt
 import { BaseAgent, AgentDependencies } from '../agents/base-agent';
 import { AgentManager } from '../agents/agent-manager';
 import { AgentConfig, AgentContext, AgentEvent, AgentResponse } from '../agents/agent-types';
+import { EventBus } from '../extensions/event-bus';
 import { VaultDiagnosticsLogger } from '../diagnostics/vault-diagnostics-logger';
 import { ReadTracker } from '../services/read-tracker';
 import { IPlatformAdapter, IPlatformFile } from '../types/platform';
@@ -46,6 +47,7 @@ export class ChatOrchestrator {
   private defaultAgent: BaseAgent | null = null;
   private diagnosticsLogger: VaultDiagnosticsLogger;
   private readTracker: ReadTracker;
+  private eventBus?: EventBus;
   
   // Decoupled host & engine references
   private platform: IPlatformAdapter;
@@ -66,12 +68,14 @@ export class ChatOrchestrator {
     platform: IPlatformAdapter,
     settings: MentatSettings,
     aiRouter: AIRouter,
-    indexManager: IndexManager
+    indexManager: IndexManager,
+    eventBus?: EventBus,
   ) {
     this.platform = platform;
     this.settings = settings;
     this.aiRouter = aiRouter;
     this.indexManager = indexManager;
+    this.eventBus = eventBus;
     this.agentManager = new AgentManager();
     this.readTracker = new ReadTracker();
 
@@ -110,7 +114,7 @@ export class ChatOrchestrator {
       readTracker: this.readTracker
     };
 
-    this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext);
+    this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext, this.eventBus);
     this.diagnosticsLogger = new VaultDiagnosticsLogger(platform.getVault());
   }
 
@@ -219,10 +223,14 @@ export class ChatOrchestrator {
   /**
    * Main query method - chat interface
    */
-  async *query(
+  /**
+   * Send a message to the agent. Events are emitted to EventBus.
+   * After completion, session messages are saved automatically.
+   */
+  async sendMessage(
     userQuery: string,
     options: ChatQueryOptions = {}
-  ): AsyncGenerator<AgentEvent, ChatQueryResult, unknown> {
+  ): Promise<void> {
     if (!this.defaultAgent) {
       throw new Error('请先在设置中配置 AI 服务商 (API Key)。No AI provider configured. Please add one in Mentat settings.');
     }
@@ -234,45 +242,27 @@ export class ChatOrchestrator {
     let sessionContextPayload = firstUserMsg?.metadata?.sessionContextPayload;
 
     if (!sessionContextPayload) {
-      // Generate it once for the session
       sessionContextPayload = await this.buildVaultSessionContextPayload();
     }
 
-    const app = this.getApp();
     const context: AgentContext = options.context || {
       messages: messages,
       sessionId: Date.now().toString(),
       metadata: {
-        maxTurns: options.maxTurns,  // Pass maxTurns through context
+        maxTurns: options.maxTurns,
         sessionContextPayload
       },
-      confirmHandler: async (skillName, params, message) => {
-        return new Promise((resolve) => {
-          new ConfirmationModal(
-            app,
-            {
-              skillName,
-              description: message || '',
-              parameters: (params ?? {}) as Record<string, unknown>,
-              operationType: 'write'
-            },
-            (confirmed) => resolve({ approved: confirmed })
-          ).open();
-        });
-      }
     };
 
-    const response = yield* this.agentManager.execute(
-      this.defaultAgent.getId(),
-      userQuery,
-      context
-    );
-
-    return {
-      response: response.content,
-      messages: response.messages,
-      skillCalls: response.skillCalls
-    };
+    try {
+      await this.agentManager.execute(
+        this.defaultAgent.getId(),
+        userQuery,
+        context
+      );
+    } catch (error) {
+      console.error('[ChatOrchestrator] sendMessage failed:', error);
+    }
   }
 
   private async buildVaultSessionContextPayload(): Promise<string> {
@@ -354,7 +344,7 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
 
     // Clear existing skills
     this.skillRegistry = new SkillRegistry();
-    this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext);
+    this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext, this.eventBus);
 
     // Reload all skills
     await this.loadAllSkills(skillContext);
@@ -992,17 +982,11 @@ OTHERWISE:
           new Notice(`🤖 正在委派任务给 ${agent.getName()}...`);
           
           // Execute agent to completion
-          const stream = agent.execute(input.prompt, {
+          const response = await agent.execute(input.prompt, {
             messages: [], // Isolated context
             sessionId: `subagent-${Date.now()}`
           });
           
-          let result = await stream.next();
-          while (!result.done) {
-            result = await stream.next();
-          }
-          
-          const response = result.value as AgentResponse;
           return {
             success: true,
             data: response.content,
@@ -1046,17 +1030,10 @@ OTHERWISE:
           
           new Notice(`🤖 正在生成子智能体: ${input.name}...`);
           
-          const stream = tempAgent.execute(input.prompt, {
+          const response = await tempAgent.execute(input.prompt, {
             messages: [],
             sessionId: `subagent-${Date.now()}`
           });
-          
-          let result = await stream.next();
-          while (!result.done) {
-            result = await stream.next();
-          }
-          
-          const response = result.value as AgentResponse;
           
           return {
             success: true,

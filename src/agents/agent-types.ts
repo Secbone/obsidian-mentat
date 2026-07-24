@@ -27,11 +27,6 @@ export interface AgentContext {
   metadata?: Record<string, unknown>;
   pendingSteerMessages?: string[];
   abortSignal?: AbortSignal;
-  confirmHandler?: (
-    skillName: string,
-    params: unknown,
-    message: string
-  ) => Promise<{ approved: boolean; modifiedParams?: unknown }>;
 }
 
 /**

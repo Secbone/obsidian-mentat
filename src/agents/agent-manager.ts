@@ -1,7 +1,7 @@
 // AgentManager - Manages agent instances and execution
 
 import { BaseAgent } from './base-agent';
-import { AgentContext, AgentResponse, AgentEvent } from './agent-types';
+import { AgentContext, AgentResponse } from './agent-types';
 
 /**
  * AgentManager - Manages multiple agent instances
@@ -65,28 +65,28 @@ export class AgentManager {
    * Execute with the current agent
    * @deprecated Use stateless execute(agentId, prompt, context) instead.
    */
-  async *executeWithCurrentAgent(
+  async executeWithCurrentAgent(
     prompt: string,
     context: AgentContext
-  ): AsyncGenerator<AgentEvent, AgentResponse, unknown> {
+  ): Promise<AgentResponse> {
     if (!this.currentAgent) {
       throw new Error('No current agent set');
     }
-    return yield* this.currentAgent.execute(prompt, context);
+    return this.currentAgent.execute(prompt, context);
   }
 
   /**
    * Execute with a specific agent by ID (Stateless)
    */
-  async *execute(
+  async execute(
     agentId: string,
     prompt: string,
     context: AgentContext
-  ): AsyncGenerator<AgentEvent, AgentResponse, unknown> {
+  ): Promise<AgentResponse> {
     const agent = this.agents.get(agentId);
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`);
     }
-    return yield* agent.execute(prompt, context);
+    return agent.execute(prompt, context);
   }
 }

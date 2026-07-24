@@ -7,7 +7,7 @@ import { IndexManager } from './indexing/index-manager';
 import { ChatView, CHAT_VIEW_TYPE } from './ui/chat-view';
 import { ChatOrchestrator } from './chat/chat-orchestrator';
 import { AgentManager } from './agents/agent-manager';
-import { ExtensionManager } from './extensions';
+import { ExtensionManager, EventBus } from './extensions';
 import { TaskType } from './types';
 import { ObsidianAdapter } from './utils/obsidian-adapter';
 import { DiagnosticsExporter } from './diagnostics/diagnostics-exporter';
@@ -21,6 +21,7 @@ export default class MentatPlugin extends Plugin {
   agentManager: AgentManager;
   platform: ObsidianAdapter;
   extensionManager: ExtensionManager;
+  eventBus: EventBus;
 
   // Track previous values for selective save-settings updates
   private prevTheme: string = '';
@@ -43,8 +44,11 @@ export default class MentatPlugin extends Plugin {
     this.indexManager = new IndexManager(platform, () => this.aiRouter.getProvider(TaskType.EMBEDDING));
     await this.indexManager.initialize();
 
+    // Initialize EventBus (before ChatOrchestrator, for agent event streaming)
+    this.eventBus = new EventBus();
+
     // Initialize Chat Orchestrator (may fail gracefully if no provider configured)
-    this.chatOrchestrator = new ChatOrchestrator(platform, this.settings, this.aiRouter, this.indexManager);
+    this.chatOrchestrator = new ChatOrchestrator(platform, this.settings, this.aiRouter, this.indexManager, this.eventBus);
     try {
       await this.chatOrchestrator.initialize();
     } catch (error: unknown) {
@@ -56,12 +60,13 @@ export default class MentatPlugin extends Plugin {
     // Get AgentManager reference (for advanced usage)
     this.agentManager = this.chatOrchestrator.getAgentManager();
 
-    // Initialize extension system
+    // Initialize extension system (shares the global eventBus)
     this.extensionManager = new ExtensionManager(
       this.app,
       this.chatOrchestrator.getSkillRegistry(),
       this.chatOrchestrator.getSkillExecutor(),
-      this.settings
+      this.settings,
+      this.eventBus,
     );
     this.extensionManager.loadAll();
 

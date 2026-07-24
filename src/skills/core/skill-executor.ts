@@ -12,8 +12,9 @@ import {
   isDocumentationSkill,
   isExecutableSkill
 } from '../skill-types';
-import { ConfirmationModal } from '../../ui/confirmation-modal';
 import { safeParseJson } from '../../utils/json-healer';
+import { EventBus } from '../../extensions/event-bus';
+import { AgentEvent } from '../../agents/agent-types';
 
 /**
  * Skill execution options
@@ -40,7 +41,8 @@ export class SkillExecutor {
 
   constructor(
     private registry: SkillRegistry,
-    private context: SkillContext
+    private context: SkillContext,
+    private eventBus?: EventBus,
   ) {}
 
   /**
@@ -136,8 +138,17 @@ export class SkillExecutor {
         : !!skill.metadata?.requiresConfirmation;
 
       if (requiresConfirmation && !options.skipConfirmation) {
-        const confirmed = await this.requestConfirmation(skill, validatedInput);
-        if (!confirmed) {
+        const fullName = typeof namespace === 'string' && namespace.includes(':')
+          ? namespace
+          : this.registry.getFullName(namespace as SkillNamespace, name);
+        this.eventBus?.emit({
+          type: 'confirm_request' as AgentEvent['type'],
+          skillName: fullName,
+          params: validatedInput,
+          message: `智能体申请执行操作: 【${skill.description}】。是否批准？`,
+        } as AgentEvent);
+        const approved = await this.waitForConfirm(fullName);
+        if (!approved) {
           const result: SkillResult = {
             success: false,
             error: 'Operation cancelled by user',
@@ -445,39 +456,17 @@ export class SkillExecutor {
   }
 
   /**
-   * Request user confirmation for a skill execution
+   * Wait for user confirmation via EventBus
    */
-  private async requestConfirmation(
-    skill: SkillDefinition,
-    parameters: Record<string, unknown>
-  ): Promise<boolean> {
-    // Determine operation type from skill name
-    const operationType = this.getOperationType(skill.name);
-
-    // Show confirmation modal
-    return new Promise<boolean>((resolve) => {
-      const modal = new ConfirmationModal(
-        this.context.plugin.app,
-        {
-          skillName: skill.name,
-          description: skill.description,
-          parameters,
-          operationType
-        },
-        (confirmed) => resolve(confirmed)
-      );
-      modal.open();
+  private waitForConfirm(skillName: string, timeout = 300000): Promise<boolean> {
+    return new Promise((resolve) => {
+      const unsub = this.eventBus?.on('confirm_response', (data) => {
+        if (data && (data as Record<string, unknown>).id === skillName) {
+          unsub?.();
+          resolve(!!(data as Record<string, unknown>).approved);
+        }
+      });
+      setTimeout(() => { unsub?.(); resolve(false); }, timeout);
     });
-  }
-
-  /**
-   * Determine operation type from skill name
-   */
-  private getOperationType(skillName: string): 'create' | 'update' | 'delete' | 'write' {
-    const lowerName = skillName.toLowerCase();
-    if (lowerName.includes('create')) return 'create';
-    if (lowerName.includes('update')) return 'update';
-    if (lowerName.includes('delete')) return 'delete';
-    return 'write';
   }
 }

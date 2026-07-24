@@ -2,5 +2,5 @@
 
 export { ExtensionManager } from './extension-manager';
 export { EventBus } from './event-bus';
-export type { ExtensionEvents, EventHandler } from './event-bus';
+export type { EventHandler } from './event-bus';
 export type { ExtensionAPI, ExtensionFactory, ExtensionContext, ExtensionRegistration } from './extension-api';

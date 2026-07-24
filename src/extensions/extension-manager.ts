@@ -9,7 +9,7 @@ import { MentatSettings } from '../settings/settings';
 import { SkillNamespace } from '../skills/skill-types';
 
 export { EventBus } from './event-bus';
-export type { ExtensionEvents, EventHandler } from './event-bus';
+export type { EventHandler } from './event-bus';
 export type { ExtensionAPI, ExtensionFactory, ExtensionContext, ExtensionRegistration } from './extension-api';
 
 export class ExtensionManager {
@@ -22,7 +22,10 @@ export class ExtensionManager {
     private skillRegistry: SkillRegistry,
     private skillExecutor: SkillExecutor,
     private settings: MentatSettings,
-  ) {}
+    eventBus?: EventBus,
+  ) {
+    if (eventBus) this.eventBus = eventBus;
+  }
 
   /**
    * Register an extension (does not load it — call loadAll() to activate).
