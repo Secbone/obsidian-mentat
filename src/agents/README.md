@@ -5,16 +5,18 @@ This directory contains the agent runtime — the core loop that drives conversa
 ## Architecture
 
 ```
-ChatView (UI event consumer)
-    │
+ChatView (subscribes to EventBus)
+    │  eventBus.on('*', handler)
     ▼
-ChatOrchestrator.query()
-    │  yield AsyncGenerator<AgentEvent>
+ChatOrchestrator.sendMessage()  // fire-and-forget, returns void
+    │
     ▼
 AgentManager.execute(agentId, prompt, context)
     │
     ▼
-BaseAgent.execute()
+BaseAgent.execute(prompt, context)  // returns Promise<AgentResponse>
+    │  internally: executeGenerator() yields AgentEvent
+    │  execute() wraps it, emits each event to eventBus
     │  ┌─────────────────────────────────────────────┐
     │  │  while (turnCount < maxTurns)              │
     │  │    yield turn_start / message_start        │
@@ -47,23 +49,42 @@ AgentResponse { content, messages, metadata }
 
 ## Core Concepts
 
-### AgentEvent — the streaming protocol
+### EventBus — the single communication channel
 
-`BaseAgent.execute()` is an `AsyncGenerator` that **yields** events and **returns** an `AgentResponse`. All UI updates, tool status, confirmation requests, and errors flow through events:
+`BaseAgent.execute()` returns `Promise<AgentResponse>`. During execution, it internally yields `AgentEvent` from a private generator and emits each one to the shared `EventBus`. All consumers (ChatView, extensions, SkillExecutor confirmation) subscribe to the same EventBus.
+
+```typescript
+// BaseAgent.execute() — entry point
+async execute(prompt: string, context: AgentContext): Promise<AgentResponse> {
+  const gen = this.executeGenerator(prompt, context);
+  let result = await gen.next();
+  while (!result.done) {
+    this.eventBus?.emit(result.value as AgentEvent);
+    result = await gen.next();
+  }
+  return result.value as AgentResponse;
+}
+```
+
+### AgentEvent — event types
 
 ```typescript
 type AgentEvent =
-  // Lifecycle
+  // Status & errors
+  | { type: 'status'; message: string }
+  | { type: 'error'; message: string }
+
+  // Agent lifecycle
   | { type: 'agent_start' }
   | { type: 'agent_end'; messages: ChatMessage[] }
 
-  // Turn
+  // Turn lifecycle (one LLM call + optional tool execution)
   | { type: 'turn_start'; turnIndex: number }
   | { type: 'turn_end'; turnIndex: number; message: ChatMessage; toolResults: unknown[] }
 
   // Message streaming
   | { type: 'message_start'; role: string }
-  | { type: 'message_update'; delta: string }
+  | { type: 'message_update'; delta: string; accumulatedText?: string }
   | { type: 'message_end'; role: string; content: string }
 
   // Tool calls
@@ -82,27 +103,37 @@ type AgentEvent =
 
   // Confirmation & steering
   | { type: 'confirm_request'; skillName: string; params: unknown; message: string }
-  | { type: 'steer'; message: string }
-  | { type: 'status'; message: string }
-  | { type: 'error'; message: string };
+  | { type: 'steer'; message: string };
 ```
 
 ### Consuming events
 
+Subscribe to the EventBus with a wildcard handler:
+
 ```typescript
-const stream = agent.execute(prompt, context);
-for await (const event of stream) {
+const unsubscribe = eventBus.on('*', (event: AgentEvent) => {
   switch (event.type) {
-    case 'chunk':          output += event.text; break;
-    case 'tool_execution_start':  showTool(event.toolName); break;
-    case 'tool_execution_end':    updateToolStatus(event.toolCallId); break;
-    case 'compaction_start':      showBanner('Compacting...'); break;
-    case 'agent_end':             done(event.messages); break;
+    case 'message_update':      output += event.delta; break;
+    case 'tool_execution_start': showTool(event.toolName); break;
+    case 'tool_execution_end':   updateToolStatus(event.toolCallId); break;
+    case 'compaction_start':     showBanner('Compacting...'); break;
+    case 'agent_end':            done(event.messages); break;
   }
-}
-const result: AgentResponse = await stream.return(undefined);
-// Or get the return value via the last `current.value` after the generator finishes
+});
 ```
+
+### AgentDependencies
+
+BaseAgent receives the following via `AgentDependencies`:
+
+| Dependency | Required | Purpose |
+|------------|----------|---------|
+| `skillRegistry` | yes | Look up skill definitions and metadata |
+| `skillExecutor` | yes | Execute tool calls |
+| `skillInvocationContext` | yes | Generate LLM tool definitions (OpenAI/Anthropic format) |
+| `diagnosticsLogger` | no | Log tool execution failures |
+| `compactor` | no | Context compaction (auto-created if omitted) |
+| `eventBus` | no | Emit events to UI/extensions |
 
 ### Tool execution mode
 
@@ -129,9 +160,16 @@ Tools are grouped by `executionCategory` (declared in skill metadata):
 }
 ```
 
+### Cyclic loop detection (AP6 Guard)
+
+Detects repetitive tool call patterns:
+- Scans a sliding window of `maxCycleLength × minRepeats` calls
+- If a cycle is detected (`toolName + normalized args` repeats), the call is blocked
+- LLM receives a system alert to break the loop
+
 ### Context compaction
 
-When the estimated token count exceeds 75% of budget (default 32k), the compactor triggers every 3 turns:
+When estimated tokens exceed 75% of budget (default 32k), the compactor triggers every 3 turns:
 
 1. Keep the last 6 messages intact
 2. Send older messages to the LLM for summarization
@@ -153,29 +191,29 @@ interface CompactionConfig {
 ### Usage
 
 ```typescript
-// Default agent is created by ChatOrchestrator
-const stream = chatOrchestrator.query('What files mention RAG?', {
-  enableSkills: true,
-  maxTurns: 20,
+// ChatOrchestrator sends a message (fire-and-forget, returns void)
+chatOrchestrator.sendMessage('What files mention RAG?', {
   context: {
     messages: contextMessages,
     sessionId: session.sessionId,
-    confirmHandler: async (skillName, params, message) => {
-      return { approved: true };
-    }
+    metadata: { maxTurns: 20 }
   }
 });
+
+// Results arrive via EventBus subscription in ChatView
 ```
 
 ## Extending
 
 ### Extension events
 
-The `ExtensionManager.eventBus` mirrors the agent lifecycle for extensions to hook into:
+Extensions subscribe to the same EventBus the agent emits to:
 
 ```typescript
-eventBus.on('before_tool', ({ toolName, args }) => {
-  console.log(`About to execute: ${toolName}`);
+eventBus.on('*', (event: AgentEvent) => {
+  if (event.type === 'tool_execution_start') {
+    console.log(`About to execute: ${event.toolName}`);
+  }
 });
 ```
 
@@ -193,10 +231,9 @@ class ResearchAgent extends BaseAgent {
     );
   }
 
-  async *execute(prompt: string, context: AgentContext) {
-    // Custom pre-processing
+  async execute(prompt: string, context: AgentContext): Promise<AgentResponse> {
     const enhancedPrompt = `[RESEARCH MODE]\n${prompt}`;
-    yield* super.execute(enhancedPrompt, context);
+    return super.execute(enhancedPrompt, context);
   }
 }
 ```

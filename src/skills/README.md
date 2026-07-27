@@ -477,6 +477,56 @@ User settings can restrict via `skillConfigurations[fullName].allowedPermissions
 3. **MCP Connection Pooling**: Reuse connections to MCP servers
 4. **Caching**: Cache frequently accessed data
 
+## Custom Skills
+
+Users can create custom skills without modifying the plugin source code, using plain JavaScript files.
+
+### Directory location
+
+```
+.vault/.obsidian/plugins/mentat/skills/
+├── your-skill/
+│   ├── SKILL.md              # Metadata + documentation (same format as built-in)
+│   └── implementation.js     # Pure JS, no imports, define function execute(input)
+```
+
+### Format
+
+**SKILL.md:**
+
+```yaml
+---
+name: hello_world
+description: Greet someone with a friendly message
+metadata:
+  executable: true
+  version: "1.0.0"
+  tags: [custom, hello]
+  requiresConfirmation: false
+---
+# Hello World Skill
+A simple custom skill that greets someone.
+```
+
+**implementation.js:**
+
+```javascript
+function execute(input) {
+  const name = input.name || 'World';
+  return { success: true, data: 'Hello, ' + name + '!' };
+}
+```
+
+The skill will appear as `custom:hello_world` in the LLM's tool list.
+
+### Constraints
+
+- Pure JavaScript only — no `require()`, `import`, or npm packages
+- No access to Obsidian API (vault, metadataCache, etc.)
+- Return `{ success: true, data }` on success or `{ success: false, error }` on failure
+- Parameters are passed as the `input` object; validation is the user's responsibility
+- For complex capabilities, use MCP servers instead
+
 ## Future Enhancements
 
 1. **Validation Script**: Validate SKILL.md format

@@ -194,7 +194,8 @@ export class ChatOrchestrator {
       skillRegistry: this.skillRegistry,
       skillExecutor: this.skillExecutor,
       skillInvocationContext: this.skillInvocationContext,
-      diagnosticsLogger: this.diagnosticsLogger
+      diagnosticsLogger: this.diagnosticsLogger,
+      eventBus: this.eventBus
     };
 
     this.defaultAgent = new BaseAgent(agentConfig, provider, dependencies);
@@ -879,7 +880,8 @@ Write your custom style instructions and preferences here. This file is dynamica
       skillRegistry: this.skillRegistry,
       skillExecutor: this.skillExecutor,
       skillInvocationContext: this.skillInvocationContext,
-      diagnosticsLogger: this.diagnosticsLogger
+      diagnosticsLogger: this.diagnosticsLogger,
+      eventBus: this.eventBus
     };
 
     // 1. Register Default Writer Agent

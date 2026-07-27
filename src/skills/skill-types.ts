@@ -12,7 +12,7 @@ export type SkillStatus = 'pending' | 'executing' | 'success' | 'error';
 /**
  * Skill namespace - identifies the source of the skill
  */
-export type SkillNamespace = 'obsidian' | 'mcp' | 'meta' | 'guard';
+export type SkillNamespace = 'obsidian' | 'mcp' | 'meta' | 'guard' | 'custom';
 
 /**
  * Skill execution result

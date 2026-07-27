@@ -245,13 +245,14 @@ export class SkillExecutor {
       };
     }
 
-    // Parse skill name
-    const { namespace, name } = this.registry.parseName(toolCall.name);
+    // Parse skill name (convert __ to : for names from AI provider)
+    const normalizedName = toolCall.name.replace(/__/g, ':');
+    const { namespace, name } = this.registry.parseName(normalizedName);
 
     // Route to appropriate executor
     if (namespace.startsWith('mcp:')) {
       // MCP skill - will be handled by MCP client
-      return this.executeMCPSkill(toolCall.name, parameters, options);
+      return this.executeMCPSkill(normalizedName, parameters, options);
     } else {
       // Built-in skill
       return this.execute(namespace, name, parameters, options);
@@ -438,6 +439,7 @@ export class SkillExecutor {
   private parseNamespace(namespace: string): SkillNamespace {
     if (namespace === 'obsidian') return 'obsidian';
     if (namespace === 'mcp' || namespace.startsWith('mcp:')) return 'mcp';
+    if (namespace === 'custom') return 'custom';
     return 'obsidian'; // Default
   }
 

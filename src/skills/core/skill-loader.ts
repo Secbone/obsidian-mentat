@@ -1,8 +1,9 @@
 // Skill Loader
 // Loads all skills from the skills/ directory according to Agent Skills specification
 
+import { z } from 'zod';
 import { App } from 'obsidian';
-import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDefinition } from '../skill-types';
+import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDefinition, SkillResult } from '../skill-types';
 
 // Import all skill implementations (compile-time imports for TypeScript)
 import * as QueryNotesImpl from '../../../skills/query-notes/scripts';
@@ -150,7 +151,7 @@ export class SkillLoader {
 
     if (isExecutable) {
       // Executable skill - load implementation
-      return this.loadExecutableSkill(metadata, context);
+      return await this.loadExecutableSkill(metadata, skillDirName, context);
     } else {
       // Documentation skill - return as-is
       return this.loadDocumentationSkill(metadata);
@@ -201,34 +202,99 @@ export class SkillLoader {
   /**
    * Load an executable skill
    */
-  private loadExecutableSkill(
+  private async loadExecutableSkill(
     metadata: SkillMetadata,
+    skillDirName: string,
     context: SkillContext
-  ): SkillDefinition | null {
-    // Get implementation from map
+  ): Promise<SkillDefinition | null> {
+    // Get implementation from map (compile-time imports for built-in skills)
     const impl = this.implementationMap.get(metadata.name) as { createSkill: (context: SkillContext) => { schema: import('zod').ZodTypeAny; execute: (input: unknown) => Promise<import('../skill-types').SkillResult<unknown>> } } | undefined;
 
-    if (!impl) {
-      console.error(`[SkillLoader] No implementation found for ${metadata.name}`);
-      return null;
+    if (impl) {
+      // Built-in skill: use compile-time import
+      const skillImpl = impl.createSkill(context);
+      return {
+        name: metadata.name,
+        namespace: 'obsidian',
+        description: metadata.description,
+        schema: skillImpl.schema,
+        execute: skillImpl.execute,
+        metadata: {
+          version: metadata.metadata?.version || '1.0.0',
+          tags: metadata.metadata?.tags || [],
+          requiresConfirmation: metadata.metadata?.requiresConfirmation || false,
+          documentation: metadata.content
+        }
+      };
     }
 
-    // Create skill using the implementation
-    const skillImpl = impl.createSkill(context);
+    // Custom skill: try loading implementation.js
+    return this.loadCustomSkill(metadata, skillDirName, context);
+  }
 
-    return {
-      name: metadata.name,
-      namespace: 'obsidian',
-      description: metadata.description,
-      schema: skillImpl.schema,
-      execute: skillImpl.execute,
-      metadata: {
-        version: metadata.metadata?.version || '1.0.0',
-        tags: metadata.metadata?.tags || [],
-        requiresConfirmation: metadata.metadata?.requiresConfirmation || false,
-        documentation: metadata.content
+  /**
+   * Load a custom skill from implementation.js
+   */
+  private async loadCustomSkill(
+    metadata: SkillMetadata,
+    skillDirName: string,
+    context: SkillContext
+  ): Promise<SkillDefinition | null> {
+    try {
+      const implPath = `${this.skillsBasePath}/${skillDirName}/implementation.js`;
+      const adapter = context.vault.adapter;
+      if (!(await adapter.exists(implPath))) {
+        console.warn(`[SkillLoader] No implementation.js found for custom skill "${metadata.name}" at ${implPath}`);
+        return null;
       }
-    };
+      const code = await adapter.read(implPath);
+
+      // Wrap user code in an execute function
+      const userExecute = new Function(
+        'input',
+        `
+          "use strict";
+          ${code}
+          if (typeof execute !== 'function') {
+            throw new Error("implementation.js must define a function named 'execute'");
+          }
+          return execute(input);
+        `
+      );
+
+      const wrappedExecute = async (input: unknown): Promise<SkillResult> => {
+        try {
+          const result = userExecute(input);
+          const finalResult = result instanceof Promise ? await result : result;
+          if (finalResult && typeof finalResult === 'object' && 'success' in finalResult) {
+            return finalResult as SkillResult;
+          }
+          return { success: true, data: finalResult };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+      };
+
+      return {
+        name: metadata.name,
+        namespace: 'custom',
+        description: metadata.description,
+        schema: z.any(),
+        execute: wrappedExecute,
+        metadata: {
+          version: (metadata.metadata?.version as string) || '1.0.0',
+          tags: (metadata.metadata?.tags as string[]) || ['custom'],
+          requiresConfirmation: (metadata.metadata?.requiresConfirmation as boolean) || false,
+          documentation: metadata.content
+        }
+      };
+    } catch (error) {
+      console.error(`[SkillLoader] Failed to load custom skill "${metadata.name}":`, error);
+      return null;
+    }
   }
 
   /**

@@ -66,10 +66,9 @@ src/
 | [`src/ui/themes/README.md`](src/ui/themes/README.md) | Theme system architecture, creating new themes |
 | [`src/ui/README.md`](src/ui/README.md) | UI system overview, CSS conventions, icon sizing |
 | [`src/agents/README.md`](src/agents/README.md) | Agent system, events, streaming, tool execution |
-| [`src/skills/README.md`](src/skills/README.md) | Skill framework internals, MCP integration |
+| [`src/skills/README.md`](src/skills/README.md) | Skill framework internals, MCP integration, custom skills |
 | [`skills/README.md`](skills/README.md) | Adding and documenting skills |
 | [`prompts/README.md`](prompts/README.md) | Prompt system, template variables |
-| [`docs/agent-system-improvements.md`](docs/agent-system-improvements.md) | Agent improvement roadmap |
 | [`docs/theme-system-refactor.md`](docs/theme-system-refactor.md) | Theme system refactoring history |
 
 ## Roadmap
@@ -78,6 +77,8 @@ src/
 - [x] Phase 2: Skill framework — 12 built-in skills, progressive/native/auto modes, MCP
 - [x] Phase 3: Themed UI — BubbleTheme, TerminalTheme, smart scroll, terminal presets
 - [x] Phase 4: Extension system v1 + automatic context compaction
+- [x] Phase 4.5: EventBus architecture (AsyncGenerator → EventBus, AgentContext.confirmHandler removed)
+- [x] Custom skills: user-defined skills via .obsidian/plugins/mentat/skills/ with implementation.js
 - [ ] Phase 5: Tree-structured sessions with branching and comparison
 - [ ] Phase 6: Extension system v2 — dynamic loading, permission sandbox
 - [ ] Phase 7: i18n, plugin marketplace, community extension registry
