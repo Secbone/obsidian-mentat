@@ -209,6 +209,30 @@ export class ProviderEditModal extends Modal {
           }
         }));
 
+    // Context Window
+    new Setting(contentEl)
+      .setName('上下文窗口')
+      .setDesc('模型上下文长度（tokens），留空自动检测')
+      .addText(text => text
+        .setPlaceholder('128000')
+        .setValue(this.tempConfig.contextWindow ? String(this.tempConfig.contextWindow) : '')
+        .onChange(value => {
+          const num = parseInt(value);
+          this.tempConfig.contextWindow = isNaN(num) ? undefined : num;
+        }));
+
+    // Compaction Threshold
+    new Setting(contentEl)
+      .setName('压缩阈值')
+      .setDesc('上下文达到此比例时触发压缩 (0-1)，默认 0.8')
+      .addText(text => text
+        .setPlaceholder('0.8')
+        .setValue(this.tempConfig.compactionThreshold ? String(this.tempConfig.compactionThreshold) : '')
+        .onChange(value => {
+          const num = parseFloat(value);
+          this.tempConfig.compactionThreshold = (isNaN(num) || num <= 0 || num >= 1) ? undefined : num;
+        }));
+
     // Initial field visibility update
     this.updateFieldVisibility();
   }
@@ -304,6 +328,13 @@ export class ProviderEditModal extends Modal {
     // MaxTokens validation
     if (this.tempConfig.maxTokens !== undefined && this.tempConfig.maxTokens < 1) {
       errors.push('最大Tokens必须大于0');
+    }
+
+    // Compaction threshold validation
+    if (this.tempConfig.compactionThreshold !== undefined) {
+      if (this.tempConfig.compactionThreshold <= 0 || this.tempConfig.compactionThreshold >= 1) {
+        errors.push('压缩阈值必须在0到1之间');
+      }
     }
 
     return { valid: errors.length === 0, errors };
