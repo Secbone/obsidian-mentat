@@ -42,16 +42,14 @@ describe('AgentOrchestrator Unit Tests', () => {
 
     const mockAgent1 = {
       getId: () => 'agent-1',
-      execute: async function* (prompt: string, context: any) {
-        yield { type: 'chunk', text: 'chunk from agent 1' };
+      execute: async (_prompt: string, _context: any) => {
         return { content: 'result 1', messages: [{ role: 'assistant', content: 'result 1', timestamp: Date.now() }] };
       }
     } as any as BaseAgent;
 
     const mockAgent2 = {
       getId: () => 'agent-2',
-      execute: async function* (prompt: string, context: any) {
-        yield { type: 'chunk', text: 'chunk from agent 2' };
+      execute: async (_prompt: string, _context: any) => {
         return { content: 'result 2', messages: [{ role: 'assistant', content: 'result 2', timestamp: Date.now() }] };
       }
     } as any as BaseAgent;
@@ -90,11 +88,9 @@ describe('AgentOrchestrator Unit Tests', () => {
       console.error(e);
     }
 
-    expect(events.length).toBe(2);
-    expect(events.some(e => e.taskId === 'task-a' && e.type === 'chunk')).toBe(true);
-    expect(events.some(e => e.taskId === 'task-b' && e.type === 'chunk')).toBe(true);
+    // Orchestrator doesn't emit per-agent chunk events in the new architecture
     expect(resultValue).toBeDefined();
-    expect(resultValue.finalResponse).toBe('result 2'); // Last task response content
+    expect(resultValue.finalResponse).toBe('result 2');
   });
 
   it('should clean pipeline intermediate context messages to prevent token bloat', async () => {
@@ -103,12 +99,11 @@ describe('AgentOrchestrator Unit Tests', () => {
 
     const mockAgent1 = {
       getId: () => 'agent-1',
-      execute: async function* (prompt: string, context: any) {
+      execute: async (_prompt: string, _context: any) => {
         return {
           content: 'agent 1 output',
           messages: [
             { role: 'user', content: 'initial', timestamp: Date.now() },
-            // Agent 1 executes a tool, generating tool call and tool response messages
             {
               role: 'assistant',
               content: '',
@@ -125,7 +120,7 @@ describe('AgentOrchestrator Unit Tests', () => {
     let passedContextMessages: any[] = [];
     const mockAgent2 = {
       getId: () => 'agent-2',
-      execute: async function* (prompt: string, context: any) {
+      execute: async (_prompt: string, context: any) => {
         passedContextMessages = context.messages;
         return { content: 'agent 2 output', messages: [] };
       }

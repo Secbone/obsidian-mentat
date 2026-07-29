@@ -10,6 +10,14 @@ describe('ChatView UI Smoke Test', () => {
     
     const mockPlugin = {
       platform,
+      extensionManager: {
+        getEventBus: () => ({
+          on: vi.fn(),
+          emit: vi.fn(),
+          off: vi.fn(),
+          removeAll: vi.fn(),
+        }),
+      },
       settings: {
         chatTheme: 'bubble',
         chatEnabled: true,

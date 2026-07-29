@@ -52,9 +52,8 @@ describe('AgentManager Unit Tests', () => {
     let executed = false;
     const mockAgent = {
       getId: () => 'agent-1',
-      execute: async function* (prompt: string, context: any) {
+      execute: async (_prompt: string, _context: any) => {
         executed = true;
-        yield { type: 'chunk', text: 'response' };
         return { content: 'response', messages: [] };
       }
     } as any as BaseAgent;
@@ -62,14 +61,8 @@ describe('AgentManager Unit Tests', () => {
     manager.registerAgent(mockAgent);
     manager.setCurrentAgent('agent-1');
 
-    const generator = manager.executeWithCurrentAgent('hello', {} as any);
-    const events = [];
-    for await (const event of generator) {
-      events.push(event);
-    }
-
+    const result = await manager.executeWithCurrentAgent('hello', {} as any);
     expect(executed).toBe(true);
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe('chunk');
+    expect(result.content).toBe('response');
   });
 });

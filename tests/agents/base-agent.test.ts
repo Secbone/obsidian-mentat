@@ -6,6 +6,7 @@ import { SkillExecutor } from '../../src/skills/core/skill-executor';
 import { SkillInvocationContext } from '../../src/skills/strategies/skill-invocation-strategy';
 import { AIProvider, AgentEvent } from '../../src/types';
 import { AgentConfig, AgentContext, DiagnosticsLogger } from '../../src/agents/agent-types';
+import { EventBus } from '../../src/extensions/event-bus';
 
 class MockDiagnosticsLogger implements DiagnosticsLogger {
   incidents: any[] = [];
@@ -21,6 +22,22 @@ describe('BaseAgent Unit Tests', () => {
     workspace: {} as any,
     indexManager: {} as any,
   } as any;
+
+  function setupAgent(config: AgentConfig, provider: AIProvider, extra: any = {}) {
+    const bus = new EventBus();
+    const skillRegistry = extra.skillRegistry ?? new SkillRegistry();
+    const skillExecutor = extra.skillExecutor ?? new SkillExecutor(skillRegistry, mockSkillContext, bus);
+    const skillInvocationContext = extra.skillInvocationContext ?? new SkillInvocationContext('native');
+    const diagnosticsLogger = extra.diagnosticsLogger;
+    const agent = new BaseAgent(config, provider, {
+      skillRegistry,
+      skillExecutor,
+      skillInvocationContext,
+      diagnosticsLogger,
+      eventBus: bus,
+    });
+    return { agent, bus, skillRegistry, skillExecutor };
+  }
 
   it('should run simple execution without skills enabled', async () => {
     const config: AgentConfig = {
@@ -44,27 +61,16 @@ describe('BaseAgent Unit Tests', () => {
       supportsSkills: () => false,
     };
 
-    const skillRegistry = new SkillRegistry();
-    const skillExecutor = new SkillExecutor(skillRegistry, mockSkillContext);
-    const skillInvocationContext = new SkillInvocationContext('native');
-
-    const agent = new BaseAgent(config, mockProvider, {
-      skillRegistry,
-      skillExecutor,
-      skillInvocationContext,
-    });
+    const { agent, bus } = setupAgent(config, mockProvider);
+    const events: AgentEvent[] = [];
+    bus.on('*', e => events.push(e));
 
     const context: AgentContext = {
       messages: [],
       sessionId: 'session-123',
     };
 
-    const events: AgentEvent[] = [];
-    const generator = agent.execute('hi', context);
-    for await (const event of generator) {
-      events.push(event);
-    }
-
+    await agent.execute('hi', context);
     expect(events.some(e => e.type === 'chunk' && e.text === 'hello')).toBe(true);
   });
 
@@ -93,15 +99,7 @@ describe('BaseAgent Unit Tests', () => {
       supportsSkills: () => false,
     };
 
-    const skillRegistry = new SkillRegistry();
-    const skillExecutor = new SkillExecutor(skillRegistry, mockSkillContext);
-    const skillInvocationContext = new SkillInvocationContext('native');
-
-    const agent = new BaseAgent(config, mockProvider, {
-      skillRegistry,
-      skillExecutor,
-      skillInvocationContext,
-    });
+    const { agent } = setupAgent(config, mockProvider);
 
     const controller = new AbortController();
     const context: AgentContext = {
@@ -112,14 +110,7 @@ describe('BaseAgent Unit Tests', () => {
 
     controller.abort();
 
-    const run = async () => {
-      const generator = agent.execute('hi', context);
-      for await (const _ of generator) {
-        // noop
-      }
-    };
-
-    await expect(run()).rejects.toThrowError(/aborted|AbortError/);
+    await expect(agent.execute('hi', context)).rejects.toThrowError(/aborted|AbortError/);
   });
 
   it('should trigger loop prevention guard when cyclic pattern is detected', async () => {
@@ -157,7 +148,8 @@ describe('BaseAgent Unit Tests', () => {
       generateStream: async () => {},
     };
 
-    const skillRegistry = new SkillRegistry();
+    const { agent, bus, skillRegistry } = setupAgent(config, mockProvider);
+
     skillRegistry.register({
       name: 'test_tool',
       namespace: 'obsidian',
@@ -168,33 +160,21 @@ describe('BaseAgent Unit Tests', () => {
       execute: async () => ({ success: true, data: { result: 'ok' } }),
     });
 
-    const skillExecutor = new SkillExecutor(skillRegistry, mockSkillContext);
-    const skillInvocationContext = new SkillInvocationContext('native');
-
-    const agent = new BaseAgent(config, mockProvider, {
-      skillRegistry,
-      skillExecutor,
-      skillInvocationContext,
-    });
-
     const context: AgentContext = {
       messages: [],
       sessionId: 'session-123',
       metadata: {
         maxCycleLength: 1,
-        minRepeats: 3, // pattern length 1, repeated 3 times: tool, tool, tool
+        minRepeats: 3,
         maxTurns: 5,
       }
     };
 
     const events: AgentEvent[] = [];
-    const generator = agent.execute('hi', context);
-    
-    for await (const event of generator) {
-      events.push(event);
-    }
+    bus.on('*', e => events.push(e));
 
-    // Check if the loop prevention warning event was emitted
+    await agent.execute('hi', context);
+
     const guardEvent = events.find(
       e => e.type === 'skill_error' && e.name === 'obsidian:test_tool' && e.error === 'Reasoning loop detected by AP6 Guard'
     );
@@ -258,38 +238,32 @@ describe('BaseAgent Unit Tests', () => {
       },
     });
 
-    const skillExecutor = new SkillExecutor(skillRegistry, mockSkillContext);
+    const bus = new EventBus();
+    const skillExecutor = new SkillExecutor(skillRegistry, mockSkillContext, bus);
     const skillInvocationContext = new SkillInvocationContext('native');
-
     const agent = new BaseAgent(config, mockProvider, {
       skillRegistry,
       skillExecutor,
       skillInvocationContext,
+      eventBus: bus,
     });
 
-    let confirmCalled = false;
     const context: AgentContext = {
       messages: [],
       sessionId: 'session-123',
-      confirmHandler: async (skillName, params, message) => {
-        confirmCalled = true;
-        return { approved: true };
-      }
     };
 
-    const generator = agent.execute('hi', context);
-    
-    // Consume generator and check confirm_request event
-    const runGenerator = async () => {
-      for await (const event of generator) {
-        if (event.type === 'confirm_request') {
-          expect(event.skillName).toBe('obsidian:need_confirm');
-        }
-      }
-    };
+    const events: AgentEvent[] = [];
+    bus.on('confirm_request', (event: any) => {
+      setTimeout(() => {
+        (bus as any).emit({ type: 'confirm_response', id: event.skillName, approved: true });
+      }, 0);
+    });
+    bus.on('*', e => events.push(e));
 
-    await runGenerator();
-    expect(confirmCalled).toBe(true);
+    await agent.execute('hi', context);
+
+    expect(events.some(e => e.type === 'confirm_request')).toBe(true);
     expect(skillWasExecuted).toBe(true);
   });
 
@@ -326,6 +300,9 @@ describe('BaseAgent Unit Tests', () => {
       generateStream: async () => {},
     };
 
+    const diagnosticsLogger = new MockDiagnosticsLogger();
+
+    const bus = new EventBus();
     const skillRegistry = new SkillRegistry();
     skillRegistry.register({
       name: 'invoke',
@@ -335,18 +312,16 @@ describe('BaseAgent Unit Tests', () => {
       execute: async () => ({ success: false, error: 'forced error' }),
     });
 
-    const skillExecutor = new SkillExecutor(skillRegistry, mockSkillContext);
+    const skillExecutor = new SkillExecutor(skillRegistry, mockSkillContext, bus);
     const skillInvocationContext = new SkillInvocationContext('native');
-    // Force obsidian:invoke to be treated as meta-tool call so it goes through safeParseToolArguments
     skillInvocationContext.isMetaToolCall = (name: string) => name === 'obsidian:invoke';
-
-    const diagnosticsLogger = new MockDiagnosticsLogger();
 
     const agent = new BaseAgent(config, mockProvider, {
       skillRegistry,
       skillExecutor,
       skillInvocationContext,
       diagnosticsLogger,
+      eventBus: bus,
     });
 
     const context: AgentContext = {
@@ -354,10 +329,7 @@ describe('BaseAgent Unit Tests', () => {
       sessionId: 'session-123',
     };
 
-    const generator = agent.execute('hi', context);
-    for await (const _ of generator) {
-      // consume
-    }
+    await agent.execute('hi', context);
 
     expect(diagnosticsLogger.incidents.length).toBeGreaterThan(0);
     expect(diagnosticsLogger.incidents[0].toolName).toBe('obsidian:invoke');
