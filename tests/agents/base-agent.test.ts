@@ -59,6 +59,8 @@ describe('BaseAgent Unit Tests', () => {
       embed: async () => [],
       generateEmbedding: async () => ({ embedding: [] }),
       supportsSkills: () => false,
+      getContextWindow: () => 32000,
+      getCompactionThreshold: () => 0.8,
     };
 
     const { agent, bus } = setupAgent(config, mockProvider);
@@ -97,6 +99,8 @@ describe('BaseAgent Unit Tests', () => {
       embed: async () => [],
       generateEmbedding: async () => ({ embedding: [] }),
       supportsSkills: () => false,
+      getContextWindow: () => 32000,
+      getCompactionThreshold: () => 0.8,
     };
 
     const { agent } = setupAgent(config, mockProvider);
@@ -146,6 +150,8 @@ describe('BaseAgent Unit Tests', () => {
       embed: async () => [],
       generateEmbedding: async () => ({ embedding: [] }),
       generateStream: async () => {},
+      getContextWindow: () => 32000,
+      getCompactionThreshold: () => 0.8,
     };
 
     const { agent, bus, skillRegistry } = setupAgent(config, mockProvider);
@@ -222,6 +228,8 @@ describe('BaseAgent Unit Tests', () => {
       embed: async () => [],
       generateEmbedding: async () => ({ embedding: [] }),
       generateStream: async () => {},
+      getContextWindow: () => 32000,
+      getCompactionThreshold: () => 0.8,
     };
 
     const skillRegistry = new SkillRegistry();
@@ -298,6 +306,8 @@ describe('BaseAgent Unit Tests', () => {
       embed: async () => [],
       generateEmbedding: async () => ({ embedding: [] }),
       generateStream: async () => {},
+      getContextWindow: () => 32000,
+      getCompactionThreshold: () => 0.8,
     };
 
     const diagnosticsLogger = new MockDiagnosticsLogger();

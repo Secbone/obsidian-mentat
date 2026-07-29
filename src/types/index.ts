@@ -97,6 +97,10 @@ export interface AIProvider {
 
   // Capabilities
   supportsSkills?(): boolean;
+
+  // Context window
+  getContextWindow(): number;
+  getCompactionThreshold(): number;
 }
 
 // Classification results

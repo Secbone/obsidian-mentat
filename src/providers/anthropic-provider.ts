@@ -10,6 +10,8 @@ export interface AnthropicProviderConfig {
   model: string;
   temperature?: number;
   maxTokens?: number;
+  contextWindow?: number;
+  compactionThreshold?: number;
 }
 
 export class AnthropicProvider implements AIProvider {
@@ -120,6 +122,29 @@ export class AnthropicProvider implements AIProvider {
 
   supportsSkills(): boolean {
     return true;
+  }
+
+  private static CONTEXT_WINDOWS: [string, number][] = [
+    ['claude-sonnet-4', 200000],
+    ['claude-3-5-sonnet', 200000],
+    ['claude-3-opus', 200000],
+    ['claude-3-haiku', 200000],
+    ['claude-3', 200000],
+    ['claude-2', 100000],
+    ['claude-instant', 100000],
+  ];
+
+  getContextWindow(): number {
+    if (this.config.contextWindow) return this.config.contextWindow;
+    const model = this.config.model.toLowerCase();
+    for (const [prefix, size] of AnthropicProvider.CONTEXT_WINDOWS) {
+      if (model.startsWith(prefix)) return size;
+    }
+    return 100000;
+  }
+
+  getCompactionThreshold(): number {
+    return this.config.compactionThreshold ?? 0.8;
   }
 
   /**

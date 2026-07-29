@@ -130,6 +130,10 @@ export interface AIProviderConfig {
   // Advanced options
   temperature?: number;
   maxTokens?: number;
+
+  // Context window (auto-detected from model if omitted)
+  contextWindow?: number;
+  compactionThreshold?: number; // 0-1, default 0.8
 }
 
 export const DEFAULT_SETTINGS: MentatSettings = {

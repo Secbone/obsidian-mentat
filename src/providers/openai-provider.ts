@@ -12,6 +12,8 @@ export interface OpenAIProviderConfig {
   embeddingModel?: string;
   temperature?: number;
   maxTokens?: number;
+  contextWindow?: number;
+  compactionThreshold?: number;
 }
 
 // OpenAI API max_tokens upper limit
@@ -179,6 +181,32 @@ export class OpenAIProvider implements AIProvider {
 
   supportsSkills(): boolean {
     return true;
+  }
+
+  private static CONTEXT_WINDOWS: [string, number][] = [
+    ['gpt-4-turbo', 128000],
+    ['gpt-4o-mini', 128000],
+    ['gpt-4o', 128000],
+    ['gpt-4', 8192],
+    ['gpt-3.5-turbo', 16384],
+    ['o1', 200000],
+    ['o3', 200000],
+    ['deepseek-reasoner', 65536],
+    ['deepseek-chat', 65536],
+    ['deepseek', 128000],
+  ];
+
+  getContextWindow(): number {
+    if (this.config.contextWindow) return this.config.contextWindow;
+    const model = this.config.model.toLowerCase();
+    for (const [prefix, size] of OpenAIProvider.CONTEXT_WINDOWS) {
+      if (model.startsWith(prefix)) return size;
+    }
+    return 8192;
+  }
+
+  getCompactionThreshold(): number {
+    return this.config.compactionThreshold ?? 0.8;
   }
 
   /**

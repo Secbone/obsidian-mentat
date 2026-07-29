@@ -18,6 +18,8 @@ export interface OllamaProviderConfig {
   embeddingModel?: string;
   temperature?: number;
   maxTokens?: number;
+  contextWindow?: number;
+  compactionThreshold?: number;
 }
 
 interface OllamaMessage {
@@ -242,6 +244,18 @@ export class OllamaProvider implements AIProvider {
   async embeds(texts: string[]): Promise<number[][]> {
     const result = await this.generateEmbeddings(texts);
     return result.embeddings;
+  }
+
+  getContextWindow(): number {
+    if (this.config.contextWindow) return this.config.contextWindow;
+    const model = this.config.model.toLowerCase();
+    if (model.includes('llama') || model.includes('mistral') || model.includes('qwen')) return 32768;
+    if (model.includes('phi') || model.includes('gemma')) return 8192;
+    return 8192;
+  }
+
+  getCompactionThreshold(): number {
+    return this.config.compactionThreshold ?? 0.8;
   }
 
   async isAvailable(): Promise<boolean> {

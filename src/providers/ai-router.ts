@@ -44,7 +44,9 @@ export class AIRouter {
               model: config.model,
               embeddingModel: config.embeddingModel,
               temperature: config.temperature,
-              maxTokens: config.maxTokens
+              maxTokens: config.maxTokens,
+              contextWindow: config.contextWindow,
+              compactionThreshold: config.compactionThreshold,
             });
             break;
 
@@ -54,7 +56,9 @@ export class AIRouter {
               apiKey: config.apiKey!,
               model: config.model,
               temperature: config.temperature,
-              maxTokens: config.maxTokens
+              maxTokens: config.maxTokens,
+              contextWindow: config.contextWindow,
+              compactionThreshold: config.compactionThreshold,
             });
             break;
 
@@ -65,7 +69,9 @@ export class AIRouter {
               model: config.model,
               embeddingModel: config.embeddingModel,
               temperature: config.temperature,
-              maxTokens: config.maxTokens
+              maxTokens: config.maxTokens,
+              contextWindow: config.contextWindow,
+              compactionThreshold: config.compactionThreshold,
             });
             break;
 

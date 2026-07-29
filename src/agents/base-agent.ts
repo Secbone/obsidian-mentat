@@ -242,8 +242,9 @@ export class BaseAgent {
       // 自动上下文压缩检查
       if (this.compactor && state.turnCount > 1 && state.turnCount % 3 === 0) {
         const totalTokens = Compactor.estimateTokens(state.messages);
-        const budget = (context.metadata as Record<string, unknown>)?.maxContextTokens as number ?? 32000;
-        if (totalTokens > budget * 0.75) {
+        const budget = this.provider.getContextWindow();
+        const threshold = this.provider.getCompactionThreshold();
+        if (totalTokens > budget * threshold) {
           yield { type: 'status', message: `正在压缩上下文 (${Math.round(totalTokens / 1000)}k tokens)...` };
           yield { type: 'compaction_start' };
 
