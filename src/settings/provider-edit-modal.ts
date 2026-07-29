@@ -203,6 +203,10 @@ export class ProviderEditModal extends Modal {
         .setPlaceholder('16384')
         .setValue(String(this.tempConfig.maxTokens || 16384))
         .onChange(value => {
+          if (value === '') {
+            this.tempConfig.maxTokens = undefined;
+            return;
+          }
           const num = parseInt(value);
           if (!isNaN(num)) {
             this.tempConfig.maxTokens = num;
