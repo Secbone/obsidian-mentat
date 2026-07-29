@@ -9,6 +9,7 @@ import { SkillCall, isExecutableSkill, SkillResult, SkillNamespace } from '../sk
 import { AgentConfig, AgentContext, AgentResponse, AgentEvent, DiagnosticsLogger } from './agent-types';
 import { Compactor } from './compactor';
 import { EventBus } from '../extensions/event-bus';
+import { formatDiffAsText } from '../utils/diff';
 
 interface ToolCallResult {
   toolMessages: ChatMessage[];
@@ -856,10 +857,17 @@ export class BaseAgent {
       }
 
       if (runResult.success) {
-        yield { type: 'skill_success', name: callNameForEvent, result: runResult.data };
+        const diff = (runResult.metadata as Record<string, unknown> | undefined)?.diff;
+        yield { type: 'skill_success', name: callNameForEvent, result: diff ? { ...(runResult.data ?? {}), _diff: diff } : runResult.data };
+        let content = JSON.stringify(runResult.data, null, 2);
+        if (diff && Array.isArray(diff)) {
+          const filePath = (runResult.data as Record<string, unknown> | undefined)?.path as string || '';
+          content = formatDiffAsText(filePath, diff as any) + '\n\n' + content;
+        }
+
         const mainMessage: ChatMessage = {
           role: 'tool',
-          content: JSON.stringify(runResult.data, null, 2),
+          content,
           timestamp: Date.now(),
           tool_call_id: toolCall.id,
           name: toolName

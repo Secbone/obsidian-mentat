@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { TFile, Vault } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 import { NoteLinter } from '../../../src/utils/note-linter';
+import { computeDiff } from '../../../src/utils/diff';
 import { getHeadingPattern, insertAfterHeading, replaceSection } from '../../../src/utils/note-manipulator';
 
 /**
@@ -145,6 +146,16 @@ export async function execute(
       }
     }
 
+    // Compute diff for display
+    const finalFile = context.vault.getAbstractFileByPath(input.path);
+    let diff: any[] | undefined;
+    if (finalFile instanceof TFile) {
+      try {
+        const finalContent = await context.vault.read(finalFile);
+        diff = computeDiff(previousContent ?? '', finalContent);
+      } catch (_) { /* ignore diff errors */ }
+    }
+
     return {
       success: true,
       data: {
@@ -154,7 +165,8 @@ export async function execute(
       metadata: {
         executionTime: Date.now() - startTime,
         filesCreated: result.created ? [result.path] : undefined,
-        filesModified: result.updated ? [result.path] : undefined
+        filesModified: result.updated ? [result.path] : undefined,
+        diff
       }
     };
   } catch (error) {

@@ -269,6 +269,30 @@
   text-decoration: underline;
 }
 
+/* Diff display */
+[data-theme="terminal"] .term-diff {
+  font-family: var(--term-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 0;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+[data-theme="terminal"] .term-diff-add {
+  background-color: rgba(0, 180, 0, 0.12);
+  color: #2ea043;
+}
+
+[data-theme="terminal"] .term-diff-remove {
+  background-color: rgba(220, 50, 50, 0.12);
+  color: #f85149;
+}
+
+[data-theme="terminal"] .term-diff-keep {
+  color: var(--term-text-muted);
+}
+
 /* Subagent trace */
 [data-theme="terminal"] .term-subagent {
   margin: 2px 0 2px 12px;

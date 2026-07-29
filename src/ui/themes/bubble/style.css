@@ -856,3 +856,27 @@
   font-size: 10.5px;
   color: var(--text-accent);
 }
+
+/* Diff display */
+[data-theme="bubble"] .bubble-diff {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 0;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+[data-theme="bubble"] .bubble-diff-add {
+  background-color: rgba(0, 180, 0, 0.12);
+  color: #2ea043;
+}
+
+[data-theme="bubble"] .bubble-diff-remove {
+  background-color: rgba(220, 50, 50, 0.12);
+  color: #f85149;
+}
+
+[data-theme="bubble"] .bubble-diff-keep {
+  color: var(--text-muted);
+}

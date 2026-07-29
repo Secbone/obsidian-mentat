@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { TFile } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 import { NoteLinter } from '../../../src/utils/note-linter';
+import { computeDiff, DiffLine } from '../../../src/utils/diff';
 import { exactReplaceString } from '../../../src/utils/note-manipulator';
 
 /**
@@ -153,7 +154,8 @@ export async function execute(
       data: result,
       metadata: {
         executionTime: Date.now() - startTime,
-        filesModified: [result.path]
+        filesModified: [result.path],
+        diff: previousContent !== null ? computeDiff(previousContent, newContent) : undefined
       }
     };
   } catch (error) {

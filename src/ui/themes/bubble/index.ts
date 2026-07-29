@@ -413,7 +413,24 @@ export class BubbleTheme implements ChatTheme {
           }
 
           if (task.result) {
-            this.renderTruncatedText(detailsBody, 'Response', task.result, `${task.id}-result`);
+            const result = task.result as Record<string, unknown>;
+            if (result._diff && Array.isArray(result._diff)) {
+              const diffEl = detailsBody.createDiv('bubble-diff');
+              for (const line of result._diff as Array<{ type: string; content: string; oldLineNum?: number; newLineNum?: number }>) {
+                const lineEl = diffEl.createDiv(
+                  line.type === 'add' ? 'bubble-diff-add' : line.type === 'remove' ? 'bubble-diff-remove' : 'bubble-diff-keep'
+                );
+                const num = line.type === 'add'
+                  ? String(line.newLineNum ?? '').padStart(3)
+                  : String(line.oldLineNum ?? '').padStart(3);
+                const prefix = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
+                lineEl.setText(`${num} ${prefix}  ${line.content}`);
+              }
+              const { _diff, ...cleanResult } = result;
+              this.renderTruncatedText(detailsBody, 'Response', cleanResult, `${task.id}-result`);
+            } else {
+              this.renderTruncatedText(detailsBody, 'Response', task.result, `${task.id}-result`);
+            }
           }
         }
 

@@ -301,7 +301,24 @@ export class TerminalTheme implements ChatTheme {
             this.renderTruncatedText(detailsBody, 'Parameters', task.params, `${task.id}-params`);
           }
           if (task.result) {
-            this.renderTruncatedText(detailsBody, 'Response', task.result, `${task.id}-result`);
+            const result = task.result as Record<string, unknown>;
+            if (result._diff && Array.isArray(result._diff)) {
+              const diffEl = detailsBody.createDiv('term-diff');
+              for (const line of result._diff as Array<{ type: string; content: string; oldLineNum?: number; newLineNum?: number }>) {
+                const lineEl = diffEl.createDiv(
+                  line.type === 'add' ? 'term-diff-add' : line.type === 'remove' ? 'term-diff-remove' : 'term-diff-keep'
+                );
+                const num = line.type === 'add'
+                  ? String(line.newLineNum ?? '').padStart(3)
+                  : String(line.oldLineNum ?? '').padStart(3);
+                const prefix = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
+                lineEl.setText(`${num} ${prefix}  ${line.content}`);
+              }
+              const { _diff, ...cleanResult } = result;
+              this.renderTruncatedText(detailsBody, 'Response', cleanResult, `${task.id}-result`);
+            } else {
+              this.renderTruncatedText(detailsBody, 'Response', task.result, `${task.id}-result`);
+            }
           }
         }
 
