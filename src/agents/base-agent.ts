@@ -123,8 +123,8 @@ export class BaseAgent {
     const startTime = Date.now();
     const systemPrompt = this.buildSystemPrompt();
 
-    yield { type: 'agent_start' };
-    yield { type: 'status', message: '初始化智能体...' };
+    yield { type: 'agent:start' };
+    yield { type: 'system:status', message: '初始化智能体...' };
 
     if (context.abortSignal?.aborted) {
       throw new DOMException('The user aborted a request.', 'AbortError');
@@ -132,7 +132,7 @@ export class BaseAgent {
 
     // If skills are disabled or not supported, run simple single-turn generation
     if (!this.config.enableSkills || !this.provider.supportsSkills?.()) {
-      yield { type: 'status', message: '正在思考...' };
+      yield { type: 'system:status', message: '正在思考...' };
 
       if (context.abortSignal?.aborted) {
         throw new DOMException('The user aborted a request.', 'AbortError');
@@ -151,7 +151,7 @@ export class BaseAgent {
           abortSignal: context.abortSignal
         });
       } catch (err: unknown) {
-        yield { type: 'error', message: `大模型执行异常: ${err instanceof Error ? err.message : String(err)}` };
+        yield { type: 'system:error', message: `大模型执行异常: ${err instanceof Error ? err.message : String(err)}` };
         throw err;
       }
 
@@ -228,7 +228,7 @@ export class BaseAgent {
 
         for (const steerText of steerTexts) {
           // 产生一个人类引导的事件，推送给前端 UI 记录
-          yield { type: 'steer', message: steerText };
+          yield { type: 'system:steer', message: steerText };
 
           // 强行将这一步的人类干预追加到大模型当前轮 of context messages 中！
           state.messages.push({
@@ -245,8 +245,8 @@ export class BaseAgent {
         const budget = this.provider.getContextWindow();
         const threshold = this.provider.getCompactionThreshold();
         if (totalTokens > budget * threshold) {
-          yield { type: 'status', message: `正在压缩上下文 (${Math.round(totalTokens / 1000)}k tokens)...` };
-          yield { type: 'compaction_start' };
+          yield { type: 'system:status', message: `正在压缩上下文 (${Math.round(totalTokens / 1000)}k tokens)...` };
+          yield { type: 'context:compact:start' };
 
           const summary = await this.compactor.compact(state.messages, { keepRecent: 6 });
           if (summary) {
@@ -260,15 +260,15 @@ export class BaseAgent {
               } as ChatMessage,
               ...recentMessages
             ];
-            yield { type: 'compaction_end', summaryLength: summary.length };
+            yield { type: 'context:compact:end', summaryLength: summary.length };
           }
         }
       }
 
-      yield { type: 'status', message: `正在思考 (第 ${state.turnCount} 轮)...` };
+      yield { type: 'system:status', message: `正在思考 (第 ${state.turnCount} 轮)...` };
 
-      yield { type: 'turn_start', turnIndex: state.turnCount };
-      yield { type: 'message_start', role: 'assistant' };
+      yield { type: 'turn:start', turnIndex: state.turnCount };
+      yield { type: 'message:start', role: 'assistant' };
 
       // Node A: Stream Model
       let result: GenerateResponse;
@@ -301,7 +301,7 @@ export class BaseAgent {
           cacheCreationTokens += result.usage.cacheCreationTokens ?? 0;
         }
       } catch (err: unknown) {
-        yield { type: 'error', message: `大模型决策异常: ${err instanceof Error ? err.message : String(err)}` };
+        yield { type: 'system:error', message: `大模型决策异常: ${err instanceof Error ? err.message : String(err)}` };
         throw err;
       }
 
@@ -313,7 +313,7 @@ export class BaseAgent {
         tool_calls: result.toolCalls
       };
 
-      yield { type: 'message_end', role: 'assistant', content: result.content };
+      yield { type: 'message:end', role: 'assistant', content: result.content };
 
       state = this.mergeState(state, {
         fullResponse: state.fullResponse + result.content,
@@ -342,19 +342,19 @@ export class BaseAgent {
         skillCalls: newSkillCalls
       });
 
-      yield { type: 'turn_end', turnIndex: state.turnCount, message: assistantMessage, toolResults };
+      yield { type: 'turn:end', turnIndex: state.turnCount, message: assistantMessage, toolResults };
     }
 
     const isLimitReached = state.turnCount >= state.maxTurns;
     if (isLimitReached) {
       console.warn('[BaseAgent] Reached maximum turns limit');
-      yield { type: 'error', message: '⚠️ 智能体执行已达到最大轮数限制，已被强制熔断。' };
+      yield { type: 'system:error', message: '⚠️ 智能体执行已达到最大轮数限制，已被强制熔断。' };
     }
 
-    yield { type: 'status', message: '任务完成！' };
+    yield { type: 'system:status', message: '任务完成！' };
 
     // 在新事件中附加 metadata
-    yield { type: 'agent_end', messages: state.messages };
+    yield { type: 'agent:end', messages: state.messages };
 
     // Attach usage stats to the last assistant message
     const assistantMsgs = state.messages.filter(m => m.role === 'assistant');
@@ -422,14 +422,14 @@ export class BaseAgent {
     }
 
     if (!this.provider.generateStreamWithSkills) {
-      yield { type: 'error', message: '当前 AI 服务商不支持技能工具调用，请切换到 OpenAI 或 Anthropic 提供商。' };
+      yield { type: 'system:error', message: '当前 AI 服务商不支持技能工具调用，请切换到 OpenAI 或 Anthropic 提供商。' };
       return { content: '', toolCalls: [], finishReason: 'stop' };
     }
 
     this.provider.generateStreamWithSkills(
       messages,
       (chunk: string) => {
-        queue.push({ type: 'chunk', text: chunk });
+        queue.push({ type: 'message:update', delta: chunk });
         if (resolveNext) {
           resolveNext();
           resolveNext = null;
@@ -509,7 +509,7 @@ export class BaseAgent {
       prompt,
       (chunk: string) => {
         fullResponse += chunk;
-        queue.push({ type: 'chunk', text: chunk });
+        queue.push({ type: 'message:update', delta: chunk });
         if (resolveNext) {
           resolveNext();
           resolveNext = null;
@@ -622,10 +622,9 @@ export class BaseAgent {
       }
 
       if (isLoop) {
-        yield { type: 'status', message: `⚠️ 检测到工具调用 [${toolCall.name}] 陷入推理死循环，正在强制干预引导自愈...` };
-        yield { type: 'tool_execution_start', toolCallId: toolCall.id, toolName: toolCall.name, args: toolCall.arguments };
-        yield { type: 'skill_error', name: toolCall.name, error: 'Reasoning loop detected by AP6 Guard' };
-        yield { type: 'tool_execution_end', toolCallId: toolCall.id, result: null, isError: true };
+        yield { type: 'system:status', message: `⚠️ 检测到工具调用 [${toolCall.name}] 陷入推理死循环，正在强制干预引导自愈...` };
+        yield { type: 'tool:start', toolCallId: toolCall.id, toolName: toolCall.name, args: toolCall.arguments };
+        yield { type: 'tool:end', toolCallId: toolCall.id, toolName: toolCall.name, result: null, isError: true };
 
         results.push({
           toolMessages: [{
@@ -684,26 +683,29 @@ export class BaseAgent {
         for (let i = 0; i < readCalls.length; i++) {
           const tc = readCalls[i];
           const { events, result: runResult } = readCollected[i];
-          yield { type: 'tool_execution_start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
+          yield { type: 'tool:start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
           for (const event of events) yield event;
-          yield { type: 'tool_execution_end', toolCallId: tc.id, result: runResult, isError: false };
+          const sr = runResult.skillCalls?.[0]?.result;
+          yield { type: 'tool:end', toolCallId: tc.id, toolName: tc.name, result: sr ?? null, isError: sr ? !sr.success : true };
           results.push(runResult);
         }
       }
 
       // 再串行执行所有写操作（保持原始顺序）
       for (const tc of serialCalls) {
-        yield { type: 'tool_execution_start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
+        yield { type: 'tool:start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
         const runRes = yield* this.executeSingleToolCall(tc, context);
-        yield { type: 'tool_execution_end', toolCallId: tc.id, result: runRes, isError: false };
+        const sr = runRes.skillCalls?.[0]?.result;
+        yield { type: 'tool:end', toolCallId: tc.id, toolName: tc.name, result: sr ?? null, isError: sr ? !sr.success : true };
         results.push(runRes);
       }
     } else {
       // 串行执行（保持原始 toolCalls 顺序）
       for (const tc of executableCalls) {
-        yield { type: 'tool_execution_start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
+        yield { type: 'tool:start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
         const runRes = yield* this.executeSingleToolCall(tc, context);
-        yield { type: 'tool_execution_end', toolCallId: tc.id, result: runRes, isError: false };
+        const sr = runRes.skillCalls?.[0]?.result;
+        yield { type: 'tool:end', toolCallId: tc.id, toolName: tc.name, result: sr ?? null, isError: sr ? !sr.success : true };
         results.push(runRes);
       }
     }
@@ -743,9 +745,7 @@ export class BaseAgent {
       );
     } catch (err: unknown) {
       // Parsing failed
-      yield { type: 'skill_call', name: toolName, params: toolCall.arguments };
-      yield { type: 'status', message: `⚠️ 工具 [${toolName}] 参数解析失败，正在引导智能体自我纠错...` };
-      yield { type: 'skill_error', name: toolName, error: err instanceof Error ? err.message : String(err) };
+      yield { type: 'system:status', message: `⚠️ 工具 [${toolName}] 参数解析失败，正在引导智能体自我纠错...` };
 
       return {
         toolMessages: [{
@@ -785,31 +785,32 @@ export class BaseAgent {
     }
 
     if (toolName === 'invoke' && !targetSkillName) {
-      yield { type: 'status', message: `⚠️ 工具 [invoke] 缺少必填参数 skill_name` };
-      yield { type: 'skill_error', name: 'invoke:unknown', error: 'Missing required parameter "skill_name"' };
+      const errorMsg = "Missing required parameter 'skill_name' in invoke tool call. You must specify the namespace and skill name (e.g., 'obsidian:edit_note') in 'skill_name'.";
+      yield { type: 'system:status', message: `⚠️ 工具 [invoke] 缺少必填参数 skill_name` };
       return {
         toolMessages: [{
           role: 'tool',
-          content: "Error: Missing required parameter 'skill_name' in invoke tool call. You must specify the namespace and skill name (e.g., 'obsidian:edit_note') in 'skill_name'.",
+          content: errorMsg,
           timestamp: Date.now(),
           tool_call_id: toolCall.id,
           name: toolName
         }],
-        skillCalls: []
+        skillCalls: [{
+          id: toolCall.id,
+          skillName: toolName,
+          namespace: 'meta',
+          parameters: argsObj,
+          status: 'error',
+          timestamp: Date.now(),
+          result: { success: false, error: errorMsg }
+        }]
       };
     }
 
     if (isSpec) {
-      yield { type: 'skill_call', name: `spec:${targetSkillName}`, params: argsObj };
       try {
         const details = this.skillRegistry.getSkillDetails(targetSkillName, 'markdown');
         const isSuccess = !details.startsWith('Error:');
-
-        if (isSuccess) {
-          yield { type: 'skill_success', name: `spec:${targetSkillName}`, result: details };
-        } else {
-          yield { type: 'skill_error', name: `spec:${targetSkillName}`, error: details };
-        }
 
         return {
           toolMessages: [{
@@ -830,22 +831,27 @@ export class BaseAgent {
           }]
         };
       } catch (err: unknown) {
-        yield { type: 'skill_error', name: `spec:${targetSkillName}`, error: err instanceof Error ? err.message : String(err) };
+        const errorMsg = err instanceof Error ? err.message : String(err);
         return {
           toolMessages: [{
             role: 'tool',
-            content: `Error: Exception during execution: ${err instanceof Error ? err.message : String(err)}`,
+            content: `Error: Exception during execution: ${errorMsg}`,
             timestamp: Date.now(),
             tool_call_id: toolCall.id,
             name: toolName
           }],
-          skillCalls: []
+          skillCalls: [{
+            id: toolCall.id,
+            skillName: toolName,
+            namespace: 'meta',
+            parameters: argsObj,
+            status: 'error',
+            timestamp: Date.now(),
+            result: { success: false, error: errorMsg }
+          }]
         };
       }
     }
-
-    const callNameForEvent = isMeta ? `invoke:${targetSkillName}` : toolName;
-    yield { type: 'skill_call', name: callNameForEvent, params: targetParams };
 
     try {
       let runResult: SkillResult;
@@ -859,7 +865,6 @@ export class BaseAgent {
 
       if (runResult.success) {
         const diff = (runResult.metadata as Record<string, unknown> | undefined)?.diff;
-        yield { type: 'skill_success', name: callNameForEvent, result: diff ? { ...(runResult.data ?? {}), _diff: diff } : runResult.data };
         let content = JSON.stringify(runResult.data, null, 2);
         if (diff && Array.isArray(diff)) {
           const filePath = (runResult.data as Record<string, unknown> | undefined)?.path as string || '';
@@ -888,8 +893,7 @@ export class BaseAgent {
           }]
         };
       } else {
-        yield { type: 'status', message: `⚠️ 工具 [${targetSkillName}] 运行失败，正在自动引导纠错...` };
-        yield { type: 'skill_error', name: callNameForEvent, error: runResult.error || '执行失败' };
+        yield { type: 'system:status', message: `⚠️ 工具 [${targetSkillName}] 运行失败，正在自动引导纠错...` };
         
         return {
           toolMessages: [{
@@ -911,8 +915,7 @@ export class BaseAgent {
         };
       }
     } catch (err: unknown) {
-      yield { type: 'status', message: `⚠️ 工具 [${targetSkillName}] 参数解析或运行异常，正在自动纠错...` };
-      yield { type: 'skill_error', name: callNameForEvent, error: err instanceof Error ? err.message : String(err) };
+      yield { type: 'system:status', message: `⚠️ 工具 [${targetSkillName}] 参数解析或运行异常，正在自动纠错...` };
 
       return {
         toolMessages: [{

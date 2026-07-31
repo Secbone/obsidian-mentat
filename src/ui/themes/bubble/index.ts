@@ -413,10 +413,11 @@ export class BubbleTheme implements ChatTheme {
           }
 
           if (task.result) {
-            const result = task.result as Record<string, unknown>;
-            if (result._diff && Array.isArray(result._diff)) {
+            const result = task.result as { success?: boolean; data?: unknown; error?: string; metadata?: { diff?: unknown } };
+            const diff = result.metadata?.diff;
+            if (diff && Array.isArray(diff)) {
               const diffEl = detailsBody.createDiv('bubble-diff');
-              for (const line of result._diff as Array<{ type: string; content: string; oldLineNum?: number; newLineNum?: number }>) {
+              for (const line of diff as Array<{ type: string; content: string; oldLineNum?: number; newLineNum?: number }>) {
                 const lineEl = diffEl.createDiv(
                   line.type === 'add' ? 'bubble-diff-add' : line.type === 'remove' ? 'bubble-diff-remove' : 'bubble-diff-keep'
                 );
@@ -426,10 +427,10 @@ export class BubbleTheme implements ChatTheme {
                 const prefix = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
                 lineEl.setText(`${num} ${prefix}  ${line.content}`);
               }
-              const { _diff, ...cleanResult } = result;
+            }
+            if (result.data !== undefined || result.error) {
+              const cleanResult = result.error && result.data === undefined ? result.error : result.data;
               this.renderTruncatedText(detailsBody, 'Response', cleanResult, `${task.id}-result`);
-            } else {
-              this.renderTruncatedText(detailsBody, 'Response', task.result, `${task.id}-result`);
             }
           }
         }

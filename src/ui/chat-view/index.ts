@@ -91,8 +91,12 @@ export class ChatView extends ItemView {
       onSteer: (_text) => this.handleSteer(),
       onCancel: () => this.handleCancel(),
       onClear: () => { void this.handleClear(); },
-      onConfirmApprove: (_taskId) => { /* handled by orchestrator */ },
-      onConfirmReject: (_taskId) => { /* handled by orchestrator */ },
+      onConfirmApprove: (taskId) => {
+        this.eventBus.emit({ type: 'confirm:response', taskId, approved: true });
+      },
+      onConfirmReject: (taskId) => {
+        this.eventBus.emit({ type: 'confirm:response', taskId, approved: false });
+      },
       onAddDocument: () => this.showDocumentSelector(),
       onRemoveDocument: (path) => { void this.chatManager.removeDocument(path); this.renderDocumentList(); },
       onSettings: () => {
@@ -397,8 +401,8 @@ export class ChatView extends ItemView {
 
     switch (event.type) {
 
-      case 'chunk': {
-        s.currentTurnResponse += event.text;
+      case 'message:update': {
+        s.currentTurnResponse += event.delta;
 
         if (s.currentTurnResponse.includes('<final_answer>')) {
           s.hasFinalAnswerTag = true;
@@ -420,7 +424,11 @@ export class ChatView extends ItemView {
         break;
       }
 
-      case 'tool_execution_start': {
+      case 'message:start':
+      case 'message:end':
+        break;
+
+      case 'tool:start': {
         const shortName = event.toolName.split(':').pop() || event.toolName;
         s.lastToolStatus = { name: shortName, status: 'pending' };
 
@@ -446,7 +454,7 @@ export class ChatView extends ItemView {
         break;
       }
 
-      case 'tool_execution_end': {
+      case 'tool:end': {
         const shortName = s.activeTasks.find(t => t.id === event.toolCallId)?.name.split(':').pop() || '';
         if (shortName === s.lastToolStatus.name) {
           s.lastToolStatus.status = event.isError ? 'error' : 'success';
@@ -461,52 +469,11 @@ export class ChatView extends ItemView {
         break;
       }
 
-      case 'skill_call': {
-        const shortName = event.name.split(':').pop() || event.name;
-        s.lastToolStatus = { name: shortName, status: 'pending' };
-        s.activeTasks.push({
-          id: event.name + Date.now(),
-          name: event.name,
-          status: 'executing',
-          params: event.params as Record<string, unknown> | undefined,
-          explanation: s.currentTurnResponse.trim(),
-        });
-        s.currentTurnResponse = '';
-        s.currentStatus = `执行工具: ${shortName}`;
-        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
-        break;
-      }
-
-      case 'skill_success': {
-        const shortName = event.name.split(':').pop() || event.name;
-        if (shortName === s.lastToolStatus.name) s.lastToolStatus.status = 'success';
-        const task = s.activeTasks.find(t =>
-          (t.name === event.name || `invoke:${t.name}` === event.name) && t.status === 'executing'
-        );
-        if (task) { task.status = 'success'; task.result = event.result; }
-        s.currentStatus = '';
-        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
-        break;
-      }
-
-      case 'skill_error': {
-        const shortName = event.name.split(':').pop() || event.name;
-        if (shortName === s.lastToolStatus.name) s.lastToolStatus.status = 'error';
-        const task = s.activeTasks.find(t =>
-          (t.name === event.name || `invoke:${t.name}` === event.name) &&
-          (t.status === 'executing' || t.status === 'confirm')
-        );
-        if (task) { task.status = 'error'; task.result = event.error; }
-        s.currentStatus = '';
-        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
-        break;
-      }
-
-      case 'confirm_request': {
+      case 'confirm:request': {
         const shortName = event.skillName.split(':').pop() || event.skillName;
         s.lastToolStatus = { name: shortName, status: 'pending' };
         s.activeTasks.push({
-          id: event.skillName + Date.now(),
+          id: event.taskId,
           name: event.skillName,
           status: 'confirm',
           params: event.params as Record<string, unknown> | undefined,
@@ -518,12 +485,12 @@ export class ChatView extends ItemView {
         break;
       }
 
-      case 'status':
+      case 'system:status':
         s.currentStatus = event.message;
         this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse);
         break;
 
-      case 'steer': {
+      case 'system:steer': {
         const steerEl = this.theme.renderSteerCard(event.message);
         if (this.currentStreamingBubble) {
           this.currentStreamingBubble.el.appendChild(steerEl);
@@ -532,11 +499,26 @@ export class ChatView extends ItemView {
         break;
       }
 
-      case 'agent_end':
+      case 'context:compact:start':
+        s.currentStatus = '正在压缩上下文...';
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse);
+        break;
+
+      case 'context:compact:end':
+        s.currentStatus = '';
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse);
+        break;
+
+      case 'agent:start':
+      case 'turn:start':
+      case 'turn:end':
+        break;
+
+      case 'agent:end':
         this.finalizeStream(s);
         break;
 
-      case 'error':
+      case 'system:error':
         this.showError(event.message);
         break;
     }

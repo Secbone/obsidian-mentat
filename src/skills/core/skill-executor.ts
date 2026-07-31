@@ -14,7 +14,6 @@ import {
 } from '../skill-types';
 import { safeParseJson } from '../../utils/json-healer';
 import { EventBus } from '../../extensions/event-bus';
-import { AgentEvent } from '../../agents/agent-types';
 
 /**
  * Skill execution options
@@ -141,13 +140,15 @@ export class SkillExecutor {
         const fullName = typeof namespace === 'string' && namespace.includes(':')
           ? namespace
           : this.registry.getFullName(namespace as SkillNamespace, name);
+        const taskId = `${fullName}:${Date.now()}`;
         this.eventBus?.emit({
-          type: 'confirm_request' as AgentEvent['type'],
+          type: 'confirm:request',
+          taskId,
           skillName: fullName,
           params: validatedInput,
           message: `智能体申请执行操作: 【${skill.description}】。是否批准？`,
-        } as AgentEvent);
-        const approved = await this.waitForConfirm(fullName);
+        });
+        const approved = await this.waitForConfirm(taskId);
         if (!approved) {
           const result: SkillResult = {
             success: false,
@@ -460,10 +461,10 @@ export class SkillExecutor {
   /**
    * Wait for user confirmation via EventBus
    */
-  private waitForConfirm(skillName: string, timeout = 300000): Promise<boolean> {
+  private waitForConfirm(taskId: string, timeout = 300000): Promise<boolean> {
     return new Promise((resolve) => {
-      const unsub = this.eventBus?.on('confirm_response', (data) => {
-        if (data && (data as Record<string, unknown>).id === skillName) {
+      const unsub = this.eventBus?.on('confirm:response', (data) => {
+        if (data && (data as Record<string, unknown>).taskId === taskId) {
           unsub?.();
           resolve(!!(data as Record<string, unknown>).approved);
         }

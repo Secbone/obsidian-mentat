@@ -20,11 +20,27 @@ export class EventBus {
   }
 
   emit(event: AgentEvent): void {
-    this.handlers.get(event.type)?.forEach(handler => {
+    const type = event.type;
+    const parts = type.split(':');
+
+    // 1. Exact match: 'tool:end'
+    this.handlers.get(type)?.forEach(handler => {
       try { handler(event); } catch (error) {
-        console.error(`[EventBus] Handler error for event "${event.type}":`, error);
+        console.error(`[EventBus] Handler error for event "${type}":`, error);
       }
     });
+
+    // 2. Namespace wildcard: 'tool:*', 'context:compact:*', ...
+    for (let i = 1; i < parts.length; i++) {
+      const pattern = parts.slice(0, i).join(':') + ':*';
+      this.handlers.get(pattern)?.forEach(handler => {
+        try { handler(event); } catch (error) {
+          console.error(`[EventBus] Handler error for pattern "${pattern}":`, error);
+        }
+      });
+    }
+
+    // 3. Global wildcard: '*'
     this.handlers.get('*')?.forEach(handler => {
       try { handler(event); } catch (error) {
         console.error(`[EventBus] Handler error for wildcard:`, error);

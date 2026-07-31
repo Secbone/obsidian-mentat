@@ -301,10 +301,11 @@ export class TerminalTheme implements ChatTheme {
             this.renderTruncatedText(detailsBody, 'Parameters', task.params, `${task.id}-params`);
           }
           if (task.result) {
-            const result = task.result as Record<string, unknown>;
-            if (result._diff && Array.isArray(result._diff)) {
+            const result = task.result as { success?: boolean; data?: unknown; error?: string; metadata?: { diff?: unknown } };
+            const diff = result.metadata?.diff;
+            if (diff && Array.isArray(diff)) {
               const diffEl = detailsBody.createDiv('term-diff');
-              for (const line of result._diff as Array<{ type: string; content: string; oldLineNum?: number; newLineNum?: number }>) {
+              for (const line of diff as Array<{ type: string; content: string; oldLineNum?: number; newLineNum?: number }>) {
                 const lineEl = diffEl.createDiv(
                   line.type === 'add' ? 'term-diff-add' : line.type === 'remove' ? 'term-diff-remove' : 'term-diff-keep'
                 );
@@ -314,10 +315,10 @@ export class TerminalTheme implements ChatTheme {
                 const prefix = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
                 lineEl.setText(`${num} ${prefix}  ${line.content}`);
               }
-              const { _diff, ...cleanResult } = result;
+            }
+            if (result.data !== undefined || result.error) {
+              const cleanResult = result.error && result.data === undefined ? result.error : result.data;
               this.renderTruncatedText(detailsBody, 'Response', cleanResult, `${task.id}-result`);
-            } else {
-              this.renderTruncatedText(detailsBody, 'Response', task.result, `${task.id}-result`);
             }
           }
         }

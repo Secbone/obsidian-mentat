@@ -1,7 +1,7 @@
 // Agent Types - Core type definitions for the Agent system
 
 import { ChatMessage } from '../types';
-import { SkillCall } from '../skills/skill-types';
+import { SkillCall, SkillResult } from '../skills/skill-types';
 
 /**
  * Agent configuration
@@ -41,43 +41,39 @@ export interface AgentResponse {
 
 /**
  * AgentEvent - Stream events emitted during RAGP execution
+ * Organized by multi-level namespace (domain:entity:action)
  * Designed for responsive UI and human-in-the-loop interactions
  */
 export type AgentEvent =
-  // 状态与错误
-  | { type: 'status'; message: string }
-  | { type: 'error'; message: string }
+  // agent 生命周期
+  | { type: 'agent:start' }
+  | { type: 'agent:end'; messages: ChatMessage[] }
 
-  // Agent 生命周期
-  | { type: 'agent_start' }
-  | { type: 'agent_end'; messages: ChatMessage[] }
+  // turn 生命周期（一次 LLM 调用 + 可能的工具执行）
+  | { type: 'turn:start'; turnIndex: number }
+  | { type: 'turn:end'; turnIndex: number; message: ChatMessage; toolResults: unknown[] }
 
-  // Turn 生命周期（一次 LLM 调用 + 可能的工具执行）
-  | { type: 'turn_start'; turnIndex: number }
-  | { type: 'turn_end'; turnIndex: number; message: ChatMessage; toolResults: unknown[] }
+  // message 流
+  | { type: 'message:start'; role: string }
+  | { type: 'message:update'; delta: string; accumulatedText?: string }
+  | { type: 'message:end'; role: string; content: string }
 
-  // 消息生命周期
-  | { type: 'message_start'; role: string }
-  | { type: 'message_update'; delta: string; accumulatedText?: string }
-  | { type: 'message_end'; role: string; content: string }
+  // tool 调用（唯一来源）
+  | { type: 'tool:start'; toolCallId: string; toolName: string; args: unknown }
+  | { type: 'tool:end'; toolCallId: string; toolName: string; result: SkillResult | null; isError: boolean }
 
-  // 工具调用生命周期（替代旧的 skill_call / skill_success / skill_error）
-  | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: unknown }
-  | { type: 'tool_execution_end'; toolCallId: string; result: unknown; isError: boolean }
+  // context 压缩
+  | { type: 'context:compact:start' }
+  | { type: 'context:compact:end'; summaryLength: number }
 
-  // 上下文压缩
-  | { type: 'compaction_start' }
-  | { type: 'compaction_end'; summaryLength: number }
+  // HITL 确认（双向）
+  | { type: 'confirm:request'; taskId: string; skillName: string; params: unknown; message: string }
+  | { type: 'confirm:response'; taskId: string; approved: boolean }
 
-  // 【旧事件 — 向后兼容】
-  | { type: 'chunk'; text: string }
-  | { type: 'skill_call'; name: string; params: unknown }
-  | { type: 'skill_success'; name: string; result: unknown }
-  | { type: 'skill_error'; name: string; error: string }
-
-  // 确认请求与引导
-  | { type: 'confirm_request'; skillName: string; params: unknown; message: string }
-  | { type: 'steer'; message: string };
+  // system 级
+  | { type: 'system:status'; message: string }
+  | { type: 'system:error'; message: string }
+  | { type: 'system:steer'; message: string };
 
 /**
  * DiagnosticsLogger - Decoupled interface for logging tool execution failures

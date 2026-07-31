@@ -68,59 +68,68 @@ async execute(prompt: string, context: AgentContext): Promise<AgentResponse> {
 
 ### AgentEvent — event types
 
+Events use multi-level namespaces (`domain:entity:action`). The EventBus supports wildcard subscription at any level (`tool:*`, `message:*`, `*`).
+
 ```typescript
 type AgentEvent =
-  // Status & errors
-  | { type: 'status'; message: string }
-  | { type: 'error'; message: string }
-
   // Agent lifecycle
-  | { type: 'agent_start' }
-  | { type: 'agent_end'; messages: ChatMessage[] }
+  | { type: 'agent:start' }
+  | { type: 'agent:end'; messages: ChatMessage[] }
 
   // Turn lifecycle (one LLM call + optional tool execution)
-  | { type: 'turn_start'; turnIndex: number }
-  | { type: 'turn_end'; turnIndex: number; message: ChatMessage; toolResults: unknown[] }
+  | { type: 'turn:start'; turnIndex: number }
+  | { type: 'turn:end'; turnIndex: number; message: ChatMessage; toolResults: unknown[] }
 
   // Message streaming
-  | { type: 'message_start'; role: string }
-  | { type: 'message_update'; delta: string; accumulatedText?: string }
-  | { type: 'message_end'; role: string; content: string }
+  | { type: 'message:start'; role: string }
+  | { type: 'message:update'; delta: string; accumulatedText?: string }
+  | { type: 'message:end'; role: string; content: string }
 
-  // Tool calls
-  | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: unknown }
-  | { type: 'tool_execution_end'; toolCallId: string; result: unknown; isError: boolean }
+  // Tool calls (single source of truth)
+  | { type: 'tool:start'; toolCallId: string; toolName: string; args: unknown }
+  | { type: 'tool:end'; toolCallId: string; toolName: string; result: SkillResult | null; isError: boolean }
 
   // Context compaction
-  | { type: 'compaction_start' }
-  | { type: 'compaction_end'; summaryLength: number }
+  | { type: 'context:compact:start' }
+  | { type: 'context:compact:end'; summaryLength: number }
 
-  // Legacy (backward compatible)
-  | { type: 'chunk'; text: string }
-  | { type: 'skill_call'; name: string; params: unknown }
-  | { type: 'skill_success'; name: string; result: unknown }
-  | { type: 'skill_error'; name: string; error: string }
+  // HITL confirmation (bidirectional)
+  | { type: 'confirm:request'; taskId: string; skillName: string; params: unknown; message: string }
+  | { type: 'confirm:response'; taskId: string; approved: boolean }
 
-  // Confirmation & steering
-  | { type: 'confirm_request'; skillName: string; params: unknown; message: string }
-  | { type: 'steer'; message: string };
+  // System-level
+  | { type: 'system:status'; message: string }
+  | { type: 'system:error'; message: string }
+  | { type: 'system:steer'; message: string };
 ```
 
 ### Consuming events
 
-Subscribe to the EventBus with a wildcard handler:
+Subscribe to the EventBus with exact, namespace, or wildcard patterns:
 
 ```typescript
-const unsubscribe = eventBus.on('*', (event: AgentEvent) => {
+// Namespace wildcard — all tool events
+const unsub = eventBus.on('tool:*', (event: AgentEvent) => {
   switch (event.type) {
-    case 'message_update':      output += event.delta; break;
-    case 'tool_execution_start': showTool(event.toolName); break;
-    case 'tool_execution_end':   updateToolStatus(event.toolCallId); break;
-    case 'compaction_start':     showBanner('Compacting...'); break;
-    case 'agent_end':            done(event.messages); break;
+    case 'tool:start': showTool(event.toolName); break;
+    case 'tool:end':   updateToolStatus(event.toolCallId, event.isError); break;
+  }
+});
+
+// Global wildcard
+eventBus.on('*', (event: AgentEvent) => {
+  switch (event.type) {
+    case 'message:update':      output += event.delta; break;
+    case 'context:compact:start': showBanner('Compacting...'); break;
+    case 'agent:end':           done(event.messages); break;
   }
 });
 ```
+
+The EventBus dispatches each emitted event to three tiers of handlers:
+1. **Exact match** — `'tool:end'`
+2. **Namespace wildcards** — `'tool:*'`, `'context:compact:*'`, ... (progressive prefix)
+3. **Global wildcard** — `'*'`
 
 ### AgentDependencies
 

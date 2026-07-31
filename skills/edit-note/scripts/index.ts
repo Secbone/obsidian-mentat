@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { TFile } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 import { NoteLinter } from '../../../src/utils/note-linter';
-import { computeDiff, DiffLine } from '../../../src/utils/diff';
+import { computeDiff } from '../../../src/utils/diff';
 import { exactReplaceString } from '../../../src/utils/note-manipulator';
 
 /**

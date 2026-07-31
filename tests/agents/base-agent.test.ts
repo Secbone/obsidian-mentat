@@ -73,7 +73,7 @@ describe('BaseAgent Unit Tests', () => {
     };
 
     await agent.execute('hi', context);
-    expect(events.some(e => e.type === 'chunk' && e.text === 'hello')).toBe(true);
+    expect(events.some(e => e.type === 'message:update' && e.delta === 'hello')).toBe(true);
   });
 
   it('should support AbortSignal cancellation', async () => {
@@ -182,7 +182,7 @@ describe('BaseAgent Unit Tests', () => {
     await agent.execute('hi', context);
 
     const guardEvent = events.find(
-      e => e.type === 'skill_error' && e.name === 'obsidian:test_tool' && e.error === 'Reasoning loop detected by AP6 Guard'
+      e => e.type === 'tool:end' && e.toolName === 'obsidian:test_tool' && e.isError === true
     );
     expect(guardEvent).toBeDefined();
   });
@@ -262,16 +262,16 @@ describe('BaseAgent Unit Tests', () => {
     };
 
     const events: AgentEvent[] = [];
-    bus.on('confirm_request', (event: any) => {
+    bus.on('confirm:request', (event: any) => {
       setTimeout(() => {
-        (bus as any).emit({ type: 'confirm_response', id: event.skillName, approved: true });
+        (bus as any).emit({ type: 'confirm:response', taskId: event.taskId, approved: true });
       }, 0);
     });
     bus.on('*', e => events.push(e));
 
     await agent.execute('hi', context);
 
-    expect(events.some(e => e.type === 'confirm_request')).toBe(true);
+    expect(events.some(e => e.type === 'confirm:request')).toBe(true);
     expect(skillWasExecuted).toBe(true);
   });
 
