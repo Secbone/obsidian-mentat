@@ -49,7 +49,7 @@ export class SkillLoader {
 
   constructor(
     private app: App,
-    private pluginId: string = 'mentat'
+    pluginId: string = 'mentat'
   ) {
     // Construct path to skills directory in plugin folder
     this.skillsBasePath = `${app.vault.configDir}/plugins/${pluginId}/skills`;

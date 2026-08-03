@@ -1,7 +1,6 @@
 // ExtensionAPI - Interface and types for extensions
 
 import { App } from 'obsidian';
-import { EventBus } from './event-bus';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
 import { MentatSettings } from '../settings/settings';

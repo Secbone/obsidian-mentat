@@ -13,7 +13,6 @@ import { TerminalTheme } from '../themes/terminal';
 import {
   ChatTheme,
   ThemeCallbacks,
-  AssistantMessageData,
   ToolCallRender,
   StreamingBubble,
   InputAreaElements,

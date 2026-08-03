@@ -207,18 +207,6 @@ export class SkillExecutor {
     }
   }
 
-  /**
-   * Helper: Truncate string at a valid UTF-8 boundary
-   */
-  private truncateAtValidUtf8(str: string, maxPos: number): string {
-    // Ensure we don't cut in the middle of a multi-byte UTF-8 sequence
-    // UTF-8 continuation bytes have the pattern 10xxxxxx (0x80-0xBF)
-    while (maxPos > 0 && (str.charCodeAt(maxPos) & 0xC0) === 0x80) {
-      maxPos--;
-    }
-    return str.substring(0, maxPos);
-  }
-
   private safeParseToolArguments(toolCall: ToolCall): Record<string, unknown> {
     if (typeof toolCall.arguments !== 'string') {
       return toolCall.arguments;

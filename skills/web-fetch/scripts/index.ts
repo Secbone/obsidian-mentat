@@ -73,7 +73,7 @@ type FetchResult = {
 };
 
 // Strategy 1: Jina AI Reader
-async function fetchWithJina(url: string, timeout: number): Promise<FetchResult> {
+async function fetchWithJina(url: string): Promise<FetchResult> {
   try {
     const jinaUrl = `https://r.jina.ai/${url}`;
     const response = await requestUrl({
@@ -142,7 +142,7 @@ async function fetchWithJina(url: string, timeout: number): Promise<FetchResult>
 }
 
 // Strategy 2: Browserless API
-async function fetchWithBrowserless(url: string, apiKey: string, timeout: number): Promise<FetchResult> {
+async function fetchWithBrowserless(url: string, apiKey: string): Promise<FetchResult> {
   if (!apiKey) {
     return {
       success: false,
@@ -310,7 +310,7 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
     const browserlessApiKey = context.plugin.settings.browserlessApiKey || '';
 
     if (strategy === 'jina') {
-      result = await fetchWithJina(input.url, input.timeout);
+      result = await fetchWithJina(input.url);
       if (!result.success) {
         errors.push(`Jina: ${result.error}`);
       }
@@ -320,7 +320,7 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
     if (!result?.success &&
         !result?.isTimeout &&
         (strategy === 'browserless' || originalStrategy === 'auto')) {
-      result = await fetchWithBrowserless(input.url, browserlessApiKey, input.timeout);
+      result = await fetchWithBrowserless(input.url, browserlessApiKey);
       if (!result.success) {
         errors.push(`Browserless: ${result.error}`);
       }

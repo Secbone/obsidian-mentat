@@ -16,12 +16,10 @@ export interface OpenCodeResult {
 }
 
 export class OpenCodeIntegration {
-  private plugin: MentatPlugin;
   private baseURL: string;
   private apiKey: string;
 
   constructor(plugin: MentatPlugin) {
-    this.plugin = plugin;
     this.baseURL = plugin.settings.opencodeApiUrl;
     this.apiKey = plugin.settings.opencodeApiKey;
   }

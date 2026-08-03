@@ -16,12 +16,7 @@
     "types": ["node"]
   },
   "include": [
-    "src/ui/**/*",
-    "src/chat/chat-manager.ts",
-    "src/indexing/**/*",
-    "src/utils/**/*",
-    "src/providers/openai-provider.ts",
-    "src/providers/ollama-provider.ts",
-    "src/types/platform.ts"
+    "src/**/*",
+    "skills/**/*"
   ]
 }

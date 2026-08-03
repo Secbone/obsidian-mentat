@@ -14,7 +14,7 @@ import { PromptLoader } from '../prompts/prompt-loader';
 import { PROMPT_PATHS, FALLBACK_PROMPTS, TEMPLATE_VARS } from '../prompts/prompt-templates';
 import { BaseAgent, AgentDependencies } from '../agents/base-agent';
 import { AgentManager } from '../agents/agent-manager';
-import { AgentConfig, AgentContext, AgentEvent, AgentResponse } from '../agents/agent-types';
+import { AgentConfig, AgentContext } from '../agents/agent-types';
 import { EventBus } from '../extensions/event-bus';
 import { VaultDiagnosticsLogger } from '../diagnostics/vault-diagnostics-logger';
 import { ReadTracker } from '../services/read-tracker';
@@ -22,7 +22,6 @@ import { IPlatformAdapter, IPlatformFile } from '../types/platform';
 import { AIRouter } from '../providers/ai-router';
 import { IndexManager } from '../indexing/index-manager';
 import { MentatSettings } from '../settings/settings';
-import { ConfirmationModal } from '../ui/confirmation-modal';
 import { App } from 'obsidian';
 import { z } from 'zod';
 
@@ -90,8 +89,7 @@ export class ChatOrchestrator {
     const invocationMode = settings.skillInvocationMode || 'progressive';
     this.skillInvocationContext = new SkillInvocationContext(
       invocationMode,
-      platform,
-      settings.skillInvocationConfig?.directCallSkills
+      platform
     );
 
     // Initialize skill cache

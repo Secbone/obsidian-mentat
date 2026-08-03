@@ -2,7 +2,7 @@
 
 import { App } from 'obsidian';
 import { EventBus } from './event-bus';
-import { ExtensionRegistration, ExtensionFactory, ExtensionAPI } from './extension-api';
+import { ExtensionRegistration, ExtensionAPI } from './extension-api';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
 import { MentatSettings } from '../settings/settings';

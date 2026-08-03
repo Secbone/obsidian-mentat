@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TFile, TFolder } from 'obsidian';
+import { TFile } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 export const metadata = {

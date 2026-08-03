@@ -13,15 +13,15 @@ import { ObsidianAdapter } from './utils/obsidian-adapter';
 import { DiagnosticsExporter } from './diagnostics/diagnostics-exporter';
 
 export default class MentatPlugin extends Plugin {
-  settings: MentatSettings;
-  aiRouter: AIRouter;
-  openCodeIntegration: OpenCodeIntegration;
-  indexManager: IndexManager;
-  chatOrchestrator: ChatOrchestrator;
-  agentManager: AgentManager;
-  platform: ObsidianAdapter;
-  extensionManager: ExtensionManager;
-  eventBus: EventBus;
+  settings!: MentatSettings;
+  aiRouter!: AIRouter;
+  openCodeIntegration!: OpenCodeIntegration;
+  indexManager!: IndexManager;
+  chatOrchestrator!: ChatOrchestrator;
+  agentManager!: AgentManager;
+  platform!: ObsidianAdapter;
+  extensionManager!: ExtensionManager;
+  eventBus!: EventBus;
 
   // Track previous values for selective save-settings updates
   private prevTheme: string = '';
@@ -292,9 +292,6 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
       const skillContext = this.chatOrchestrator.getSkillInvocationContext();
       if (skillContext) {
         skillContext.setMode(this.settings.skillInvocationMode || 'auto');
-        if (this.settings.skillInvocationConfig?.directCallSkills) {
-          skillContext.setDirectCallSkills(this.settings.skillInvocationConfig.directCallSkills);
-        }
       }
     }
 

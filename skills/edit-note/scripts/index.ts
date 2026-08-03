@@ -111,11 +111,9 @@ export async function execute(
 
       if (!linterResult.isValid) {
         let isIncrementalImprovement = false;
-        let originalErrorsCount = 0;
 
         if (previousContent !== null) {
           const originalLinterResult = NoteLinter.validate(previousContent);
-          originalErrorsCount = originalLinterResult.errors.length;
           if (linterResult.errors.length <= originalLinterResult.errors.length) {
             isIncrementalImprovement = true;
           }

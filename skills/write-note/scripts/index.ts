@@ -6,7 +6,7 @@ import { TFile, Vault } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 import { NoteLinter } from '../../../src/utils/note-linter';
 import { computeDiff } from '../../../src/utils/diff';
-import { getHeadingPattern, insertAfterHeading, replaceSection } from '../../../src/utils/note-manipulator';
+import { insertAfterHeading, replaceSection } from '../../../src/utils/note-manipulator';
 
 /**
  * Skill metadata

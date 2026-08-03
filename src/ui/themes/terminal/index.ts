@@ -11,7 +11,7 @@ import {
   InputAreaElements,
   InputState,
 } from '../types';
-import { parseFinalAnswer, resolveToolDisplayName, getToolShortName, truncateText, valueToString, BRAILLE_DOTS, getSpinnerChar } from '../message-utils';
+import { parseFinalAnswer, resolveToolDisplayName, getToolShortName, truncateText, valueToString, getSpinnerChar } from '../message-utils';
 import { SmartScroller } from '../smart-scroller';
 import { AnswerRenderer } from '../answer-renderer';
 
@@ -37,7 +37,6 @@ export class TerminalTheme implements ChatTheme {
   private contentEl: HTMLElement | null = null;
 
   private expandedTaskOutputs = new Set<string>();
-  private lastRenderTime = 0;
   private lastAnswerRenderTime = 0;
 
   // Console dedup tracking
@@ -96,7 +95,6 @@ export class TerminalTheme implements ChatTheme {
     this.stopButton = null;
     this.callbacks = null;
     this.expandedTaskOutputs.clear();
-    this.lastRenderTime = 0;
     this.lastAnswerRenderTime = 0;
     this.lastConsoleStatus = '';
     this.lastConsoleTasksJson = '';
@@ -262,7 +260,6 @@ export class TerminalTheme implements ChatTheme {
       this.lastConsoleStatus = statusMessage;
       this.lastConsoleTasksJson = tasksJson;
       this.lastConsoleExplanation = cleanExplanation;
-      this.lastRenderTime = now;
       consoleContainer.empty();
 
       if (statusMessage || activeTasks.length > 0) {
@@ -625,27 +622,6 @@ export class TerminalTheme implements ChatTheme {
     const btn = messageEl.createEl('button', { cls: 'term-copy-button' });
     btn.setAttribute('aria-label', '复制消息');
     setIcon(btn, 'copy');
-  }
-
-  private setupCodeCopyButtons(messageEl: HTMLElement): void {
-    const codeCopyButtons = messageEl.findAll('.code-copy-button');
-    codeCopyButtons.forEach(button => {
-      button.addEventListener('click', (e) => {
-        void (async () => {
-          const target = e.currentTarget as HTMLElement;
-          const codeId = target.getAttribute('data-code-id');
-          const codeEl = activeDocument.getElementById(codeId!);
-          if (codeEl) {
-            await navigator.clipboard.writeText(codeEl.textContent || '');
-            const originalText = target.textContent;
-            target.textContent = '已复制!';
-            window.setTimeout(() => {
-              target.textContent = originalText;
-            }, 2000);
-          }
-        })();
-      });
-    });
   }
 
   private setupMessageCopyButtons(wrapper: HTMLElement): void {

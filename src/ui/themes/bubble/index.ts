@@ -11,7 +11,7 @@ import {
   InputAreaElements,
   InputState,
 } from '../types';
-import { parseFinalAnswer, resolveToolDisplayName, getToolShortName, truncateText, valueToString, BRAILLE_DOTS, getSpinnerChar, getSpinnerPrefix } from '../message-utils';
+import { parseFinalAnswer, resolveToolDisplayName, getToolShortName, truncateText, valueToString, getSpinnerChar, getSpinnerPrefix } from '../message-utils';
 import { SmartScroller } from '../smart-scroller';
 import { AnswerRenderer } from '../answer-renderer';
 

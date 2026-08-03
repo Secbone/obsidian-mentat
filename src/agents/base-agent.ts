@@ -654,7 +654,6 @@ export class BaseAgent {
     if (executableCalls.length === 0) return results;
 
     const mode = this.config.toolExecutionMode || 'parallel';
-    const limit = this.config.maxParallelTools || 5;
 
     if (mode === 'parallel') {
       // Phase 2: 按 executionCategory 分组

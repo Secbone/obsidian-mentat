@@ -372,12 +372,10 @@ export class SkillInvocationContext {
   private strategy: SkillInvocationStrategy;
   private mode: SkillInvocationMode;
   private platform?: IPlatformAdapter;
-  private directCallSkills?: string[];
 
-  constructor(mode: SkillInvocationMode = 'progressive', platform?: IPlatformAdapter, directCallSkills?: string[]) {
+  constructor(mode: SkillInvocationMode = 'progressive', platform?: IPlatformAdapter) {
     this.mode = mode;
     this.platform = platform;
-    this.directCallSkills = directCallSkills;
     this.strategy = this.createStrategy(mode);
   }
 
@@ -400,13 +398,6 @@ export class SkillInvocationContext {
   setMode(mode: SkillInvocationMode): void {
     this.mode = mode;
     this.strategy = this.createStrategy(mode);
-  }
-
-  setDirectCallSkills(skills: string[]): void {
-    this.directCallSkills = skills;
-    if (this.mode === 'auto') {
-      this.strategy = this.createStrategy(this.mode);
-    }
   }
 
   getMode(): SkillInvocationMode {

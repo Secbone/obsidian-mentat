@@ -58,7 +58,7 @@ export class ContentExtractor {
   /**
    * Extract tags from frontmatter and inline tags
    */
-  private extractTags(content: string, metadata: IFileCache | null): string[] {
+  private extractTags(_content: string, metadata: IFileCache | null): string[] {
     const tags = new Set<string>();
 
     // Extract from frontmatter

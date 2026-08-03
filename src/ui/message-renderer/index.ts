@@ -45,7 +45,7 @@ export class MessageRenderer {
     let html = this.escapeHtml(text);
 
     // Code blocks (must come before inline code)
-    html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+    html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
       const language = lang || 'text';
       const codeId = `code-${Math.random().toString(36).substring(2, 11)}`;
       const escapedLang = this.escapeHtml(language);
@@ -73,7 +73,7 @@ export class MessageRenderer {
     html = html.replace(/_(.+?)_/g, '<em>$1</em>');
 
     // Links
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text, url) => {
       return `<a href="${this.escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
     });
 

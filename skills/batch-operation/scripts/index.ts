@@ -2,7 +2,7 @@
 // Core logic for batch operations on Obsidian documents
 
 import { z } from 'zod';
-import { TFile, Vault, MetadataCache } from 'obsidian';
+import { TFile } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 /**
