@@ -192,69 +192,59 @@ interface VaultPermissionPolicy {
 - **归一化映射**：外部 agent 的流式事件（message/tool_use/tool_result/error）→ 现有 `AgentEvent` 联合类型（`message:update`/`tool:start`/`tool:end`/`turn:end`…）。
 - **开放决策点**：参考实现的具体产品在阶段 3 开工时最终确认（可同时调研 OpenCode SDK / DSH 的 API 网关）。
 
-## 6. 内核：两个基础机制
+## 6. 内核：Cordis 兼容子集（已实现，`src/core/cordis/`）
 
-### 6.1 `DisposeStack`（可逆效应累积器）
+> **设计决策更新**：内核不采用自定义 `DisposeStack`/`ServiceContainer` API，而是实现
+> **与 `@deepseek-ai/cordis` 4.x API 形状兼容的简化子集**（`src/core/cordis/`，约 1800 行，
+> 22 个 vitest 用例全过，tsc/eslint 全绿）。理由：① 心智模型与 Cordis 一致，学习/迁移成本低；
+> ② 未来可平滑替换为真 Cordis（API 形状不变）；③ 借 Cordis 的语义保证（可逆效应、响应式依赖）。
 
-论文（Cordis）`ctx.effect` 的最小实现：任何资源注册返回逆操作，卸载按 LIFO 恢复。
+### 6.1 已实现的 API 面（兼容 Cordis 4 子集）
 
-```ts
-class DisposeStack {
-  /** 注册一个逆操作；返回取消函数（从栈中移除此项）。 */
-  push(dispose: () => void | Promise<void>, label?: string): () => void;
-  /** LIFO 执行全部逆操作；幂等。 */
-  dispose(): Promise<void>;
-  readonly size: number;
-}
-```
+| 类别 | API |
+|---|---|
+| 上下文 | `new Context()`（返回 proxy）· `ctx.extend/isolate/intercept` |
+| 服务 | `ctx.provide(name, value, check?)` · `ctx.get(name, strict?)` · `ctx.set` |
+| 效应 | `ctx.effect(callback, label?)`（fiber 累积器，LIFO 恢复） |
+| 插件 | `ctx.plugin(plugin, config?)` · `ctx.use(...)` · `ctx.inject(names, cb)`（函数/类/`{apply}` 三形态） |
+| 事件 | `ctx.on/once/off/emit`（监听器即可逆效应；dispatch 风格可选 subject + 通配符） |
+| 纤维 | `ctx.fiber`（state 状态机 0/1/2/3/5、`await()`、promise-like、卸载级联） |
+| 基类 | `Service`（`super(ctx, name)` 自动注册，纤维卸载自动注销） |
 
-迁移面：`main.onunload`、`ExtensionManager`（补 `unloadAll`）、`EventBus.on` 的返回值、技能注册、MCP 连接。
+### 6.2 与 Cordis 4 的实现差异（有意为之）
 
-### 6.2 `ServiceContainer`（provide/inject 服务容器）
+- **ctx 注入替代 getTraceable**：Cordis 靠 Proxy+`getTraceable` 让服务方法 `this.ctx` 动态指向
+  调用者上下文；本内核把调用上下文作为服务方法的**显式第一参数**（`registry.provide(ctx, ...)`），
+  mixin 只做一次注入。语义等价、无 Proxy 魔法（详见 `docs/cordis-analysis.md` §1.2/§3.1）。
+- **同步 disposer 同步执行**：`off()`/disposer 立即生效（Cordis 是异步链）。
+- **`_setInertia` 链式清理**：避免"同步完成的 async 任务"导致 `while (inertia)` 死循环。
+- **模块拆分**：`context/fiber/registry/reflect/events/service/symbols/utils` 8 个文件。
 
-替换 `main.ts` 的手写依赖图（`this.aiRouter = new AIRouter(...)` 链）。
+### 6.3 已知技术债（兼容性约束下的取舍）
 
-```ts
-interface ServiceRegistration<T> {
-  name: string;
-  impl: T;
-  /** 依赖：注册时按名解析；缺失 → 服务处于 pending，出现后自动激活。 */
-  requires?: string[];
-  onActivate?(ctx: ServiceContainer): void | Promise<void>;
-}
-
-class ServiceContainer {
-  provide<T>(name: string, impl: T, opts?): () => void;   // 可逆；返回撤销
-  inject<T>(name: string): T | undefined;                 // 同步取
-  require<T>(name: string): T;                            // 缺失抛错（带依赖链诊断）
-  /** 响应式：服务出现/被撤销时通知订阅者（委托模式的 provider 热切换基础）。 */
-  onChange(name: string, cb: (impl: unknown | undefined) => void): () => void;
-  /** 一次 LIFO 撤销全部提供。 */
-  dispose(): Promise<void>;
-}
-```
-
-迁移面：`main.ts onload` 各子系统注册；`AIRouter` 热切换（provider 配置变化 → 重新 provide → 订阅者自动更新）。
+- 服务名仍是裸字符串（无类型级校验）——未来加 `declare module` 类型映射。
+- 插件形状多态是运行时检查。
+- 错误是字符串消息（非结构化错误对象）。
 
 ## 7. 分阶段实施计划
 
 | 阶段 | 内容 | 交付物 |
 |---|---|---|
-| **1 内核化** | DisposeStack · ServiceContainer · AgentModeRegistry/AgentBackend/描述符 · EmbeddedBackend 适配器 · main.ts 迁移 · 清理收口（ExtensionManager.unloadAll 等） | `src/core/`、测试、无行为变化 |
+| **1 内核化** ✅ | **Cordis 兼容内核已落地**（`src/core/cordis/`）· 待做：AgentModeRegistry/AgentBackend/描述符 · EmbeddedBackend 适配器 · main.ts 迁移 · 清理收口（ExtensionManager.unloadAll 等） | 内核已提交 `60b2a80` |
 | **2 MCP server** | VaultCapability 清单 · server 端协议（复用 mcp-types）· 权限层（permissionGuard + 确认回调） | `src/mcp-server/`、可被外部 agent 连接 |
 | **3 委托模式** | ExternalBackend 契约 · 参考实现（Claude Code SDK 等）· 会话级模式切换（ChatSession.modeId + 设置/命令/UI 选择器）· 自定义模式注册示例 | 双模式可运行、切换流畅 |
 | **4 收尾** | vitest 覆盖（内核/权限/归一化）、typecheck、lint、README 与 docs 更新 | CI 绿 |
 
 ## 8. 兼容性与风险
 
-- **现有功能零回归**：阶段 1 纯增量（新增 `src/core/`，不动现有行为）；EmbeddedBackend 是薄适配层。
+- **现有功能零回归**：阶段 1 内核为纯增量（新增 `src/core/cordis/`，不动现有行为）；EmbeddedBackend 是薄适配层。
 - **Obsidian 进程约束**：MCP server 的 stdio 传输需在 Obsidian 主进程可用（Electron/Node 环境确认）；HTTP 传输作为备选。
 - **外部 agent 依赖**：参考实现引入 SDK 依赖会增加 bundle；设计为**可选动态加载**（未配置不打包）。
 - **测试隔离**：vault 能力测试用 `tests/__mocks__` 现有 mock vault；权限层纯逻辑可单测。
 
 ## 9. 验收标准
 
-1. `npm run typecheck && npm run lint && npm test` 全绿（含新增测试）。
+1. `npm run typecheck && npm run lint && npm test` 全绿（内核 22 用例已绿；阶段 1 迁移后全量绿）。
 2. 启动后行为与现状一致（阶段 1 无感知变化）。
 3. 内置 MCP server 可被一个标准 MCP client（如 `mcp-inspector` 或 Claude Code）连接，只读操作无需确认、写操作弹 Obsidian 确认。
 4. 每会话可在 embedded ↔ delegated 间切换；切换后历史可继续对话。
