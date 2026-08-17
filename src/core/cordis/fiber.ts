@@ -111,11 +111,16 @@ export class Fiber {
         this._refresh();
       }
     } else {
-      // Root fiber: always active, owns the context itself.
+      // Root fiber: always active, owns the context itself. Disposing it
+      // recovers every effect registered directly on the root (Cordis
+      // semantics: `ctx.fiber.dispose()` unwinds the whole assembly).
       this.uid = 0;
       this.ctx = parent;
       this.state = ACTIVE;
-      this.dispose = () => this._restart();
+      this.dispose = async () => {
+        await this._disposables.dispose();
+        this._inertia = null;
+      };
     }
   }
 
@@ -320,7 +325,4 @@ export class Fiber {
     return this._inertia ?? Promise.resolve();
   }
 
-  private _restart(): void {
-    this._inertia = null;
-  }
 }

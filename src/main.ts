@@ -8,18 +8,21 @@ import { ChatView, CHAT_VIEW_TYPE } from './ui/chat-view';
 import { ChatOrchestrator } from './chat/chat-orchestrator';
 import { AgentManager } from './agents/agent-manager';
 import { ExtensionManager, EventBus } from './extensions';
-import { TaskType } from './types';
-import { ObsidianAdapter } from './utils/obsidian-adapter';
 import { DiagnosticsExporter } from './diagnostics/diagnostics-exporter';
+import { Context } from './core/cordis';
+import { MentatRoot } from './root';
 
 export default class MentatPlugin extends Plugin {
+  /** The unified Cordis context; all subsystems are registered services on it. */
+  ctx!: Context;
+
   settings!: MentatSettings;
   aiRouter!: AIRouter;
   openCodeIntegration!: OpenCodeIntegration;
   indexManager!: IndexManager;
   chatOrchestrator!: ChatOrchestrator;
   agentManager!: AgentManager;
-  platform!: ObsidianAdapter;
+  platform!: import('./utils/obsidian-adapter').ObsidianAdapter;
   extensionManager!: ExtensionManager;
   eventBus!: EventBus;
 
@@ -30,50 +33,16 @@ export default class MentatPlugin extends Plugin {
   async onload() {
     console.log('Loading Mentat plugin');
 
-    // Load settings
+    // Load settings (needed before the host assembly reads them).
     await this.loadSettings();
 
-    // Initialize platform adapter
-    this.platform = new ObsidianAdapter(this);
-    const platform = this.platform;
+    // Host assembly: mount the MentatRoot component, which initializes every
+    // subsystem as a service on the unified context (see src/root.ts).
+    this.ctx = new Context();
+    await this.ctx.plugin(MentatRoot, { plugin: this });
 
-    // Initialize AI Router
-    this.aiRouter = new AIRouter(this.settings);
-
-    // Initialize Index Manager
-    this.indexManager = new IndexManager(platform, () => this.aiRouter.getProvider(TaskType.EMBEDDING));
-    await this.indexManager.initialize();
-
-    // Initialize EventBus (before ChatOrchestrator, for agent event streaming)
-    this.eventBus = new EventBus();
-
-    // Initialize Chat Orchestrator (may fail gracefully if no provider configured)
-    this.chatOrchestrator = new ChatOrchestrator(platform, this.settings, this.aiRouter, this.indexManager, this.eventBus);
-    try {
-      await this.chatOrchestrator.initialize();
-    } catch (error: unknown) {
-      console.warn('Mentat: ChatOrchestrator initialization failed (will retry after provider config):', 
-        error instanceof Error ? error.message : String(error));
-      new Notice('Mentat: 未检测到 AI 服务商配置。请在设置中配置 API Key。No AI provider configured — add one in Mentat settings.');
-    }
-
-    // Get AgentManager reference (for advanced usage)
-    this.agentManager = this.chatOrchestrator.getAgentManager();
-
-    // Initialize extension system (shares the global eventBus)
-    this.extensionManager = new ExtensionManager(
-      this.app,
-      this.chatOrchestrator.getSkillRegistry(),
-      this.chatOrchestrator.getSkillExecutor(),
-      this.settings,
-      this.eventBus,
-    );
-    this.extensionManager.loadAll();
-
-    // Initialize integrations
-    this.openCodeIntegration = new OpenCodeIntegration(this);
-
-    // Register chat view
+    // UI plane (Obsidian-managed, not Cordis-managed):
+    // register chat view
     this.registerView(
       CHAT_VIEW_TYPE,
       (leaf) => new ChatView(leaf, this)
@@ -95,12 +64,9 @@ export default class MentatPlugin extends Plugin {
 
   onunload(): void {
     console.log('Unloading Mentat plugin');
-    try {
-      this.chatOrchestrator?.dispose();
-    } catch (error: unknown) {
-      console.warn('Mentat: Error during dispose:', error instanceof Error ? error.message : String(error));
-    }
-    this.openCodeIntegration?.dispose();
+    // Recover every registration made by the host assembly in LIFO order
+    // (chat orchestrator, integrations, ...), replacing the manual dispose.
+    void this.ctx?.fiber.dispose();
   }
 
   private registerCommands(): void {
