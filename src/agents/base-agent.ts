@@ -114,6 +114,18 @@ export class BaseAgent {
   }
 
   /**
+   * Streaming entry point: yields AgentEvent and returns AgentResponse,
+   * without emitting to the EventBus (callers bridge events themselves).
+   * Added for the AgentBackend abstraction (docs/mentat-cordis-refactor.md M6).
+   */
+  async *streamExecute(
+    prompt: string,
+    context: AgentContext
+  ): AsyncGenerator<AgentEvent, AgentResponse, unknown> {
+    return yield* this.executeGenerator(prompt, context);
+  }
+
+  /**
    * Internal generator — yields AgentEvent, returns AgentResponse.
    */
   private async *executeGenerator(

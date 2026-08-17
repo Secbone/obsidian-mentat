@@ -11,6 +11,7 @@ import { IndexingService } from './indexing/indexing.service';
 import { ChatService } from './chat/chat.service';
 import { ExtensionsService } from './extensions/extensions.service';
 import { OpenCodeService } from './providers/opencode.service';
+import { AgentModesService } from './agents/agent-modes.service';
 
 /** Config passed to the MentatRoot component. */
 export interface MentatRootConfig {
@@ -52,5 +53,8 @@ export const MentatRoot: PluginObject = {
     await ctx.plugin(ChatService);
     await ctx.plugin(ExtensionsService);
     await ctx.plugin(OpenCodeService);
+
+    // ── session plane (M6) ────────────────────────────────────────────────
+    await ctx.plugin(AgentModesService);
   },
 };
