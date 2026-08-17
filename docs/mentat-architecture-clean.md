@@ -24,14 +24,26 @@
 - **Cordis 兼容内核**：统一上下文（Γ∞）、可逆效应、响应式依赖、隔离/拦截、事件、纤维生命周期。
 - 职责：组件装配、依赖解析、卸载回收。**不含任何 Mentat 领域概念。**
 
-### L1 平台层 —— 宿主能力抽象（薄直通，一个宿主插件多服务名）
-| 功能 | 说明 |
-|---|---|
-| **vault** | 文件系统直通（读/写/移动/删除/列表）；**Markdown 解析、frontmatter、双链、链接修复属于 L2 领域层** |
-| **metadata** | 标签、别名、缓存（MetadataCache）、文件状态 |
-| **workspace** | 当前文件、打开的叶子、工作区布局 |
-| **storage** | 插件数据持久化（loadData/saveData）、配置目录、技能目录 |
-| **notify** | Obsidian Notice / Modal / 确认对话框（人机交互原语） |
+### L1 平台层 —— 平台无关的"知识工作区"抽象（薄直通，一个宿主插件多服务名）
+
+**设计决策（v2.2）：接口只含平台无关的领域概念，宿主类型（Obsidian App/Vault/
+Workspace/MetadataCache）永不出口**。Obsidian 特有 API 留在实现内部；需要宿主本身的
+组件（UI/命令/设置页）走 L5 壳层的 `mentatPlugin` 服务。可选能力用**可选服务名**
+表达——能力缺失时，声明依赖它的组件自动 pending（Cordis 响应式依赖），实现"特性按
+平台能力自然伸缩"。
+
+| 服务名 | 能力 | 必须? | Obsidian 实现 | headless 实现 |
+|---|---|---|---|---|
+| `documents` | 文档：list/get/read/write/move/delete/exists | ✅ | app.vault | 文件系统 |
+| `search` | 全文搜索 | ✅ | Vault.search | grep/ripgrep |
+| `storage` | loadData/saveData/configDir | ✅ | plugin.*Data | JSON 文件 |
+| `graph` | 双链/反向链接/标签/frontmatter | 可选 | MetadataCache | —（组件自动 pending）|
+| `workspace` | 当前活动文档/上下文 | 可选 | workspace | — |
+| `ui` | 通知/确认/对话框 | 可选 | Notice/Modal | — |
+
+> 领域增强（Markdown 解析、链接修复、frontmatter 批量、双链解析）**不属于平台层**，
+> 归属 L2 `tool:vault-*`（它们声明 `inject: ['documents', 'graph']`，在无 graph 的平台上
+> 自动不激活）。
 
 ### L2 能力层 —— 领域能力（可替换单元）
 | 功能 | 说明 |
@@ -129,7 +141,7 @@ L0 内核
 
 | 插件 | 类型 | 依赖 | 提供（细粒度服务名） | 职责 |
 |---|---|---|---|---|
-| `platform` | 宿主插件 | — | `vault`（读/写/移/删/列表）· `metadata`（标签/别名/缓存）· `workspace`（当前文件/布局）· `storage`（loadData/配置目录）· `notify`（Notice/Modal/确认） | 宿主抽象（Obsidian 实现，整体可替换） |
+| `platform` | 宿主插件 | — | `documents` · `search` · `storage`（核心，必须）；`graph` · `workspace` · `ui`（可选能力） | 平台无关的知识工作区抽象；按平台能力提供可选服务（Obsidian / headless / server 实现可替换） |
 | `settings` | 服务 | storage | settings schema + 变更事件 | 配置（schema 驱动，DSH 式） |
 | `diagnostics` | 服务 | events | 诊断/日志导出 | 横切：日志、诊断包 |
 
@@ -290,4 +302,4 @@ src/
 | 外部 | `openCode` 独立服务 | `delegated` 适配器注册 | 统一外部 agent 接入 |
 | 权限 | 无（技能 requiresConfirmation 零散）| `permissions` 横切服务 | MCP + 敏感工具共用 |
 | 部署 | 仅 Obsidian 插件 | root/headless/server 可切换 | 多模式与生态 |
-| 平台层 | （隐式依赖 plugin.app）| 一个 `platform` 宿主插件提供 `vault/metadata/workspace/storage/notify` 五个细粒度服务名 | 替换单位=宿主整体；依赖粒度=服务名；薄直通无领域逻辑 |
+| 平台层 | 接口出口 Obsidian 类型（`getApp/getVault/getMetadataCache/...`）| 平台无关接口：`documents/search/storage` 核心 + `graph/workspace/ui` 可选服务名；宿主类型不出平台层（壳层 `mentatPlugin` 提供宿主）| 多平台可适配（obsidian/headless/server）；能力缺失→依赖组件自动 pending |
