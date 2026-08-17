@@ -319,6 +319,40 @@ interface ChatMessage {
 ---
 
 
+**L4 交互层**
+
+```ts
+// ── extensions 宿主（服务名 'extensions'）───────────────────────
+interface ExtensionAPI {
+  readonly context: { id: string; name: string; description: string };
+  registerTool(def: ToolDefinition): () => void;      // 扩展注册工具（可逆）
+  on(event: AgentEvent['type'], handler: (e: AgentEvent) => void): () => void;
+  get<T>(service: string): T | undefined;              // 白名单服务访问
+  getSettings<T>(): T;
+}
+
+// ── ui-chat 插件契约（组件声明式）───────────────────────────────
+interface ChatUiPlugin {
+  mount(ctx: Context, deps: { session: ChatSessionService; events: EventsService; settings: SettingsService }): () => void;
+  // Obsidian 注册视图等宿主操作仅出现在 L5 壳，UI 插件本身仍走平台服务名
+}
+
+// ── mcp-server（服务名 'mcp-server'）：vault 能力 → MCP tools ───
+interface McpServerConfig {
+  tools: Array<{ name: string; schema: ZodTypeAny; permission: Permission }>;
+  transport: 'stdio' | 'http';
+}
+// 每个暴露的 vault 能力 = ToolDefinition + permission（写/删/执行挂 permissions 服务）
+
+// ── delegated 适配器（注册进 modes 注册表）──────────────────────
+interface DelegatedAdapterConfig {
+  modeId: string;                       // 'delegated:claude-code' ...
+  connect(): Promise<AgentBackend>;     // 经 modes 注册；复用 mcp-server 暴露 vault
+}
+```
+
+---
+
 ---
 
 ## 4. 数据流（一次对话）
@@ -420,4 +454,5 @@ src/
 | 权限 | 无（技能 requiresConfirmation 零散）| `permissions` 横切服务 | MCP + 敏感工具共用 |
 | 部署 | 仅 Obsidian 插件 | root/headless/server 可切换 | 多模式与生态 |
 | 平台层 | 接口出口 Obsidian 类型（`getApp/getVault/getMetadataCache/...`）| 平台无关接口：`documents/search/storage` 核心 + `graph/workspace/ui` 可选服务名；宿主类型不出平台层（壳层 `mentatPlugin` 提供宿主）| 多平台可适配（obsidian/headless/server）；能力缺失→依赖组件自动 pending |
+| L4 交互接口 | 现状：UI 直接 new ChatManager/依赖 plugin；extensions API 只透传内部 | 目标：`ExtensionAPI`（registerTool 可逆 + 白名单服务）、`ui-*` 插件契约、`mcp-server` tool+permission 映射、`delegated` 适配器注册 modes | 第三方扩展/外部 agent/新 UI 以统一接口接入 |
 | 接口污染（审计 §3.6）| `SkillContext`（vault/metadataCache/workspace/plugin）、`SkillDefinition`、`ChatMessage.sources: TFile[]`、`AIProvider` 均引用 Obsidian 类型 | 全部平台无关化：`SkillContext → documents/search/graph/knowledge`；`ChatMessage.sources → string[]`（路径引用）；`ToolContext` 注入服务而非宿主 | 技能/工具/模型跨平台复用；无 graph 平台技能自动不激活 |
