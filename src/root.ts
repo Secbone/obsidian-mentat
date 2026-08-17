@@ -7,14 +7,15 @@ import {
   EventBusService,
   ReadTrackerService,
 } from './services';
-import { AIRouter } from './providers/ai-router';
-import { IndexManager } from './indexing/index-manager';
+import { AIRouterService } from './providers/ai-router.service';
+import { IndexingService } from './indexing/indexing.service';
 import { ExtensionManager } from './extensions';
 import { ChatOrchestrator } from './chat/chat-orchestrator';
 import { OpenCodeIntegration } from './providers/opencode-integration';
-import { TaskType } from './types';
 import type { MentatSettings } from './settings/settings';
 import type { EventBus } from './extensions';
+import type { AIRouter } from './providers/ai-router';
+import type { IndexManager } from './indexing/index-manager';
 import type { ObsidianAdapter } from './utils/obsidian-adapter';
 
 /** Config passed to the MentatRoot component. */
@@ -50,21 +51,16 @@ export const MentatRoot: PluginObject = {
     await ctx.plugin(EventBusService);
     await ctx.plugin(ReadTrackerService);
 
-    // ── business services (M3/M4: replace with components) ────────────────
+    // ── capability services (M3) ──────────────────────────────────────────
+    await ctx.plugin(AIRouterService);
+    await ctx.plugin(IndexingService);
+
+    // ── remaining business services (M4: replace with components) ─────────
     const settings = registry.get<MentatSettings>(ctx, 'settings', false)!;
     const platform = registry.get<ObsidianAdapter>(ctx, 'platform', false)!;
     const eventBus = registry.get<EventBus>(ctx, 'eventBus', false)!;
-
-    // AI router
-    const aiRouter = new AIRouter(settings);
-    ctx.provide('aiRouter', aiRouter);
-    plugin.aiRouter = aiRouter;
-
-    // Indexing
-    const indexManager = new IndexManager(platform, () => aiRouter.getProvider(TaskType.EMBEDDING));
-    await indexManager.initialize();
-    ctx.provide('indexing', indexManager);
-    plugin.indexManager = indexManager;
+    const aiRouter = registry.get<AIRouter>(ctx, 'aiRouter', false)!;
+    const indexManager = registry.get<IndexManager>(ctx, 'indexing', false)!;
 
     // Chat orchestration (may fail gracefully without a provider)
     const chatOrchestrator = new ChatOrchestrator(
