@@ -24,10 +24,10 @@
 - **Cordis 兼容内核**：统一上下文（Γ∞）、可逆效应、响应式依赖、隔离/拦截、事件、纤维生命周期。
 - 职责：组件装配、依赖解析、卸载回收。**不含任何 Mentat 领域概念。**
 
-### L1 平台层 —— 宿主能力抽象
+### L1 平台层 —— 宿主能力抽象（薄直通，一个宿主插件多服务名）
 | 功能 | 说明 |
 |---|---|
-| **vault** | 文件系统（读/写/移动/删除/列表）、Markdown 解析、frontmatter、双链、链接修复 |
+| **vault** | 文件系统直通（读/写/移动/删除/列表）；**Markdown 解析、frontmatter、双链、链接修复属于 L2 领域层** |
 | **metadata** | 标签、别名、缓存（MetadataCache）、文件状态 |
 | **workspace** | 当前文件、打开的叶子、工作区布局 |
 | **storage** | 插件数据持久化（loadData/saveData）、配置目录、技能目录 |
@@ -119,11 +119,24 @@ L0 内核
 > 命名即注册名（`ctx.get('llm')` 等）。
 
 ### 3.1 平台层插件
-| 插件 | 类型 | 依赖 | 提供 | 职责 |
+
+**设计决策（v2.1）：平台层是一个宿主插件，提供多个细粒度服务名。**
+
+平台层的替换单位是**宿主整体**（Obsidian → headless），不是单个能力；且平台层保持
+**薄直通**（只转发宿主 API，不做领域逻辑——领域逻辑一律上移到 L2 能力层）。因此拆成
+多个插件只会产生重复样板与无意义的跨插件耦合。依赖粒度通过"一个插件 provide 多个
+服务名"解决：工具组件声明 `inject: ['vault']` 而不触碰 workspace。
+
+| 插件 | 类型 | 依赖 | 提供（细粒度服务名） | 职责 |
 |---|---|---|---|---|
-| `platform` | 服务 | — | vault/metadata/workspace/storage/notify 适配器 | 宿主抽象（Obsidian 实现） |
-| `settings` | 服务 | platform(storage) | settings schema + 变更事件 | 配置（schema 驱动，DSH 式） |
+| `platform` | 宿主插件 | — | `vault`（读/写/移/删/列表）· `metadata`（标签/别名/缓存）· `workspace`（当前文件/布局）· `storage`（loadData/配置目录）· `notify`（Notice/Modal/确认） | 宿主抽象（Obsidian 实现，整体可替换） |
+| `settings` | 服务 | storage | settings schema + 变更事件 | 配置（schema 驱动，DSH 式） |
 | `diagnostics` | 服务 | events | 诊断/日志导出 | 横切：日志、诊断包 |
+
+> 拆分边界：仅当某能力有独立生命周期/状态（如独立数据库连接），或确有独立部署替换
+> 需求（如 headless 不装 workspace——用"可选的 workspace 插件"解决）时，才从 `platform`
+> 拆出独立插件。领域增强（链接修复、frontmatter 批量、双链解析）**不属于平台层**，
+> 归属 L2 `tool:vault-*`。
 
 ### 3.2 能力层插件
 | 插件 | 类型 | 依赖 | 提供 | 职责 |
@@ -277,3 +290,4 @@ src/
 | 外部 | `openCode` 独立服务 | `delegated` 适配器注册 | 统一外部 agent 接入 |
 | 权限 | 无（技能 requiresConfirmation 零散）| `permissions` 横切服务 | MCP + 敏感工具共用 |
 | 部署 | 仅 Obsidian 插件 | root/headless/server 可切换 | 多模式与生态 |
+| 平台层 | （隐式依赖 plugin.app）| 一个 `platform` 宿主插件提供 `vault/metadata/workspace/storage/notify` 五个细粒度服务名 | 替换单位=宿主整体；依赖粒度=服务名；薄直通无领域逻辑 |
