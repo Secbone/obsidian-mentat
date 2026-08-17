@@ -202,6 +202,123 @@ L0 内核
 - `agentModes`（M6 已建）→ 升级为 `modes` 注册表服务。
 - 新增 `permissions` 横切服务（MCP 与权限敏感工具共用）。
 
+### 3.6 关键接口契约（平台无关）
+
+> 全架构的接口纪律：**宿主类型（Obsidian `App/Vault/Workspace/MetadataCache/TFile`）
+> 不出现在任何 L0–L3 接口中**。审计现状：`IPlatformAdapter`（5 处）、`SkillContext`
+> （3 处 + plugin）、`SkillDefinition`、`ChatMessage.sources`（TFile）均被污染；下表为
+> 目标契约，改造映射见 §8。
+
+**L2 能力层**
+
+```ts
+// ── tools 注册表（服务名 'tools'）──────────────────────────────
+interface ToolDefinition {                 // 领域概念，无宿主类型
+  name: string;
+  description: string;
+  schema: ZodTypeAny;                      // 输入校验（复用 zod）
+  permissions: Permission[];               // 需要的权限 → permissions 服务
+  execute(input: unknown, ctx: ToolContext): Promise<ToolResult>;
+}
+interface ToolContext {                    // 平台无关的执行上下文
+  documents?: DocumentStore;               // 注入而非 vault
+  knowledge?: Knowledge;                   // 检索（可选）
+  signal?: AbortSignal;
+}
+
+// ── llm 注册表（服务名 'llm'）──────────────────────────────────
+interface LLMProvider {
+  id: string;                              // 'openai' | 'anthropic' | 'ollama' | ...
+  capabilities: { chat: boolean; streaming: boolean; embeddings: boolean; tools: boolean };
+  generate(messages: ChatMessage[], opts?: GenerateOptions):
+    Promise<string> | AsyncIterable<LLMChunk>;
+  embed(texts: string[]): Promise<number[][]>;
+}
+
+// ── knowledge（服务名 'knowledge'）─────────────────────────────
+interface Knowledge {
+  indexDocuments(paths?: string[]): Promise<void>;
+  search(query: string, opts?: RetrievalOptions): Promise<RetrievalResult[]>;
+  getStats(): KnowledgeStats;
+}
+
+// ── skills（服务名 'skills'，SkillContext 平台无关化）───────────
+interface SkillContext {
+  documents: DocumentStore;                // 取代 vault
+  search: SearchCapability;                // 取代 metadataCache/workspace
+  graph?: GraphCapability;                 // 可选（无 graph 平台技能自动 pending）
+  knowledge?: Knowledge;
+  readTracker?: ReadTracker;
+  // 不再有 vault / metadataCache / workspace / plugin
+}
+```
+
+**L3 编排层**
+
+```ts
+// ── AgentBackend（已建于 src/agents/agent-backend.ts，契约不变）─
+interface AgentBackend {
+  readonly id: string;
+  readonly displayName: string;
+  readonly capabilities: AgentBackendCapabilities;
+  streamChat(input: AgentChatInput): AsyncGenerator<AgentEvent>;
+  onSessionStart?(sessionId: string): void | Promise<void>;
+  onSessionEnd?(sessionId: string): void | Promise<void>;
+  dispose(): void | Promise<void>;
+}
+
+// ── session（服务名 'session'）──────────────────────────────────
+interface ChatSession {
+  readonly id: string;
+  readonly modeId: string;
+  send(message: ChatMessage): AsyncIterable<AgentEvent>;
+  abort(): void;
+  dispose(): Promise<void>;
+}
+
+// ── compaction（服务名 'compaction'，策略可注册）────────────────
+interface CompactionStrategy {
+  shouldCompact(stats: ContextStats): boolean;
+  compact(messages: ChatMessage[], opts: CompactionOptions): Promise<CompactionResult>;
+}
+```
+
+**横切层**
+
+```ts
+// ── permissions（服务名 'permissions'）──────────────────────────
+type Permission =
+  | 'documents:read' | 'documents:write' | 'documents:delete'
+  | 'execute:command' | 'network:fetch' | 'extension:mount';
+interface PermissionPolicy {
+  request(permission: Permission, reason: { scope: string; detail: string }): Promise<boolean>;
+  /** 按会话缓存授权；权限粒度见 RFC §4 */
+}
+
+// ── events（统一事件契约，命名空间式）───────────────────────────
+type AgentEvent =
+  | { type: 'agent:start' } | { type: 'agent:end'; messages: ChatMessage[] }
+  | { type: 'turn:start'; turnIndex: number } | { type: 'turn:end'; turnIndex: number }
+  | { type: 'message:update'; delta: string }
+  | { type: 'tool:start'; tool: string } | { type: 'tool:end'; tool: string }
+  | { type: 'context:compact:start' } | { type: 'context:compact:end' };
+```
+
+**通用消息类型（去宿主化）**
+
+```ts
+interface ChatMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'function';
+  content: string;
+  timestamp: number;
+  sources?: string[];       // 路径引用数组（取代 TFile[]）
+  tool_call_id?: string;
+}
+```
+
+---
+
+
 ---
 
 ## 4. 数据流（一次对话）
@@ -303,3 +420,4 @@ src/
 | 权限 | 无（技能 requiresConfirmation 零散）| `permissions` 横切服务 | MCP + 敏感工具共用 |
 | 部署 | 仅 Obsidian 插件 | root/headless/server 可切换 | 多模式与生态 |
 | 平台层 | 接口出口 Obsidian 类型（`getApp/getVault/getMetadataCache/...`）| 平台无关接口：`documents/search/storage` 核心 + `graph/workspace/ui` 可选服务名；宿主类型不出平台层（壳层 `mentatPlugin` 提供宿主）| 多平台可适配（obsidian/headless/server）；能力缺失→依赖组件自动 pending |
+| 接口污染（审计 §3.6）| `SkillContext`（vault/metadataCache/workspace/plugin）、`SkillDefinition`、`ChatMessage.sources: TFile[]`、`AIProvider` 均引用 Obsidian 类型 | 全部平台无关化：`SkillContext → documents/search/graph/knowledge`；`ChatMessage.sources → string[]`（路径引用）；`ToolContext` 注入服务而非宿主 | 技能/工具/模型跨平台复用；无 graph 平台技能自动不激活 |
