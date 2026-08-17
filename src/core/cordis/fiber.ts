@@ -302,8 +302,10 @@ export class Fiber {
     this.state = INACTIVE;
     this._loadError = null;
     // Inertial chaining: if dependencies became satisfied again while this
-    // fiber was unloading (e.g. a provider was re-registered), reload it.
-    if (this.uid !== null && this._dependenciesSatisfied()) {
+    // fiber was unloading (e.g. a provider was re-registered), reload it —
+    // but never retry after an activation failure (Cordis: an error outcome
+    // prevents re-entering the lifecycle).
+    if (this.uid !== null && this._loadError === null && this._dependenciesSatisfied()) {
       this._refresh();
     }
   }

@@ -1,13 +1,21 @@
 import { Notice } from 'obsidian';
 import type { PluginObject } from './core/cordis';
 import type MentatPlugin from './main';
-import { ObsidianAdapter } from './utils/obsidian-adapter';
+import {
+  SettingsService,
+  PlatformService,
+  EventBusService,
+  ReadTrackerService,
+} from './services';
 import { AIRouter } from './providers/ai-router';
 import { IndexManager } from './indexing/index-manager';
-import { EventBus, ExtensionManager } from './extensions';
+import { ExtensionManager } from './extensions';
 import { ChatOrchestrator } from './chat/chat-orchestrator';
 import { OpenCodeIntegration } from './providers/opencode-integration';
 import { TaskType } from './types';
+import type { MentatSettings } from './settings/settings';
+import type { EventBus } from './extensions';
+import type { ObsidianAdapter } from './utils/obsidian-adapter';
 
 /** Config passed to the MentatRoot component. */
 export interface MentatRootConfig {
@@ -15,52 +23,53 @@ export interface MentatRootConfig {
 }
 
 /**
- * Host-plane assembly component (M1 skeleton, behavior-preserving).
+ * Host-plane assembly component (M2: base services componentized).
  *
- * Moves the hand-wired initialization from `main.ts onload()` into a Cordis
- * plugin so that every subsystem is registered as a *service* on the unified
- * context, and unloading the context fiber (in `onunload`) recovers the
- * registrations in LIFO order. Nothing else changes yet: the plugin instance
- * keeps its public field references (`plugin.aiRouter`, ...) so existing UI,
- * commands and settings code keeps working untouched.
+ * Assembles the plugin as a Cordis component tree:
+ * - base services (settings / platform / eventBus / readTracker) are
+ *   dedicated components declaring their dependencies via `inject`;
+ * - heavier business services (router / indexing / chat / extensions /
+ *   integrations) are still initialized inline for now and will be
+ *   componentized in M3/M4, reading base services through the registry.
  *
- * Follow-up steps (per docs/mentat-cordis-refactor.md) will replace each
- * subsystem in turn with a proper `Service` component declaring `inject`.
+ * Unloading the context fiber (in `onunload`) recovers every registration
+ * in LIFO order.
  */
 export const MentatRoot: PluginObject = {
   inject: [],
   apply: async (ctx, config: MentatRootConfig) => {
     const plugin = config.plugin;
+    const registry = ctx.registry;
 
-    // ── identity / settings ───────────────────────────────────────────────
+    // ── identity ──────────────────────────────────────────────────────────
     ctx.provide('mentatPlugin', plugin);
-    ctx.provide('settings', plugin.settings);
 
-    // ── platform ──────────────────────────────────────────────────────────
-    const platform = new ObsidianAdapter(plugin);
-    ctx.provide('platform', platform);
-    plugin.platform = platform;
+    // ── base services (await activation so providers are installed) ───────
+    await ctx.plugin(SettingsService);
+    await ctx.plugin(PlatformService);
+    await ctx.plugin(EventBusService);
+    await ctx.plugin(ReadTrackerService);
 
-    // ── AI router ─────────────────────────────────────────────────────────
-    const aiRouter = new AIRouter(plugin.settings);
+    // ── business services (M3/M4: replace with components) ────────────────
+    const settings = registry.get<MentatSettings>(ctx, 'settings', false)!;
+    const platform = registry.get<ObsidianAdapter>(ctx, 'platform', false)!;
+    const eventBus = registry.get<EventBus>(ctx, 'eventBus', false)!;
+
+    // AI router
+    const aiRouter = new AIRouter(settings);
     ctx.provide('aiRouter', aiRouter);
     plugin.aiRouter = aiRouter;
 
-    // ── indexing ──────────────────────────────────────────────────────────
+    // Indexing
     const indexManager = new IndexManager(platform, () => aiRouter.getProvider(TaskType.EMBEDDING));
     await indexManager.initialize();
     ctx.provide('indexing', indexManager);
     plugin.indexManager = indexManager;
 
-    // ── event bus (before the orchestrator, for agent event streaming) ────
-    const eventBus = new EventBus();
-    ctx.provide('eventBus', eventBus);
-    plugin.eventBus = eventBus;
-
-    // ── chat orchestration (may fail gracefully without a provider) ───────
+    // Chat orchestration (may fail gracefully without a provider)
     const chatOrchestrator = new ChatOrchestrator(
       platform,
-      plugin.settings,
+      settings,
       aiRouter,
       indexManager,
       eventBus,
@@ -79,25 +88,24 @@ export const MentatRoot: PluginObject = {
     plugin.agentManager = chatOrchestrator.getAgentManager();
     ctx.provide('agents', plugin.agentManager);
 
-    // ── extension system (shares the global event bus) ────────────────────
+    // Extension system
     const extensionManager = new ExtensionManager(
       plugin.app,
       chatOrchestrator.getSkillRegistry(),
       chatOrchestrator.getSkillExecutor(),
-      plugin.settings,
+      settings,
       eventBus,
     );
     extensionManager.loadAll();
     ctx.provide('extensions', extensionManager);
     plugin.extensionManager = extensionManager;
 
-    // ── integrations ──────────────────────────────────────────────────────
+    // Integrations
     const openCodeIntegration = new OpenCodeIntegration(plugin);
     ctx.provide('openCode', openCodeIntegration);
     plugin.openCodeIntegration = openCodeIntegration;
 
-    // Unload inverse: keep the current onunload cleanup semantics exactly
-    // (M5 will widen this to full LIFO recovery of every registration).
+    // Unload inverse: keep the current cleanup semantics (M5 widens this).
     return async () => {
       chatOrchestrator.dispose();
       openCodeIntegration.dispose();

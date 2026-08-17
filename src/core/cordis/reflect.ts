@@ -64,21 +64,17 @@ export class ReflectService {
     }, `ctx.accessor(${JSON.stringify(name)})`);
   }
 
-  /** Resolve a property read; enforces the inject requirement inside fibers. */
+  /**
+   * Resolve a property read. `ctx.get(name)` reads the service store freely
+   * (no inject requirement — that enforcement belongs to proxy property
+   * access, matching Cordis semantics).
+   */
   get(ctx: Context, prop: string, strict = true): unknown {
     const meta = this.props[prop];
     if (meta?.type === 'accessor') {
       return (meta.config as AccessorOptions).get.call(ctx);
     }
-    const fiber = ctx.fiber;
-    if (fiber.runtime) {
-      if (!(prop in fiber.inject)) {
-        throw new Error(`cannot get property "${prop}" without inject`);
-      }
-      return this.ctx.registry.get(ctx, prop, strict);
-    }
-    // Root context: plain registry read.
-    return this.ctx.registry.get(ctx, prop, false);
+    return this.ctx.registry.get(ctx, prop, strict);
   }
 
   /** Resolve a property write; requires the current fiber to provide it. */
@@ -116,6 +112,15 @@ export const contextHandler: ProxyHandler<Context> = {
     const stringProp = prop as string;
     if (stringProp in target) return Reflect.get(target, prop, receiver);
     if (target.reflect.has(stringProp)) {
+      // Property access inside a fiber requires the name to be declared in
+      // `inject` (or provided by the fiber itself) — the paper's rule that a
+      // component may only read what it declares. `ctx.get(name)` bypasses
+      // this; `ctx.foo` enforces it.
+      const accessor = (receiver && typeof receiver === 'object' ? receiver : target) as Context;
+      const fiber = accessor.fiber;
+      if (fiber.runtime && !(stringProp in fiber.inject) && !(stringProp in (fiber.store as object))) {
+        throw new Error(`cannot get property "${stringProp}" without inject`);
+      }
       return target.reflect.get(target, stringProp, false);
     }
     return undefined;
