@@ -129,17 +129,12 @@ describe('AgentOrchestrator Unit Tests', () => {
     manager.registerAgent(mockAgent1);
     manager.registerAgent(mockAgent2);
 
-    const pipeline = orchestrator.executePipeline(
+    const response = await orchestrator.executePipeline(
       ['agent-1', 'agent-2'],
       'initial prompt',
       { messages: [], sessionId: 's2' }
     );
-
-    // Consume pipeline
-    let next = await pipeline.next();
-    while (!next.done) {
-      next = await pipeline.next();
-    }
+    expect(response).toBeTruthy();
 
     // Verify tool calls and tool responses are preserved in context messages passed to Agent 2
     expect(passedContextMessages.length).toBe(4);
