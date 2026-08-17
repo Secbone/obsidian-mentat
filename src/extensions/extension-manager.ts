@@ -15,6 +15,8 @@ export type { ExtensionAPI, ExtensionFactory, ExtensionContext, ExtensionRegistr
 export class ExtensionManager {
   private extensions = new Map<string, ExtensionRegistration>();
   private loadedInstances = new Map<string, ExtensionAPI>();
+  /** Cleanup disposers returned by extension factories (recovered on unload). */
+  private disposers = new Map<string, () => void>();
   readonly eventBus = new EventBus();
 
   constructor(
@@ -65,6 +67,11 @@ export class ExtensionManager {
     }
   }
 
+  /** Whether an extension instance is currently loaded. */
+  hasLoaded(id: string): boolean {
+    return this.loadedInstances.has(id);
+  }
+
   /**
    * Get the event bus (for host code to emit events).
    */
@@ -104,7 +111,8 @@ export class ExtensionManager {
     };
 
     try {
-      await reg.factory(api);
+      const result = await reg.factory(api);
+      if (typeof result === 'function') this.disposers.set(reg.id, result as () => void);
       this.loadedInstances.set(reg.id, api);
       console.log(`[ExtensionManager] Loaded extension: ${reg.id} (${reg.name})`);
     } catch (error) {
@@ -113,6 +121,16 @@ export class ExtensionManager {
   }
 
   private unloadExtension(id: string): void {
+    // Run the extension's cleanup disposer (revertible-effect discipline).
+    const dispose = this.disposers.get(id);
+    if (dispose) {
+      try {
+        dispose();
+      } catch (error) {
+        console.error(`[ExtensionManager] Extension ${id} dispose error:`, error);
+      }
+      this.disposers.delete(id);
+    }
     this.loadedInstances.delete(id);
   }
 }

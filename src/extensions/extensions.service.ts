@@ -26,6 +26,11 @@ export const ExtensionsService: PluginObject = {
     );
     extensionManager.loadAll();
     plugin.extensionManager = extensionManager;
-    return ctx.provide('extensions', extensionManager);
+    const dispose = ctx.provide('extensions', extensionManager);
+    // Unload inverse (M5): recover every extension's registrations too.
+    return () => {
+      extensionManager.unloadAll();
+      void dispose();
+    };
   },
 };
