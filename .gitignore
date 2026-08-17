@@ -40,3 +40,6 @@ yarn-error.log*
 .claude/
 
 
+
+# npm cache (local installs)
+.npm-cache/
