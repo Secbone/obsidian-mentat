@@ -182,11 +182,11 @@ export class AgentOrchestrator {
   /**
    * Execute agents in pipeline (sequential) mode
    */
-  async *executePipeline(
+  async executePipeline(
     agentIds: string[],
     initialPrompt: string,
     initialContext: AgentContext
-  ): AsyncGenerator<AgentEvent & { activeAgentId?: string }, AgentResponse, unknown> {
+  ): Promise<AgentResponse> {
     let currentContext = initialContext;
     let currentPrompt = initialPrompt;
     let finalResponse: AgentResponse | null = null;
