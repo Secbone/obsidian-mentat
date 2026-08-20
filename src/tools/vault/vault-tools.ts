@@ -1,6 +1,5 @@
 import type { PluginObject, Context } from '../../core/cordis';
 import type { ToolDefinition } from '../contract';
-import type { DocumentStore } from '../../platform/contracts';
 import type { ToolsRegistry } from '../tools.service';
 
 /**
