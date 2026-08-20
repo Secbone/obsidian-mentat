@@ -89,8 +89,8 @@ export class Context {
   once(_name: string, _handler: EventHandler): Disposable { return () => {}; }
   /** Remove an event listener (mixin-forwarded). */
   off(_name: string, _handler: EventHandler): void { }
-  /** Emit an event (mixin-forwarded). */
-  emit(_subject: unknown, _name: string, ..._args: unknown[]): boolean { return false; }
+  /** Emit an event (mixin-forwarded; Cordis dispatch signature: optional leading subject). */
+  emit(..._args: unknown[]): boolean { return false; }
   /** Define a computed property (mixin-forwarded). */
   accessor<T = unknown>(_name: string, _options: AccessorOptions<T>): Disposable { return () => {}; }
   /* eslint-enable @typescript-eslint/no-unused-vars */

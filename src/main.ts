@@ -244,6 +244,8 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
 
   async saveSettings() {
     await this.saveData(this.settings);
+    // Emit on the kernel context so L2+ services (llm, etc.) can react.
+    this.ctx?.emit('settings:update', this.settings);
 
     // Refresh AI Router when settings change
     if (this.aiRouter) {
