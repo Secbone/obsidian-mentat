@@ -6,6 +6,8 @@ import {
   EventBusService,
   ReadTrackerService,
 } from './services';
+import { DiagnosticsService } from './diagnostics/diagnostics.service';
+import { ObsidianPlatformPlugin } from './platform/platform.service';
 import { AIRouterService } from './providers/ai-router.service';
 import { IndexingService } from './indexing/indexing.service';
 import { ChatService } from './chat/chat.service';
@@ -39,7 +41,13 @@ export const MentatRoot: PluginObject = {
     // ── identity ──────────────────────────────────────────────────────────
     ctx.provide('mentatPlugin', plugin);
 
-    // ── base services ─────────────────────────────────────────────────────
+    // ── L1 platform + crosscutting ────────────────────────────────────────
+    // Host-agnostic platform services (documents/search/storage/graph/workspace/ui).
+    // Kept alongside the legacy `platform` service until L2/L3 switch over.
+    await ctx.plugin(ObsidianPlatformPlugin);
+    await ctx.plugin(DiagnosticsService);
+
+    // ── base services (legacy, retired at switch points) ──────────────────
     await ctx.plugin(SettingsService);
     await ctx.plugin(PlatformService);
     await ctx.plugin(EventBusService);
