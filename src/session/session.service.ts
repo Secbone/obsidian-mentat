@@ -1,5 +1,4 @@
 import type { PluginObject, Context } from '../core/cordis';
-import type { AgentBackend } from '../agents/agent-backend';
 import type { AgentEvent } from '../agents/agent-types';
 import type { ChatMessage } from '../types';
 import type { AgentModeRegistry } from '../agents/agent-mode';
