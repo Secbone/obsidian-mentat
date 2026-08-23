@@ -32,7 +32,7 @@ export class AgentLoopService {
     const maxTurns = options.maxTurns ?? 4;
     yield { type: 'agent:start' };
 
-    let state = { messages };
+    const state = { messages };
 
     for (let turn = 0; turn < maxTurns; turn++) {
       if (signal?.aborted) { yield { type: 'agent:error' as never }; break; }
