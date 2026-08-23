@@ -1,6 +1,6 @@
 import type { PluginObject, Context } from '../core/cordis';
 import { AgentModeRegistry, EMBEDDED_MODE } from './agent-mode';
-import { EmbeddedBackend } from './embedded-backend';
+import { EmbeddedBackend } from './backends/embedded.backend';
 
 /**
  * Host service: provides the agent-mode registry and registers the built-in
