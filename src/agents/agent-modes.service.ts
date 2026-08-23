@@ -17,5 +17,6 @@ export const AgentModesService: PluginObject = {
       createBackend: ({ ctx: sessionCtx, sessionId }) => new EmbeddedBackend(sessionCtx, { sessionId }),
     });
     ctx.provide('agentModes', registry);
+    ctx.provide('modes', registry);   // canonical L3 name used by the session service
   },
 };
