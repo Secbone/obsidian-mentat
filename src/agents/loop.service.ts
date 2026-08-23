@@ -1,6 +1,5 @@
 import type { PluginObject, Context } from '../core/cordis';
 import type { AgentEvent } from './agent-types';
-import type { AgentBackend } from './agent-backend';
 import type { ChatMessage } from '../types';
 import type { LLMRegistry } from '../llm/llm.service';
 import type { ToolsRegistry } from '../tools/tools.service';
