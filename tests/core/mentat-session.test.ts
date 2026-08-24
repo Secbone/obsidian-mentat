@@ -2,9 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { Context } from '../../src/core/cordis';
 import { AgentModeRegistry, EMBEDDED_MODE } from '../../src/agents/agent-mode';
 import { createSession } from '../../src/chat/session';
-import { EmbeddedBackend } from '../../src/agents/embedded-backend';
+import { EmbeddedBackend } from '../../src/agents/backends/embedded.backend';
 import type { AgentModeDescriptor } from '../../src/agents/agent-mode';
-import type { AIProvider } from '../../src/types';
 
 describe('AgentModeRegistry (M6)', () => {
   it('registers, lists, gets and reversibly unregisters modes', () => {
@@ -83,27 +82,37 @@ describe('createSession (M6)', () => {
   });
 });
 
-describe('EmbeddedBackend (M6)', () => {
-  it('yields agent events through the existing RAGP loop', async () => {
+describe('EmbeddedBackend (L3.4)', () => {
+  it('yields agent events through the agent-loop service', async () => {
     const ctx = new Context();
-    const mockProvider = {
-      id: 'mock', name: 'Mock', type: 'openai',
+    // Provide the agent-loop dependency chain over the kernel context.
+    const { LLMRegistry } = await import('../../src/llm/llm.service');
+    const { AgentLoopService } = await import('../../src/agents/loop.service');
+    const { ToolsRegistry } = await import('../../src/tools/tools.service');
+    const { ContextWindowService } = await import('../../src/session/context.service');
+    const { CompactionService, SummarizeCompactionStrategy } = await import('../../src/session/compaction.service');
+
+    const llm = new LLMRegistry();
+    llm.register({
+      id: 'mock', name: 'Mock',
+      capabilities: { chat: true, streaming: true, embeddings: false, tools: false },
       generate: async () => 'hello',
-      generateStream: async (_p: string, cb: (c: string) => void) => { cb('hello'); },
-      generateEmbedding: async () => ({ embedding: [] }),
-      embed: async () => [],
-      isAvailable: async () => true,
-      getContextWindow: () => 8000,
-      getCompactionThreshold: () => 6000,
-      supportsSkills: () => false,
-    } as AIProvider;
-    ctx.provide('aiRouter', { getProvider: async () => mockProvider } as never);
+      generateStream: async () => {},
+      getContextWindow: () => 8000, getCompactionThreshold: () => 6000, isAvailable: async () => true,
+    });
+    const compaction = new CompactionService(new ContextWindowService());
+    compaction.register(new SummarizeCompactionStrategy());
+    ctx.provide('llm', llm);
+    ctx.provide('tools', new ToolsRegistry());
+    ctx.provide('context-window', new ContextWindowService());
+    ctx.provide('compaction', compaction);
+    ctx.provide('agent-loop', new AgentLoopService(llm, new ToolsRegistry(), new ContextWindowService(), compaction));
 
     const backend = new EmbeddedBackend(ctx);
     const events: string[] = [];
     for await (const event of backend.streamChat({
       sessionId: 's1',
-      messages: [{ role: 'user', content: 'hi' }],
+      messages: [{ role: 'user', content: 'hi', timestamp: Date.now() }],
     })) {
       events.push(event.type);
     }
