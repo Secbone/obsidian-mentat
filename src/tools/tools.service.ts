@@ -56,9 +56,10 @@ export class ToolsRegistry {
 }
 
 export const ToolsService: PluginObject = {
-  inject: ['permissions'],
   apply(ctx: Context) {
     const registry = new ToolsRegistry();
+    // Permissions are an optional enhancement: bind if present, else tools
+    // run un-gated (enforcement is enforced when a permissions service is up).
     const permissions = ctx.get<PermissionService>('permissions', false);
     if (permissions) registry.usePermissions(permissions);
     return ctx.provide('tools', registry);
