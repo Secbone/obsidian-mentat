@@ -2,7 +2,6 @@ import type { PluginObject, Context } from '../../core/cordis';
 import type { AgentModeDescriptor } from '../../agents/agent-mode';
 import type { AgentModeRegistry } from '../../agents/agent-mode';
 import type { AgentBackend } from '../../agents/agent-backend';
-import type { McpServerService } from '../mcp-server/mcp-server.service';
 
 /**
  * A delegated-external-agent adapter: implements an AgentBackend that forwards
