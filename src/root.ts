@@ -14,6 +14,7 @@ import { ChatService } from './chat/chat.service';
 import { ExtensionsService } from './extensions/extensions.service';
 import { OpenCodeService } from './providers/opencode.service';
 import { AgentModesService } from './agents/agent-modes.service';
+import { NewArchitectureLayer } from './app/new-architecture.layer';
 
 /** Config passed to the MentatRoot component. */
 export interface MentatRootConfig {
@@ -64,5 +65,8 @@ export const MentatRoot: PluginObject = {
 
     // ── session plane (M6) ────────────────────────────────────────────────
     await ctx.plugin(AgentModesService);
+
+    // ── L2-L4 new-architecture service stack (parallel with legacy) ───────
+    await ctx.plugin(NewArchitectureLayer);
   },
 };
