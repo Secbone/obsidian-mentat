@@ -2,7 +2,6 @@ import type { Context } from '../core/cordis';
 import type { ToolDefinition } from '../tools/contract';
 import type { ToolsRegistry } from '../tools/tools.service';
 import type { EventBridgeService } from '../events/event-bridge.service';
-import type { PermissionService } from '../external/permissions.service';
 import type { AgentEvent } from '../agents/agent-types';
 
 export interface ExtensionContext {

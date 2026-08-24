@@ -15,7 +15,7 @@ async function setup() {
 
 describe('ExtensionHostV2 (L4.5)', () => {
   it('registers an extension; registerTool is reversible via the unsubscriber', async () => {
-    const { ctx, tools, host } = await setup();
+    const { tools, host } = await setup();
     let unregisterTool: (() => void) | undefined;
     const reg: ExtensionRegistrationV2 = {
       id: 'ext1', name: 'E1', description: '',
