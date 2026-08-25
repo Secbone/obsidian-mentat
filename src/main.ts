@@ -234,6 +234,31 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
         await DiagnosticsExporter.generateAndOpenDiagnosticsLog(this);
       }
     });
+
+    // Export recent structured logs (diagnostics troubleshooting)
+    this.addCommand({
+      id: 'export-diagnostics',
+      name: 'Export recent diagnostics (logs)',
+      callback: async () => {
+        const ctx = this.ctx;
+        const logger = ctx?.get<{ recent: (f?: { level?: string }) => Array<{ iso: string; level: string; name: string; message: string; errorChain?: string }> }>('logger', false);
+        if (!logger) {
+          new Notice('Mentat: logger not available');
+          return;
+        }
+        const path = `${this.app.vault.configDir}/plugins/mentat/logs/diagnostics-export.txt`;
+        try {
+          const entries = logger.recent();
+          const lines = entries.map((e) => `[${e.iso}] ${e.level.toUpperCase()} ${e.name}: ${e.message}${e.errorChain ? ` (${e.errorChain})` : ''}`);
+          const text = lines.join('\n') || '(no logs)';
+          const vault = this.app.vault;
+          await vault.adapter.write(path, text);
+          new Notice(`✓ Exported ${entries.length} log entries to ${path}`);
+        } catch (error) {
+          new Notice(`✗ Export failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    });
   }
 
   async loadSettings() {
