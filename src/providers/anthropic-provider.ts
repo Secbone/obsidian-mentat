@@ -2,6 +2,7 @@
 
 import { AIProvider, GenerateOptions, GenerateResponse, ChatMessage, ToolCall } from '../types';
 import Anthropic from '@anthropic-ai/sdk';
+import { obsidianFetch } from '../obsidian/obsidian-fetch';
 import { parseJson } from '../utils/json-healer';
 
 export interface AnthropicProviderConfig {
@@ -30,7 +31,11 @@ export class AnthropicProvider implements AIProvider {
 
     this.client = new Anthropic({
       apiKey: config.apiKey,
-      dangerouslyAllowBrowser: true // Required for Obsidian plugin environment
+      dangerouslyAllowBrowser: true, // Required for Obsidian plugin environment
+      fetch: (...args: Parameters<typeof fetch>) => {
+        try { return obsidianFetch(args[0] as string, args[1] as RequestInit); }
+        catch { return globalThis.fetch(...args); }
+      },
     });
   }
 

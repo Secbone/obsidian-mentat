@@ -313,7 +313,12 @@ export class BaseAgent {
           cacheCreationTokens += result.usage.cacheCreationTokens ?? 0;
         }
       } catch (err: unknown) {
-        yield { type: 'system:error', message: `大模型决策异常: ${err instanceof Error ? err.message : String(err)}` };
+        yield {
+          type: 'system:error',
+          message: `大模型决策异常: ${err instanceof Error
+            ? (() => { const c = (err as { cause?: unknown }).cause; return c instanceof Error ? `\${err.message} → cause: \${c.message}` : err.message; })()
+            : String(err)}`,
+        };
         throw err;
       }
 

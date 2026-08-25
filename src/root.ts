@@ -51,9 +51,11 @@ export const MentatRoot: PluginObject = {
     if (logger && rawAdapter?.append) {
       const adapter = rawAdapter;
       const appDir = String(plugin.app.vault.configDir ?? '');
+      const logDir = `${appDir}/plugins/mentat/logs`.replace(/\\/g, '/');
       const fileSink = new FileLogSink({
-        dir: `${appDir}/plugins/mentat/logs`.replace(/\\/g, '/'),
+        dir: logDir,
         append: (path, data) => adapter.append!(path, data),
+        mkdir: (path) => plugin.app.vault.adapter.mkdir(path.replace(/\\/g, '/')),
       });
       logger.addExporter(fileSink);
     }

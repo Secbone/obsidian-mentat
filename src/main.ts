@@ -252,6 +252,8 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
           const lines = entries.map((e) => `[${e.iso}] ${e.level.toUpperCase()} ${e.name}: ${e.message}${e.errorChain ? ` (${e.errorChain})` : ''}`);
           const text = lines.join('\n') || '(no logs)';
           const vault = this.app.vault;
+          const logDir = `${vault.configDir}/plugins/mentat/logs`.replace(/\\/g, '/');
+          await vault.adapter.mkdir(logDir).catch(() => {});   // ensure dir exists
           await vault.adapter.write(path, text);
           new Notice(`✓ Exported ${entries.length} log entries to ${path}`);
         } catch (error) {

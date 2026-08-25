@@ -40,6 +40,7 @@ describe('Mentat capability services (M3)', () => {
     const ctx = new Context();
     const plugin = createMockPlugin();
     ctx.provide('mentatPlugin', plugin);
+    ctx.provide('logger', { get: () => ({ error: () => {}, warn: () => {}, info: () => {}, debug: () => {} }) } as never);
 
     await ctx.plugin(SettingsService);
     await ctx.plugin(PlatformService);
@@ -56,6 +57,7 @@ describe('Mentat capability services (M3)', () => {
     const ctx = new Context();
     const plugin = createMockPlugin();
     ctx.provide('mentatPlugin', plugin);
+    ctx.provide('logger', { get: () => ({ error: () => {}, warn: () => {}, info: () => {}, debug: () => {} }) } as never);
     await ctx.plugin(SettingsService);
     await ctx.plugin(PlatformService);
 

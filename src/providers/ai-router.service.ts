@@ -1,6 +1,7 @@
 import type { PluginObject, Context } from '../core/cordis';
 import type { MentatSettings } from '../settings/settings';
 import { AIRouter } from './ai-router';
+import type { LoggerService, Logger } from '../logger/logger.service';
 import type MentatPlugin from '../main';
 
 /**
@@ -12,10 +13,20 @@ import type MentatPlugin from '../main';
  * every consumer — the Cordis pattern for provider hot-swap.
  */
 export const AIRouterService: PluginObject = {
-  inject: ['settings'],
+  inject: ['settings', 'logger'],
   apply(ctx: Context) {
     const settings = ctx.get<MentatSettings>('settings')!;
-    const router = new AIRouter(settings);
+    const logger = ctx.get<LoggerService>('logger', false);
+    const loggerFactory = (providerId: string) => (error: unknown, stage: string) => {
+      if (logger) {
+        const named = logger.get(`provider:${providerId}`, { providerId }) as Logger;
+        named.error(`[${stage}] ${error instanceof Error ? error.message : String(error)}`);
+        named.error(error);
+      } else {
+        console.error(`[provider:${providerId}] ${stage}:`, error);
+      }
+    };
+    const router = new AIRouter(settings, loggerFactory);
     // Keep the plugin field reference for existing command code.
     const plugin = ctx.get<MentatPlugin>('mentatPlugin', false);
     if (plugin) plugin.aiRouter = router;

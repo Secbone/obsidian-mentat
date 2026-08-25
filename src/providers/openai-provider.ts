@@ -3,6 +3,7 @@
 
 import { AIProvider, GenerateOptions, GenerateResponse, ChatMessage, ToolCall } from '../types';
 import OpenAI from 'openai';
+import { obsidianFetch } from '../obsidian/obsidian-fetch';
 
 export interface OpenAIProviderConfig {
   id: string;
@@ -50,7 +51,14 @@ export class OpenAIProvider implements AIProvider {
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
-      dangerouslyAllowBrowser: true // Required for Obsidian plugin environment
+      dangerouslyAllowBrowser: true, // Required for Obsidian plugin environment
+      // Use Obsidian's main-process requestUrl (not subject to the renderer
+      // fetch 'Failed to fetch' restriction). Falls back to global fetch in
+      // non-Obsidian (headless) environments.
+      fetch: (...args: Parameters<typeof fetch>) => {
+        try { return obsidianFetch(args[0] as string, args[1] as RequestInit); }
+        catch { return globalThis.fetch(...args); }
+      },
     });
   }
 

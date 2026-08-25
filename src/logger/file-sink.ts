@@ -7,6 +7,8 @@ export interface FileLogSinkOptions {
   /** Base directory for logs (e.g. `<configDir>/.mentat/logs`). */
   dir: string;
   append: AppendFn;
+  /** Optional: ensure the directory exists before the first append. */
+  mkdir?: (path: string) => Promise<void> | void;
   /** Per-name level overrides. */
   levels?: Record<string, number>;
   /** Preserve < N days; older files removed on init. */
@@ -29,15 +31,24 @@ export class FileLogSink implements LoggerExporter {
   private dir: string;
   private append: AppendFn;
   private staticContext: Record<string, unknown>;
+  private initialized = false;
+  private mkdir?: (path: string) => Promise<void> | void;
 
   constructor(options: FileLogSinkOptions) {
     this.dir = options.dir;
     this.append = options.append;
+    this.mkdir = options.mkdir;
     this.levels = options.levels;
     this.staticContext = options.staticContext ?? {};
   }
 
   async export(message: LogMessage): Promise<void> {
+    if (!this.initialized) {
+      // Ensure the log directory exists before the first write (the Obsidian
+      // adapter does not auto-create parents).
+      try { await this.mkdir?.(this.dir); } catch { /* dir may already exist */ }
+      this.initialized = true;
+    }
     const file = this.fileFor(message.ts);
     const entry = {
       ts: message.iso,

@@ -11,7 +11,10 @@ export class AIRouter {
   private providers: Map<string, AIProvider> = new Map();
   private settings: MentatSettings;
 
-  constructor(settings: MentatSettings) {
+  constructor(
+    settings: MentatSettings,
+    private loggerFactory?: (providerId: string) => (error: unknown, stage: string) => void,
+  ) {
     this.settings = settings;
     this.initializeProviders();
   }
@@ -43,6 +46,7 @@ export class AIRouter {
               baseURL: config.baseURL || 'https://api.openai.com/v1',
               model: config.model,
               embeddingModel: config.embeddingModel,
+              logger: this.loggerFactory?.(config.id),
               temperature: config.temperature,
               maxTokens: config.maxTokens,
               contextWindow: config.contextWindow,
@@ -56,6 +60,7 @@ export class AIRouter {
               apiKey: config.apiKey!,
               model: config.model,
               temperature: config.temperature,
+              logger: this.loggerFactory?.(config.id),
               maxTokens: config.maxTokens,
               contextWindow: config.contextWindow,
               compactionThreshold: config.compactionThreshold,
