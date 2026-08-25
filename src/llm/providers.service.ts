@@ -4,6 +4,7 @@ import { AnthropicProvider } from '../providers/anthropic-provider';
 import { OllamaProvider } from '../providers/ollama-provider';
 import { adaptLegacyProvider } from './legacy-adapter';
 import type { LLMRegistry } from './llm.service';
+import type { LoggerService, Logger } from '../logger/logger.service';
 import type { MentatSettings, AIProviderConfig } from '../settings/settings';
 
 /**
@@ -15,10 +16,20 @@ import type { MentatSettings, AIProviderConfig } from '../settings/settings';
  * re-syncs the registry — the Cordis reactive hot-swap pattern for models.
  */
 export const LlmProvidersService: PluginObject = {
-  inject: ['settings', 'llm'],
+  inject: ['settings', 'llm', 'logger'],
   apply(ctx: Context) {
     const settings = ctx.get<MentatSettings>('settings', false)!;
     const registry = ctx.get<LLMRegistry>('llm', false)!;
+    const logger = ctx.get<LoggerService>('logger', false);
+    // Wrap the logger so a missing logger degrades to console rather than throwing.
+    const logProviderError = (id: string) => (error: unknown, stage: string) => {
+      if (logger) {
+        (logger.get(`provider:${id}`, { providerId: id }) as Logger).error(`[${stage}] ${error instanceof Error ? (error as {cause?: unknown}).cause ? String((error as {cause?: unknown}).cause) : error.message : String(error)}`);
+        (logger.get(`provider:${id}`, { providerId: id }) as Logger).error(error);
+      } else {
+        console.error(`[provider:${id}] ${stage}:`, error);
+      }
+    };
 
     const syncProviders = () => {
       // Track current provider ids so removal re-syncs too.
@@ -26,7 +37,7 @@ export const LlmProvidersService: PluginObject = {
       for (const config of settings.aiProviders) {
         if (!config.enabled) continue;
         try {
-          const provider = buildProvider(config);
+          const provider = buildProvider(config, logProviderError(config.id));
           if (!provider) continue;
           want.add(config.id);
           if (!registry.get(config.id)) {
@@ -52,7 +63,7 @@ export const LlmProvidersService: PluginObject = {
   },
 };
 
-function buildProvider(config: AIProviderConfig) {
+function buildProvider(config: AIProviderConfig, logger?: (error: unknown, stage: string) => void) {
   switch (config.type) {
     case 'openai':
       if (!config.apiKey) return null;
@@ -60,6 +71,7 @@ function buildProvider(config: AIProviderConfig) {
         id: config.id,
         apiKey: config.apiKey,
         baseURL: config.baseURL || 'https://api.openai.com/v1',
+        logger,
         model: config.model,
         embeddingModel: config.embeddingModel,
         temperature: config.temperature,

@@ -11,6 +11,7 @@ function settingsWith(aiProviders: unknown[]): MentatSettings {
 describe('LlmProvidersService (L2.2)', () => {
   it('registers enabled providers (with API key) from settings into the llm registry', async () => {
     const ctx = new Context();
+    ctx.provide('logger', { get: () => ({ error: () => {}, warn: () => {}, info: () => {}, debug: () => {} }) } as never);
     ctx.provide('settings', settingsWith([
       { id: 'openai-main', type: 'openai', name: 'OpenAI', enabled: true, apiKey: 'sk-xxx', model: 'gpt-4o', baseURL: 'https://api.openai.com/v1' },
       { id: 'no-key', type: 'anthropic', name: 'Anthropic', enabled: true, apiKey: '', model: 'claude' },
@@ -26,6 +27,7 @@ describe('LlmProvidersService (L2.2)', () => {
 
   it('reacts to settings:update — registers a newly added provider', async () => {
     const ctx = new Context();
+    ctx.provide('logger', { get: () => ({ error: () => {}, warn: () => {}, info: () => {}, debug: () => {} }) } as never);
     const settings = settingsWith([
       { id: 'a', type: 'openai', name: 'A', enabled: true, apiKey: 'k', model: 'm', baseURL: 'https://x' },
     ] as never);
@@ -46,6 +48,7 @@ describe('LlmProvidersService (L2.2)', () => {
 
   it('skips ollama with no local node check (registers by config)', async () => {
     const ctx = new Context();
+    ctx.provide('logger', { get: () => ({ error: () => {}, warn: () => {}, info: () => {}, debug: () => {} }) } as never);
     ctx.provide('settings', settingsWith([
       { id: 'local', type: 'ollama', name: 'Ollama', enabled: true, model: 'llama3', baseURL: 'http://localhost:11434' },
     ] as never));

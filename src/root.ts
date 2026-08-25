@@ -7,6 +7,8 @@ import {
   ReadTrackerService,
 } from './services';
 import { DiagnosticsService } from './diagnostics/diagnostics.service';
+import { LoggerServicePlugin } from './logger/logger.service';
+import { FileLogSink } from './logger/file-sink';
 import { ObsidianPlatformPlugin } from './platform/platform.service';
 import { AIRouterService } from './providers/ai-router.service';
 import { IndexingService } from './indexing/indexing.service';
@@ -41,6 +43,20 @@ export const MentatRoot: PluginObject = {
 
     // ── identity ──────────────────────────────────────────────────────────
     ctx.provide('mentatPlugin', plugin);
+
+    // ── logging (crosscutting; must precede any service that logs) ────────
+    await ctx.plugin(LoggerServicePlugin);
+    const logger = ctx.get<import('./logger/logger.service').LoggerService>('logger', false);
+    const rawAdapter = plugin?.app?.vault?.adapter as { append?: (p: string, d: string) => Promise<void> } | undefined;
+    if (logger && rawAdapter?.append) {
+      const adapter = rawAdapter;
+      const appDir = String(plugin.app.vault.configDir ?? '');
+      const fileSink = new FileLogSink({
+        dir: `${appDir}/plugins/mentat/logs`.replace(/\\/g, '/'),
+        append: (path, data) => adapter.append!(path, data),
+      });
+      logger.addExporter(fileSink);
+    }
 
     // ── L1 platform + crosscutting ────────────────────────────────────────
     // Host-agnostic platform services (documents/search/storage/graph/workspace/ui).

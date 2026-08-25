@@ -14,10 +14,26 @@ export interface OpenAIProviderConfig {
   maxTokens?: number;
   contextWindow?: number;
   compactionThreshold?: number;
+  /** Optional logger to record errors (e.g. ctx.logger.get('provider:<id>')). */
+  logger?: (error: unknown, stage: string) => void;
 }
 
 // OpenAI API max_tokens upper limit
 const MAX_TOKENS_UPPER_LIMIT = 393216;
+
+
+/** Format an OpenAI SDK error, expanding the underlying network cause. */
+function formatOpenAIError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const anyErr = error as { cause?: unknown; status?: number; code?: string; request?: unknown };
+  const parts = [error.message];
+  if (typeof anyErr.code === 'string' && anyErr.code !== 'undefined') parts.push(`code=${anyErr.code}`);
+  if (typeof anyErr.status === 'number') parts.push(`status=${anyErr.status}`);
+  if (anyErr.cause instanceof Error && anyErr.cause.message && anyErr.cause.message !== error.message) {
+    parts.push(`cause=${anyErr.cause.message}`);
+  }
+  return parts.join(' | ');
+}
 
 export class OpenAIProvider implements AIProvider {
   id: string;
@@ -64,8 +80,8 @@ export class OpenAIProvider implements AIProvider {
 
       return response.choices[0]?.message?.content || '';
     } catch (error: unknown) {
-      console.error('OpenAIProvider generate error:', error);
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
+      this.config.logger?.(error, 'generate');
+      throw new Error(`OpenAI API error: ${formatOpenAIError(error)}`);
     }
   }
 
@@ -107,8 +123,8 @@ export class OpenAIProvider implements AIProvider {
         }
       }
     } catch (error: unknown) {
-      console.error('OpenAIProvider generateStream error:', error);
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
+      this.config.logger?.(error, 'generateStream');
+      throw new Error(`OpenAI API error: ${formatOpenAIError(error)}`);
     }
   }
 
@@ -128,7 +144,7 @@ export class OpenAIProvider implements AIProvider {
         tokens: response.usage?.total_tokens
       };
     } catch (error: unknown) {
-      console.error('OpenAIProvider generateEmbedding error:', error);
+      this.config.logger?.(error, 'generateEmbedding');
       throw new Error(`OpenAI Embedding error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -154,7 +170,7 @@ export class OpenAIProvider implements AIProvider {
         tokens: response.usage?.total_tokens
       };
     } catch (error: unknown) {
-      console.error('OpenAIProvider generateEmbeddings error:', error);
+      this.config.logger?.(error, 'generateEmbeddings');
       throw new Error(`OpenAI Embeddings error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -281,8 +297,8 @@ export class OpenAIProvider implements AIProvider {
         } : undefined
       };
     } catch (error: unknown) {
-      console.error('OpenAIProvider generateWithSkills error:', error);
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
+      this.config.logger?.(error, 'generateWithSkills');
+      throw new Error(`OpenAI API error: ${formatOpenAIError(error)}`);
     }
   }
 
@@ -407,8 +423,8 @@ export class OpenAIProvider implements AIProvider {
         } : undefined
       };
     } catch (error: unknown) {
-      console.error('OpenAIProvider generateStreamWithSkills error:', error);
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
+      this.config.logger?.(error, 'generateStreamWithSkills');
+      throw new Error(`OpenAI API error: ${formatOpenAIError(error)}`);
     }
   }
 

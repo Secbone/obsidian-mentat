@@ -12,6 +12,8 @@ export interface AnthropicProviderConfig {
   maxTokens?: number;
   contextWindow?: number;
   compactionThreshold?: number;
+  /** Optional logger to record errors (e.g. ctx.logger.get('provider:<id>')). */
+  logger?: (error: unknown, stage: string) => void;
 }
 
 export class AnthropicProvider implements AIProvider {
@@ -51,7 +53,7 @@ export class AnthropicProvider implements AIProvider {
       const textContent = message.content.find(block => block.type === 'text');
       return textContent ? textContent.text : '';
     } catch (error) {
-      console.error('AnthropicProvider generate error:', error);
+      this.config.logger?.(error, 'generate');
       throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -84,7 +86,7 @@ export class AnthropicProvider implements AIProvider {
         }
       }
     } catch (error) {
-      console.error('AnthropicProvider generateStream error:', error);
+      this.config.logger?.(error, 'generateStream');
       throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -210,7 +212,7 @@ export class AnthropicProvider implements AIProvider {
         } : undefined
       };
     } catch (error) {
-      console.error('AnthropicProvider generateWithSkills error:', error);
+      this.config.logger?.(error, 'generateWithSkills');
       throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -308,7 +310,7 @@ export class AnthropicProvider implements AIProvider {
         } : undefined
       };
     } catch (error) {
-      console.error('AnthropicProvider generateStreamWithSkills error:', error);
+      this.config.logger?.(error, 'generateStreamWithSkills');
       throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
