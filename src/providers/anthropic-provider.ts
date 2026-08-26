@@ -33,8 +33,8 @@ export class AnthropicProvider implements AIProvider {
       apiKey: config.apiKey,
       dangerouslyAllowBrowser: true, // Required for Obsidian plugin environment
       fetch: (...args: Parameters<typeof fetch>) => {
-        try { return obsidianFetch(args[0] as string, args[1] as RequestInit); }
-        catch { return globalThis.fetch(...args); }
+        try { return globalThis.fetch(args[0] as never, args[1] as RequestInit); }
+        catch { return obsidianFetch(args[0] as string, args[1] as RequestInit); }
       },
     });
   }

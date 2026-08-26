@@ -52,12 +52,14 @@ export class OpenAIProvider implements AIProvider {
       apiKey: config.apiKey,
       baseURL: config.baseURL,
       dangerouslyAllowBrowser: true, // Required for Obsidian plugin environment
-      // Use Obsidian's main-process requestUrl (not subject to the renderer
-      // fetch 'Failed to fetch' restriction). Falls back to global fetch in
-      // non-Obsidian (headless) environments.
+      // Prefer the native global fetch — it supports SSE streaming (SDK
+      // requests stream:true) and now works once the broken proxy is cleared.
+      // obsidianFetch (requestUrl) is only a fallback for when fetch itself
+      // is unavailable; requestUrl cannot stream SSE and causes
+      // 'net::ERR_INVALID_ARGUMENT' on stream:true responses.
       fetch: (...args: Parameters<typeof fetch>) => {
-        try { return obsidianFetch(args[0] as string, args[1] as RequestInit); }
-        catch { return globalThis.fetch(...args); }
+        try { return globalThis.fetch(args[0] as never, args[1] as RequestInit); }
+        catch { return obsidianFetch(args[0] as string, args[1] as RequestInit); }
       },
     });
   }
