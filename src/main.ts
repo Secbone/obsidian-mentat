@@ -1,4 +1,4 @@
-import { Plugin, Notice } from 'obsidian';
+import { Plugin, Notice, requestUrl } from 'obsidian';
 import { MentatSettings, DEFAULT_SETTINGS } from './settings/settings';
 import { SettingsTab } from './settings/settings-tab';
 import { AIRouter } from './providers/ai-router';
@@ -232,6 +232,47 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
       name: 'Open Diagnostics and Debug Log',
       callback: async () => {
         await DiagnosticsExporter.generateAndOpenDiagnosticsLog(this);
+      }
+    });
+
+    // Diagnose connectivity: test renderer fetch vs main-process requestUrl.
+    this.addCommand({
+      id: 'diagnose-connection',
+      name: 'Diagnose AI connection (fetch vs requestUrl)',
+      callback: async () => {
+        const ctx = this.ctx;
+        const provider = ctx?.get<{ aiProviders?: Array<{ id: string; baseURL?: string; apiKey?: string; model?: string }> }>('settings', false);
+        const cfg = (provider as { aiProviders?: Array<{ id: string; baseURL?: string; apiKey?: string; model?: string }> } | undefined)?.aiProviders?.[0];
+        const url = `${cfg?.baseURL || 'https://api.deepseek.com'}/v1/models`;
+        const apiKey = cfg?.apiKey || '';
+        const logger = ctx?.get<{ get: (n: string) => { info(...a: unknown[]): void; error(...a: unknown[]): void } }>('logger', false);
+        const log = (msg: string) => {
+          console.log(`[Mentat diag] ${msg}`);
+          logger?.get('connect-diagnose').info(msg);
+        };
+
+        const REQ = { url, headers: { Authorization: `Bearer ${apiKey}` } };
+
+        // 1) renderer fetch (the failing one)
+        try {
+          if (typeof fetch !== 'function') log('fetch: function MISSING in renderer');
+          else {
+            const r = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+            log(`fetch: OK status=${r.status}`);
+          }
+        } catch (e) {
+          log(`fetch: FAILED -> ${(e as Error).name}: ${(e as Error).message}`);
+        }
+
+        // 2) main-process requestUrl
+        try {
+          const r = await requestUrl(REQ as never);
+          log(`requestUrl: status=${r.status}`);
+        } catch (e) {
+          log(`requestUrl: FAILED -> ${(e as Error).name}: ${(e as Error).message}`);
+        }
+
+        new Notice('✓ 连接诊断已写入日志（fetch vs requestUrl），导出即可查看');
       }
     });
 
