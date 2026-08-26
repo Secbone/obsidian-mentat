@@ -48,7 +48,9 @@ Mentat 已完成 **L1-L5 干净架构重构**（宿主无关 + 多模式）并**
 **修复链**：诊断命令 fetch vs requestUrl → 定位代理 → 清理系统代理 → 流式用原生 fetch → 插件恢复正常。
 
 ## 4. 待办（下一步）
-1. **L5 切换点（核心未完）**：UI(chat-view) 仍在旧路径(`chatOrchestrator.sendMessage→BaseAgent`)，新架构 session/agent-loop 在旁路。需把 chat-view 切到新 session + 新事件流，旧 ChatService 退役。切前加"架构切换开关"+备份。
+1. **L5 切换点（进行中）**：
+   - ✅ 已完成：UI 事件流改为走 kernel-backed `event-bridge`（提交 `50f71f6`，零行为变化，新架构事件可达 UI）
+   - ⏳ 剩余：chat-view 的 `sendMessage` 从 `chatOrchestrator.sendMessage` → `session.send()` (for-await 喂 handleStreamEvent)，旧 ChatService 退役。建议加"架构切换开关"+备份。
 2. CI lint 清理（base-agent.ts 等既有 no-explicit-any）。
 3. 新架构组件（agent-loop/mcp/delegated）失败路径接入 logger。
 
