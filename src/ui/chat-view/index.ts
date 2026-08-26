@@ -69,7 +69,10 @@ export class ChatView extends ItemView {
     this.themeRegistry.register('bubble', '经典气泡', '传统聊天气泡式界面，左右分列，工具调用折叠展示', () => new BubbleTheme(this.app, this.messageRenderer));
     this.themeRegistry.register('terminal', '终端式', '终端时间线式界面，等宽工具区 + 比例字体回答区，内嵌确认按钮', () => new TerminalTheme(this.app, this.messageRenderer, this.plugin.settings.terminalPreset || 'green'));
     this.theme = this.themeRegistry.getCurrent();
-    this.eventBus = plugin.extensionManager.getEventBus();
+    // Prefer the kernel-backed event bridge (same single-arg on('*') API as
+    // the legacy EventBus), so new-architecture agent events reach the UI.
+    // Fall back to the legacy EventBus if the bridge isn't up yet.
+    this.eventBus = (plugin.ctx?.get?.('event-bridge', false) ?? plugin.extensionManager.getEventBus()) as EventBus;
   }
 
   getViewType(): string {
