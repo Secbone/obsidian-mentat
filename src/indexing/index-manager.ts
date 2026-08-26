@@ -70,9 +70,21 @@ export class IndexManager {
     // 3. Split into chunks
     const chunks = await this.chunkProcessor.chunkDocument(file as unknown as Parameters<typeof this.chunkProcessor.chunkDocument>[0], extracted);
 
-    // 4. Generate embeddings for all chunks
+    // 4. Generate embeddings for all chunks.
+    // Degrade gracefully: if no embedding capability (provider is absent or
+    // has no embeddingModel), index the content without vectors rather than
+    // throwing and stalling the whole flow (keeps agent interaction immune
+    // to a missing embedding provider). Vector search then finds nothing,
+    // but keyword/metadata search still works.
     const texts = chunks.map(c => c.content);
-    const { embeddings } = await this.embeddingBatch.generateBatch(texts);
+    let embeddings: number[][] = [];
+    try {
+      const batch = await this.embeddingBatch.generateBatch(texts);
+      embeddings = batch.embeddings;
+    } catch (error) {
+      console.warn('[IndexManager] Embedding unavailable; indexing without vectors:', error instanceof Error ? error.message : String(error));
+      embeddings = texts.map(() => []);
+    }
 
     // 5. Assemble complete chunks with embeddings
     const fullChunks: FileChunk[] = chunks.map((chunk, i) => ({
