@@ -45,12 +45,16 @@ if (!fs.existsSync("dist")) {
   fs.mkdirSync("dist", { recursive: true });
 }
 
-if (prod) {
-  await context.rebuild();
-  fs.copyFileSync("manifest.json", "dist/manifest.json");
-  process.exit(0);
-} else {
+const watch = process.argv[2] === "watch";
+
+if (watch) {
   fs.copyFileSync("manifest.json", "dist/manifest.json");
   await context.watch();
-  console.log("Watching for changes...");
+  console.log("Watching for changes... (reload Obsidian to pick up)");
+} else {
+  // One-shot build: either production or a plain dev build (no watch).
+  await context.rebuild();
+  fs.copyFileSync("manifest.json", "dist/manifest.json");
+  console.log("Built dist/ (one-shot). Use 'npm run dev:watch' for HMR.");
+  process.exit(0);
 }
