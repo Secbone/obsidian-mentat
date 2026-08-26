@@ -209,13 +209,23 @@ export class IndexManager {
     query: string,
     options?: SearchOptions
   ): Promise<SimilaritySearchResult[]> {
-    // Generate query embedding
+    // Generate query embedding. Degrade gracefully: if the resolved provider
+    // has no embeddingModel (e.g. an OpenAI-compatible chat-only provider),
+    // generateEmbedding throws 'No embedding model configured'. Catch it and
+    // return empty results so semantic search never stalls the agent flow.
     const provider = await this.getEmbeddingProvider();
     if (!provider) {
       console.warn('[IndexManager] No embedding provider configured - search unavailable');
       return [];
     }
-    const { embedding } = await provider.generateEmbedding(query);
+    let embedding: number[];
+    try {
+      const result = await provider.generateEmbedding(query);
+      embedding = result.embedding;
+    } catch (error) {
+      console.warn('[IndexManager] Embedding unavailable for search; returning no results:', error instanceof Error ? error.message : String(error));
+      return [];
+    }
 
     // Search in vector store
     return this.vectorStore.search(embedding, options);
