@@ -32,6 +32,8 @@ export interface MentatSettings {
   autoClassificationEnabled: boolean;
   linkSuggestionEnabled: boolean;
   chatEnabled: boolean;
+  /** Use the new Cordis-based agent architecture (session/agent-loop) for chat. */
+  useNewArchitecture: boolean;
   graphEnabled: boolean;
   reviewEnabled: boolean;
 
@@ -158,6 +160,7 @@ export const DEFAULT_SETTINGS: MentatSettings = {
   autoClassificationEnabled: true,
   linkSuggestionEnabled: true,
   chatEnabled: true,
+  useNewArchitecture: false, // new architecture opt-in; old path is the safe default
   graphEnabled: true,
   reviewEnabled: true,
 

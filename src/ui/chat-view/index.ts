@@ -390,11 +390,56 @@ export class ChatView extends ItemView {
 
     this.streamUnsubscribe = this.eventBus.on('*', (event) => this.handleStreamEvent(event));
 
-    this.chatOrchestrator.sendMessage(userMessage, {
-      enableSkills: this.plugin.settings.skillsEnabled,
-      maxTurns: this.plugin.settings.maxTurns || 20,
-      context: this.activeContext ?? undefined,
-    });
+    if (this.plugin.settings.useNewArchitecture) {
+      // New architecture: drive the model call through the Cordis session /
+      // agent-loop service and feed events straight to the UI handler.
+      void this.sendViaNewArchitecture(userMessage);
+    } else {
+      // Legacy path (default, safe).
+      this.chatOrchestrator.sendMessage(userMessage, {
+        enableSkills: this.plugin.settings.skillsEnabled,
+        maxTurns: this.plugin.settings.maxTurns || 20,
+        context: this.activeContext ?? undefined,
+      });
+    }
+  }
+
+  /**
+   * Send a user message through the new `session` service (agent-loop).
+   * Reuses the existing eventBus subscription for streaming by emitting each
+   * AgentEvent through the kernel-backed event bridge; the for-await drives
+   * completion. Falls back to the legacy orchestrator on any error so the
+   * message is never silently lost.
+   */
+  private async sendViaNewArchitecture(userMessage: string): Promise<void> {
+    const session = this.plugin.ctx?.get?.('session', false) as
+      | { get(s: string): unknown; create(s: string, mode?: string): unknown; send(s: string, i: { messages: ChatMessage[]; signal?: AbortSignal }): AsyncIterable<AgentEvent> }
+      | undefined;
+    if (!session) {
+      this.chatOrchestrator.sendMessage(userMessage, {
+        enableSkills: this.plugin.settings.skillsEnabled,
+        maxTurns: this.plugin.settings.maxTurns || 20,
+        context: this.activeContext ?? undefined,
+      });
+      return;
+    }
+    const sessionId = this.activeContext?.sessionId ?? String(Date.now());
+    try {
+      // Ensure a live session exists (idempotent reuse across turns).
+      if (!session.get(sessionId)) session.create(sessionId);
+      const messages = this.activeContext?.messages ?? [];
+      for await (const event of session.send(sessionId, {
+        messages,
+        signal: this.currentAbortController?.signal,
+      })) {
+        this.handleStreamEvent(event);
+      }
+    } catch (error) {
+      if (this.streamState) this.finalizeStream(this.streamState);
+      console.error('[chat] new-arch send failed:', error);
+      // Surface a system error event so the UI isn't left hanging.
+      this.handleStreamEvent({ type: 'system:error', message: error instanceof Error ? error.message : String(error) } as never);
+    }
   }
 
   private handleStreamEvent(event: AgentEvent): void {
