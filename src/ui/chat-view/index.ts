@@ -69,10 +69,11 @@ export class ChatView extends ItemView {
     this.themeRegistry.register('bubble', '经典气泡', '传统聊天气泡式界面，左右分列，工具调用折叠展示', () => new BubbleTheme(this.app, this.messageRenderer));
     this.themeRegistry.register('terminal', '终端式', '终端时间线式界面，等宽工具区 + 比例字体回答区，内嵌确认按钮', () => new TerminalTheme(this.app, this.messageRenderer, this.plugin.settings.terminalPreset || 'green'));
     this.theme = this.themeRegistry.getCurrent();
-    // Prefer the kernel-backed event bridge (same single-arg on('*') API as
-    // the legacy EventBus), so new-architecture agent events reach the UI.
-    // Fall back to the legacy EventBus if the bridge isn't up yet.
-    this.eventBus = (plugin.ctx?.get?.('event-bridge', false) ?? plugin.extensionManager.getEventBus()) as EventBus;
+    // IMPORTANT: the legacy path (default) emits agent events to the legacy
+    // EventBus (BaseAgent -> chatOrchestrator.eventBus). The UI must subscribe
+    // to THAT bus, not the kernel event-bridge, or the stream is lost and the
+    // view hangs. (Switch to event-bridge only when new-architecture is active.)
+    this.eventBus = plugin.extensionManager.getEventBus() as EventBus;
   }
 
   getViewType(): string {
@@ -428,11 +429,30 @@ export class ChatView extends ItemView {
       // Ensure a live session exists (idempotent reuse across turns).
       if (!session.get(sessionId)) session.create(sessionId);
       const messages = this.activeContext?.messages ?? [];
-      for await (const event of session.send(sessionId, {
-        messages,
-        signal: this.currentAbortController?.signal,
-      })) {
-        this.handleStreamEvent(event);
+      // Timeout guard: the streaming provider call can stall in the Obsidian
+      // renderer; without this the UI would stay 'executing' forever with no
+      // way to stop. Force-finish after a generous window.
+      const emit = (event: AgentEvent) => this.handleStreamEvent(event);
+      const timeout = this.plugin.settings.maxTurns ? 120000 : 120000; // 2 min
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        emit({ type: 'system:error', message: '请求超时：模型未在 2 分钟内完成（可能为流式卡住）' } as never);
+        if (this.streamState) this.finalizeStream(this.streamState);
+        this.currentAbortController?.abort();
+      }, timeout);
+      try {
+        for await (const event of session.send(sessionId, {
+          messages,
+          signal: this.currentAbortController?.signal,
+        })) {
+          if (done) break;
+          emit(event);
+        }
+      } finally {
+        done = true;
+        clearTimeout(timer);
       }
     } catch (error) {
       if (this.streamState) this.finalizeStream(this.streamState);
