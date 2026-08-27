@@ -160,7 +160,7 @@ export const DEFAULT_SETTINGS: MentatSettings = {
   autoClassificationEnabled: true,
   linkSuggestionEnabled: true,
   chatEnabled: true,
-  useNewArchitecture: false, // new architecture opt-in; old path is the safe default
+  useNewArchitecture: true, // L5 switch: new architecture (session/agent-loop) is now the default
   graphEnabled: true,
   reviewEnabled: true,
 
