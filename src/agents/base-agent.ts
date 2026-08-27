@@ -9,7 +9,7 @@ import { SkillCall, isExecutableSkill, SkillResult, SkillNamespace } from '../sk
 import { AgentConfig, AgentContext, AgentResponse, AgentEvent, DiagnosticsLogger } from './agent-types';
 import { Compactor } from './compactor';
 import { EventBus } from '../extensions/event-bus';
-import { formatDiffAsText } from '../utils/diff';
+import { formatDiffAsText, type DiffLine } from '../utils/diff';
 
 interface ToolCallResult {
   toolMessages: ChatMessage[];
@@ -884,7 +884,7 @@ export class BaseAgent {
         let content = JSON.stringify(runResult.data, null, 2);
         if (diff && Array.isArray(diff)) {
           const filePath = (runResult.data as Record<string, unknown> | undefined)?.path as string || '';
-          content = formatDiffAsText(filePath, diff as any) + '\n\n' + content;
+          content = formatDiffAsText(filePath, diff as DiffLine[]) + '\n\n' + content;
         }
 
         const mainMessage: ChatMessage = {
