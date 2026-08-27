@@ -31,6 +31,7 @@ export class AgentLoopService {
 
   async *run(messages: ChatMessage[], options: LoopOptions = {}, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
     const maxTurns = options.maxTurns ?? 4;
+    this.logger?.info(`agent-loop run start: ${messages.length} messages, maxTurns=${maxTurns}`);
     yield { type: 'agent:start' };
 
     const state = { messages };
@@ -39,8 +40,13 @@ export class AgentLoopService {
       if (signal?.aborted) { yield { type: 'agent:error' as never }; break; }
       yield { type: 'turn:start', turnIndex: turn };
 
+      this.logger?.info(`turn ${turn} start: resolving chat provider`);
       const provider = this.llm.resolve('chat');
-      if (!provider) { yield { type: 'system:error', message: 'no chat provider configured' } as never; break; }
+      if (!provider) {
+        this.logger?.error('no chat provider configured in llm registry');
+        yield { type: 'system:error', message: 'no chat provider configured' } as never; break;
+      }
+      this.logger?.info(`turn ${turn}: provider=${provider.id} tools=${provider.capabilities.tools} stream=${provider.capabilities.streaming}`);
 
       const stats = this.window.stats(state.messages);
       if (stats.exceedsBudget) {
@@ -49,7 +55,7 @@ export class AgentLoopService {
       }
 
       let content = '';
-      let toolCalls;
+      let toolCalls: import('../types').ToolCall[] | undefined = undefined;
       if (provider.capabilities.tools && typeof provider.generateWithTools === 'function') {
         // accumulate deltas, then emit a single message:update event
         const deltas: string[] = [];
@@ -66,6 +72,7 @@ export class AgentLoopService {
 
       // Append assistant message, then execute any tool calls.
       state.messages = [...state.messages, { role: 'assistant', content, timestamp: Date.now() }];
+      this.logger?.info(`turn ${turn}: generate done, contentLen=${content.length}, toolCalls=${toolCalls?.length ?? 0}`);
       if (toolCalls && toolCalls.length) {
         for (const call of toolCalls) {
           const input = typeof call.arguments === 'string' ? parseJsonSafe(call.arguments) : (call.arguments ?? {});
@@ -86,6 +93,7 @@ export class AgentLoopService {
       break; // no tools -> done
     }
 
+    this.logger?.info(`agent-loop run end: total messages=${state.messages.length}`);
     yield { type: 'agent:end', messages: state.messages };
   }
 }
