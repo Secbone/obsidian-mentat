@@ -66,3 +66,22 @@ Mentat 已完成 **L1-L5 干净架构重构**（宿主无关 + 多模式）并**
 - 新层：`src/llm/ src/tools/ src/knowledge/ src/agents/ src/session/ src/events/ src/external/ src/extensions/ src/obsidian/`
 - 日志：`src/logger/`
 - 装配：`src/app/new-architecture.layer.ts`、`src/root.ts`
+
+
+---
+
+## 7. 排障经验（connection error → 卡死 完整链条）
+
+**症状演进**：Connection error → Failed to fetch → ERR_PROXY_CONNECTION_FAILED → ERR_INVALID_ARGUMENT → 对话卡死(无输出/不能停)
+
+**根因链（每个都已验证修复）**：
+1. **Obsidian 继承坏代理** `http://127.0.0.1:7890`（GNOME manual 代理，未运行）→ `ERR_PROXY_CONNECTION_FAILED`。
+   修复：`gsettings set org.gnome.system.proxy mode none` + 重启 Obsidian。
+2. **requestUrl 不适合 SSE 流式** → `net::ERR_INVALID_ARGUMENT`。修复：provider **原生 fetch 优先**，obsidianFetch 仅兜底。
+3. **embedding 缺失导致交互卡死**：DeepSeek 无 embeddingModel，但 `AIRouter.getProvider(EMBEDDING)` 只按 type==openai 误选 → `indexManager.search`(对话检索) 和 `indexFile`(笔记编辑后索引) 抛错无 catch → 卡死。
+   修复：search 和 indexFile 都**优雅降级**（embedding 失败返回空/存内容无向量）。
+4. **事件流回归（关键教训）**：旧 BaseAgent 发事件到 legacy eventBus，但 UI 曾改听 kernel event-bridge → 事件流断裂 → UI 卡住无输出（日志零新增是信号）。修复：**UI 保持订阅 legacy eventBus**，event-bridge 仅新架构用。
+
+**日志系统排障价值**：FileLogSink(JSONL) + diagnose-connection(fetch vs requestUrl) + export 命令 → 每次卡死都能定位到具体环节（provider 错误 or UI 事件层）。
+
+**关键提交**：`50f71f6`(事件桥,后被回退) · `10c97d3`(回退修UI卡死) · `e104135`(search降级) · `9985dc2`(indexFile降级) · `a55e6a2`(fetch优先) · `a03a7ef`(obsidianFetch)
