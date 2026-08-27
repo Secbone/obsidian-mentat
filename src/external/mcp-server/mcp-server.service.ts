@@ -2,6 +2,7 @@ import type { PluginObject, Context } from '../../core/cordis';
 import type { ToolsRegistry } from '../../tools/tools.service';
 import type { MCPToolDefinition, MCPToolsListResponse, MCPToolCallResponse } from '../../skills/mcp/mcp-types';
 import type { ZodTypeAny } from 'zod';
+import type { Logger, LoggerService } from '../../logger/logger.service';
 
 /**
  * MCP server (L4.3): exposes the tools registry over the MCP protocol so
@@ -14,7 +15,7 @@ import type { ZodTypeAny } from 'zod';
  * protocol-neutral tool surface.
  */
 export class McpServerService {
-  constructor(private tools: ToolsRegistry) {}
+  constructor(private tools: ToolsRegistry, private logger?: Logger) {}
 
   listTools(): MCPToolsListResponse {
     const list: MCPToolDefinition[] = this.tools.list().map((t) => ({
@@ -31,6 +32,7 @@ export class McpServerService {
       const ok = result?.success !== false;
       return { jsonrpc: '2.0', method: 'tools/call', result: { content: [{ type: 'text', text: JSON.stringify(result?.data ?? result) }], isError: !ok } } as unknown as MCPToolCallResponse;
     } catch (err) {
+      this.logger?.error(`mcp callTool ${name} failed`, { tool: name, error: err instanceof Error ? err.message : String(err) });
       return { jsonrpc: '2.0', method: 'tools/call', result: { content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }], isError: true } } as unknown as MCPToolCallResponse;
     }
   }
@@ -48,6 +50,7 @@ export const McpServerServicePlugin: PluginObject = {
   inject: ['tools'],
   apply(ctx: Context) {
     const tools = ctx.get<ToolsRegistry>('tools')!;
-    return ctx.provide('mcp-server', new McpServerService(tools));
+    const logger = ctx.get<LoggerService>('logger', false);
+    return ctx.provide('mcp-server', new McpServerService(tools, logger?.get('mcp-server')));
   },
 };

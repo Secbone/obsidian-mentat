@@ -5,6 +5,7 @@ import type { LLMRegistry } from '../llm/llm.service';
 import type { ToolsRegistry } from '../tools/tools.service';
 import type { CompactionService } from '../session/compaction.service';
 import type { ContextWindowService } from '../session/context.service';
+import type { Logger, LoggerService } from '../logger/logger.service';
 
 export interface LoopOptions {
   maxTurns?: number;
@@ -25,6 +26,7 @@ export class AgentLoopService {
     private tools: ToolsRegistry,
     private window: ContextWindowService,
     private compaction: CompactionService,
+    private logger?: Logger,
   ) {}
 
   async *run(messages: ChatMessage[], options: LoopOptions = {}, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
@@ -68,7 +70,10 @@ export class AgentLoopService {
         for (const call of toolCalls) {
           const input = typeof call.arguments === 'string' ? parseJsonSafe(call.arguments) : (call.arguments ?? {});
           yield { type: 'tool:start', toolCallId: call.id ?? call.name, toolName: call.name, args: input } as never;
-          const toolResult = await this.tools.execute(call.name, input, { signal }).catch((e) => ({ success: false, error: e.message }));
+          const toolResult = await this.tools.execute(call.name, input, { signal }).catch((e) => {
+            this.logger?.error(`tool ${call.name} failed`, { toolName: call.name, error: e instanceof Error ? e.message : String(e) });
+            return { success: false, error: e instanceof Error ? e.message : String(e) };
+          });
           state.messages = [...state.messages, { role: 'tool', content: JSON.stringify(toolResult), name: call.name, timestamp: Date.now() }];
           const isError = !toolResult || !(toolResult as { success?: boolean }).success;
           yield { type: 'tool:end', toolCallId: call.id ?? call.name, toolName: call.name, result: toolResult as never, isError } as never;
@@ -92,7 +97,8 @@ export const AgentLoopServicePlugin: PluginObject = {
     const tools = ctx.get<ToolsRegistry>('tools')!;
     const window = ctx.get<ContextWindowService>('context-window')!;
     const compaction = ctx.get<CompactionService>('compaction')!;
-    const service = new AgentLoopService(llm, tools, window, compaction);
+    const logger = ctx.get<LoggerService>('logger', false);
+    const service = new AgentLoopService(llm, tools, window, compaction, logger?.get('agent-loop'));
     return ctx.provide('agent-loop', service);
   },
 };
