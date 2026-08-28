@@ -2,7 +2,7 @@
 # Diagnose why Obsidian can't reach api.deepseek.com (ERR_PROXY_CONNECTION_FAILED).
 # Run THIS on the machine where Obsidian is launched.
 set -uo pipefail
-KEY="${1:-[REDACTED]}"   # optional: your DeepSeek api key
+KEY="${1:-YOUR_API_KEY_HERE}"   # optional: your DeepSeek api key
 
 echo "=== [1] Obsidian process & its ACTUAL proxy env ==="
 OBS_PID=""
