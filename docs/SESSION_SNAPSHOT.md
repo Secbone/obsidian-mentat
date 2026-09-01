@@ -8,6 +8,8 @@
 ## 1. 当前状态（一句话）
 Mentat 已完成 **L1-L5 干净架构重构**（宿主无关 + 多模式）并**全部通过测试**，且在用户 Obsidian 里**部署运行正常**（排障闭环走通）。
 
+> 测试更新（2026-08-27）：新增/扩展回归测试套件，全量 `tests/core/` **39 文件 150 用例全通过**（含真实 DeepSeek `l5-real-provider` 端到端）。针对新架构早期 bug（流式缓冲、工具未传给模型、用户消息丢失、孤儿 tool 消息 400）新增确定性回归测试，并用突变验证确认测试能抓住这些 bug。新增文件：`tests/core/agent-loop-streaming.test.ts`（流式时序/工具传递/工具配对）、`tests/core/agent-loop-edge.test.ts`（maxTurns/工具错误/压缩/参数解析）、`tests/core/openai-messages.test.ts`、`tests/core/chat-messages.test.ts`、`tests/core/legacy-adapter.test.ts`；抽取纯函数 `src/agents/chat-messages.ts`、`src/providers/openai-messages.ts` 使关键逻辑可单测。
+
 ## 2. 已完成的工作
 
 ### 2.1 L1-L5 逐层实现（干净架构，docs/mentat-architecture-clean.md）

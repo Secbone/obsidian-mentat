@@ -2,6 +2,7 @@ import type { PluginObject, Context } from '../../core/cordis';
 import type { ToolDefinition } from '../contract';
 import type { ToolsRegistry } from '../tools.service';
 import type { NotifyCapability } from '../../platform/contracts';
+import { z } from 'zod';
 
 /**
  * System/interaction tools (L2.6): ask the user for confirmation/input.
@@ -12,6 +13,7 @@ function askUserTool(ui?: NotifyCapability): ToolDefinition<{ question: string }
   return {
     name: 'ask_user',
     description: 'Ask the user a concise question and get their answer.',
+    schema: z.object({ question: z.string().describe('The concise question to ask the user') }),
     permissions: ['documents:read'],
     async execute(input) {
       if (!ui) return { success: false, error: 'ui capability unavailable' };

@@ -5,6 +5,7 @@ import { ToolsService } from '../tools/tools.service';
 import { VaultToolsPlugin } from '../tools/vault/vault-tools';
 import { WebToolsPlugin } from '../tools/web/web-tools';
 import { SystemToolsPlugin } from '../tools/system/system-tools';
+import { ContextAssemblerPlugin } from '../context/context-assembler';
 import { KnowledgeServicePlugin } from '../knowledge/knowledge.service';
 import { ContextWindowServicePlugin } from '../session/context.service';
 import { CompactionServicePlugin } from '../session/compaction.service';
@@ -36,6 +37,7 @@ export const NewArchitectureLayer: PluginObject = {
     await ctx.plugin(SystemToolsPlugin);           // ask_user (needs ui)
     await ctx.plugin(KnowledgeServicePlugin);      // knowledge (documents + llm)
     await ctx.plugin(McpClientServicePlugin);      // external MCP tools -> tools
+    await ctx.plugin(ContextAssemblerPlugin);       // vault context for system prompt
 
     // ── L3 orchestration ──────────────────────────────────────────────────
     await ctx.plugin(ContextWindowServicePlugin);  // context-window

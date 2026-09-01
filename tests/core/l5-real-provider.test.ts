@@ -11,7 +11,7 @@ import { AgentModeRegistry, EMBEDDED_MODE } from '../../src/agents/agent-mode';
 import { EmbeddedBackend } from '../../src/agents/backends/embedded.backend';
 import { createSession } from '../../src/chat/session';
 
-const KEY = process.env.DEEPSEEK_KEY || '[REDACTED]';
+const KEY = process.env.DEEPSEEK_KEY || '';
 
 describe('L5 real-provider integration (DeepSeek via new architecture)', () => {
   it('runs a chat through session -> agent-loop -> DeepSeek', async () => {

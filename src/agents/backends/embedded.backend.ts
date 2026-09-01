@@ -22,7 +22,10 @@ export class EmbeddedBackend implements AgentBackend {
 
   async *streamChat(input: AgentChatInput): AsyncGenerator<AgentEvent> {
     const loop = this.ctx.get<AgentLoopService>('agent-loop')!;
-    yield* loop.run(input.messages, { maxTurns: 4, mode: this.options.sessionId }, input.signal);
+    // Allow enough turns for real multi-step tool analysis (read several notes,
+    // search, then answer). Combined with the loop's final-answer guarantee the
+    // user always gets a plain-text response.
+    yield* loop.run(input.messages, { maxTurns: 10, mode: this.options.sessionId }, input.signal);
   }
 
   dispose(): void {

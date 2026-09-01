@@ -34,7 +34,14 @@ class HeadlessDocuments implements DocumentStore {
   }
 
   async readDocument(doc: Doc): Promise<string> { return readFileSync(this.resolve(doc.path), 'utf-8'); }
-  async writeDocument(path: string, content: string): Promise<void> { writeFileSync(this.resolve(path), content, 'utf-8'); }
+  async writeDocument(docPath: string, content: string): Promise<void> {
+    // Mirror Obsidian's vault.create: create parent directories so writing to
+    // a new (possibly nested) path does not fail with ENOENT.
+    // NOTE: param is named `docPath` (not `path`) to avoid shadowing the
+    // imported `path` module.
+    mkdirSync(path.dirname(this.resolve(docPath)), { recursive: true });
+    writeFileSync(this.resolve(docPath), content, 'utf-8');
+  }
   async moveDocument(from: string, to: string): Promise<void> { renameSync(this.resolve(from), this.resolve(to)); }
   async deleteDocument(path: string): Promise<void> { unlinkSync(this.resolve(path)); }
   async exists(path: string): Promise<boolean> { return existsSync(this.resolve(path)); }
@@ -63,7 +70,9 @@ class HeadlessSearch implements SearchCapability {
     for (const f of walkMarkdown(this.root)) {
       const text = fs.readFileSync(f, 'utf-8');
       if (text.toLowerCase().includes(query.toLowerCase())) {
-        out.push({ path: f, snippet: text.slice(0, 120) });
+        // Return a path RELATIVE to the vault root so it stays consistent with
+        // DocumentStore.listDocuments/getDocument (read-after-search works).
+        out.push({ path: path.relative(this.root, f), snippet: text.slice(0, 120) });
       }
     }
     return out;
@@ -89,7 +98,13 @@ import * as fs from 'fs';
 
 function walkMarkdown(dir: string): string[] {
   const out: string[] = [];
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return []; // dir missing/unreadable -> no docs (list should not throw)
+  }
+  for (const e of entries) {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) { if (!full.includes('node_modules')) out.push(...walkMarkdown(full)); }
     else if (full.endsWith('.md')) out.push(full);

@@ -4,6 +4,7 @@
 import { AIProvider, GenerateOptions, GenerateResponse, ChatMessage, ToolCall } from '../types';
 import OpenAI from 'openai';
 import { obsidianFetch } from '../obsidian/obsidian-fetch';
+import { convertToOpenAIMessages } from './openai-messages';
 
 export interface OpenAIProviderConfig {
   id: string;
@@ -243,7 +244,7 @@ export class OpenAIProvider implements AIProvider {
     options?: GenerateOptions
   ): Promise<GenerateResponse> {
     try {
-      const openaiMessages = this.convertMessages(messages);
+      const openaiMessages = convertToOpenAIMessages(messages);
 
       // Add systemPrompt if provided
       if (options?.systemPrompt) {
@@ -322,7 +323,7 @@ export class OpenAIProvider implements AIProvider {
     options?: GenerateOptions
   ): Promise<GenerateResponse> {
     try {
-      const openaiMessages = this.convertMessages(messages);
+      const openaiMessages = convertToOpenAIMessages(messages);
 
       // Add systemPrompt if provided
       if (options?.systemPrompt) {
@@ -355,6 +356,27 @@ export class OpenAIProvider implements AIProvider {
           requestParams.tool_choice = options.toolChoice;
         }
       }
+
+      // Diagnostic: log the full request payload for architecture comparison.
+      const _diagTools = ((requestParams.tools as Array<{function?: {name?: string; parameters?: unknown}}>) ?? []).map(
+        (t) => ({ name: t.function?.name, params: t.function?.parameters })
+      );
+      const _diagSystem = ((requestParams.messages as Array<{role?: string; content?: string}>)[0]?.role === 'system')
+        ? (requestParams.messages as Array<{content?: string}>)[0]?.content
+        : undefined;
+      console.log('[LLM-REQUEST]', JSON.stringify({
+        model: this.config.model,
+        systemPrompt: _diagSystem?.slice(0, 2000),
+        messageCount: openaiMessages.length,
+        messageRoles: openaiMessages.map((m) => m.role),
+        messages: openaiMessages.map((m) => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content.slice(0, 500) : m.content,
+          ...(m.role === 'tool' ? { tool_call_id: (m as {tool_call_id?: string}).tool_call_id } : {}),
+          ...(m.role === 'assistant' && (m as {tool_calls?: unknown[]}).tool_calls ? { has_tool_calls: true } : {}),
+        })),
+        tools: _diagTools,
+      }));
 
       const stream = await this.client.chat.completions.create(requestParams as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming, {
         signal: options?.abortSignal
@@ -438,83 +460,4 @@ export class OpenAIProvider implements AIProvider {
     }
   }
 
-  /**
-   * Convert ChatMessage[] to OpenAI format
-   * Filters out system messages (defensive programming - system prompt should be passed via options)
-   * Ensures tool_calls / tool response pairing integrity (required by OpenAI-compatible APIs)
-   *
-   * Handles two types of orphans caused by message truncation:
-   * 1. Orphan tool messages: tool response without a preceding assistant that declared the tool_call
-   * 2. Orphan assistant tool_calls: assistant declared tool_calls but some/all responses are missing
-   */
-  private convertMessages(messages: ChatMessage[]): OpenAI.Chat.ChatCompletionMessageParam[] {
-    const filtered = messages.filter(msg => msg.role !== 'system');
-
-    // Pre-scan: collect all tool_call_ids that have tool responses
-    const respondedToolCallIds = new Set<string>();
-    for (const msg of filtered) {
-      if (msg.role === 'tool' && msg.tool_call_id) {
-        respondedToolCallIds.add(msg.tool_call_id);
-      }
-    }
-
-    // Forward pass: track declared tool_call IDs and build result
-    const seenToolCallIds = new Set<string>();
-    const result: OpenAI.Chat.ChatCompletionMessageParam[] = [];
-
-    for (const msg of filtered) {
-      if (msg.role === 'assistant' && msg.tool_calls) {
-        // Register all declared tool_call IDs
-        for (const tc of msg.tool_calls) {
-          seenToolCallIds.add(tc.id);
-        }
-
-        // Keep only tool_calls that have matching tool responses
-        const validToolCalls = msg.tool_calls.filter(tc => respondedToolCallIds.has(tc.id));
-
-        if (validToolCalls.length > 0) {
-          result.push({
-            role: 'assistant' as const,
-            content: msg.content || null,
-            tool_calls: validToolCalls.map(tc => ({
-              id: tc.id,
-              type: 'function' as const,
-              function: {
-                name: tc.name,
-                arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments)
-              }
-            }))
-          });
-        } else {
-          // All tool_calls are orphans - send as plain assistant message
-          result.push({
-            role: 'assistant' as const,
-            content: msg.content || ''
-          });
-        }
-      } else if (msg.role === 'tool') {
-        if (!msg.tool_call_id || !seenToolCallIds.has(msg.tool_call_id)) {
-          // Orphan tool message - convert to user message to preserve context
-          console.warn('OpenAIProvider: orphan tool message (no matching preceding assistant tool_calls), converting to user message');
-          result.push({
-            role: 'user' as const,
-            content: `[Tool Result${msg.name ? ` (${msg.name})` : ''}]: ${msg.content}`
-          });
-        } else {
-          result.push({
-            role: 'tool' as const,
-            content: msg.content,
-            tool_call_id: msg.tool_call_id
-          });
-        }
-      } else {
-        result.push({
-          role: msg.role as 'user' | 'assistant',
-          content: msg.content
-        });
-      }
-    }
-
-    return result;
-  }
 }

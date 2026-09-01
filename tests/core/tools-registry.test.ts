@@ -40,3 +40,37 @@ describe('ToolsRegistry (L2.4)', () => {
     expect(ctx.get('tools', false)).toBeUndefined();
   });
 });
+
+describe('ToolsRegistry — permissions & context', () => {
+  it('enforces declared permissions and fails closed when denied', async () => {
+    const r = new ToolsRegistry();
+    const fn = vi.fn(async () => ({ success: true, data: {} }));
+    r.register({ name: 'secure', description: '', permissions: ['documents:write'], execute: fn });
+    // Deny every permission.
+    const denied = { check: async () => false };
+    r.usePermissions(denied as never);
+    await expect(r.execute('secure', {}, {} as never)).rejects.toThrow(/permission denied/);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('runs un-gated when no permission service is bound', async () => {
+    const r = new ToolsRegistry();
+    const fn = vi.fn(async () => ({ success: true, data: 'ok' }));
+    r.register({ name: 'open', description: '', permissions: ['documents:read'], execute: fn });
+    const res = await r.execute('open', {}, {} as never);
+    expect(fn).toHaveBeenCalled();
+    expect(res).toEqual({ success: true, data: 'ok' });
+  });
+
+  it('passes the ToolContext (documents/search/graph/signal) to execute', async () => {
+    const r = new ToolsRegistry();
+    let receivedCtx: unknown;
+    const documents = { read: async () => 'file' };
+    r.register({
+      name: 'ctx', description: '', permissions: ['documents:read'],
+      execute: async (_input, ctx) => { receivedCtx = ctx; return { success: true, data: {} }; },
+    });
+    await r.execute('ctx', {}, { documents: documents as never, signal: new AbortController().signal } as never);
+    expect(receivedCtx).toMatchObject({ documents, signal: expect.any(AbortSignal) });
+  });
+});

@@ -38,11 +38,18 @@ export function adaptLegacyProvider(source: AIProvider): LLMProvider {
     },
     async generateWithTools(messages, onChunk, options) {
       if (capabilities.tools) {
+        // Advertise the requested tools to the model. The legacy provider
+        // exposes them through `options.skills` (OpenAI-style function defs).
+        const skills = (options?.tools ?? []).map((t) => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters ?? { type: 'object', properties: {} },
+        }));
         const result = await source.generateStreamWithSkills!(
           messages,
           (delta) => onChunk?.({ delta }),
           undefined,
-          { temperature: options?.temperature, maxTokens: options?.maxTokens, abortSignal: options?.signal },
+          { temperature: options?.temperature, maxTokens: options?.maxTokens, abortSignal: options?.signal, skills, systemPrompt: options?.systemPrompt },
         );
         return { content: result.content ?? '', toolCalls: result.toolCalls };
       }

@@ -43,3 +43,33 @@ describe('SessionService (L3.5)', () => {
     expect(ctx.get('session', false)).toBeUndefined();
   });
 });
+
+describe('SessionService — send contract', () => {
+  it('throws when sending to a session that does not exist', async () => {
+    const ctx = new Context();
+    const modes = new AgentModeRegistry();
+    const service = new SessionService(ctx, modes);
+    // `send` is an async generator — the throw surfaces on iteration.
+    const drain = async () => { for await (const _e of service.send('nope', { messages: [{ role: 'user', content: 'hi', timestamp: 1 }] })) { /* noop */ } };
+    await expect(drain()).rejects.toThrow(/not found/);
+  });
+
+  it('forwards the exact message list to the backend', async () => {
+    const ctx = new Context();
+    const modes = new AgentModeRegistry();
+    const received: { messages: unknown } = { messages: [] };
+    modes.register({
+      id: EMBEDDED_MODE, displayName: 'E', description: '',
+      createBackend: () => ({
+        id: EMBEDDED_MODE, displayName: 'E', capabilities: { supportsStreaming: true, supportsCancellation: false, supportsSkills: false },
+        streamChat: async function* (input: { messages: unknown }) { received.messages = input.messages; yield { type: 'agent:start' } as AgentEvent; },
+        dispose: () => {},
+      }),
+    });
+    const service = new SessionService(ctx, modes);
+    service.create('s1');
+    const msgs = [{ role: 'user' as const, content: 'hello', timestamp: 1 }];
+    await (async () => { for await (const _e of service.send('s1', { messages: msgs })) { /* drain */ } })();
+    expect(received.messages).toEqual(msgs);
+  });
+});

@@ -17,6 +17,18 @@ export interface LLMGenerateOptions {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  /** Tools to advertise to the model (OpenAI-style function defs). */
+  tools?: LLMToolDefinition[];
+  /** Optional system prompt steering the model's behaviour. */
+  systemPrompt?: string;
+}
+
+/** A tool advertised to the model — neutral, no host types. */
+export interface LLMToolDefinition {
+  name: string;
+  description: string;
+  /** JSON Schema for the tool input (OpenAI-style `parameters`). */
+  parameters?: Record<string, unknown>;
 }
 
 /** A model provider — the atomic unit registrable into the `llm` service. */

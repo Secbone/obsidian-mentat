@@ -1,6 +1,7 @@
 import type { PluginObject, Context } from '../../core/cordis';
 import type { ToolDefinition } from '../contract';
 import type { ToolsRegistry } from '../tools.service';
+import { z } from 'zod';
 
 /**
  * Web tools (L2.6): fetch a URL and (optionally) search the web.
@@ -10,6 +11,7 @@ import type { ToolsRegistry } from '../tools.service';
 const fetchTool: ToolDefinition<{ url: string }> = {
   name: 'web_fetch',
   description: 'Fetch a URL and return its text content.',
+  schema: z.object({ url: z.string().describe('The full URL to fetch, including scheme') }),
   permissions: ['network:fetch'],
   async execute(input) {
     try {
@@ -26,6 +28,7 @@ const fetchTool: ToolDefinition<{ url: string }> = {
 const searchTool: ToolDefinition<{ query: string }> = {
   name: 'web_search',
   description: 'Search the web for a query and return top results.',
+  schema: z.object({ query: z.string().describe('The search query text') }),
   permissions: ['network:fetch'],
   async execute(input) {
     try {

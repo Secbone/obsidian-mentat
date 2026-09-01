@@ -6,6 +6,7 @@ import { ChatOrchestrator } from '../../chat/chat-orchestrator';
 import { FileSelectorModal } from '../file-selector-modal';
 import { ChatMessage } from '../../types';
 import { AgentEvent, AgentContext } from '../../agents/agent-types';
+import { buildStreamMessages } from '../../agents/chat-messages';
 import MentatPlugin from '../../main';
 import { ThemeRegistry } from '../themes/registry';
 import { BubbleTheme } from '../themes/bubble';
@@ -50,12 +51,12 @@ export class ChatView extends ItemView {
   private eventBus: EventBus;
   private streamUnsubscribe: (() => void) | null = null;
   private streamState: {
-    currentTurnResponse: string;
+    turnText: string;
     finalAnswer: string;
-    hasFinalAnswerTag: boolean;
     activeTasks: ActiveTask[];
     currentStatus: string;
     lastToolStatus: { name: string; status: 'success' | 'error' | 'pending' };
+    inputMessageCount: number;
   } | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: MentatPlugin) {
@@ -365,12 +366,12 @@ export class ChatView extends ItemView {
     this.currentStreamingBubble = this.theme.createStreamingBubble();
 
     this.streamState = {
-      currentTurnResponse: '',
+      turnText: '',
       finalAnswer: '',
-      hasFinalAnswerTag: false,
       activeTasks: [],
       currentStatus: '初始化智能体...',
       lastToolStatus: { name: '', status: 'pending' },
+      inputMessageCount: 0, // set in sendViaNewArchitecture
     };
 
     this.isStreaming = true;
@@ -428,13 +429,21 @@ export class ChatView extends ItemView {
     try {
       // Ensure a live session exists (idempotent reuse across turns).
       if (!session.get(sessionId)) session.create(sessionId);
-      const messages = this.activeContext?.messages ?? [];
+      // IMPORTANT: the agent-loop runs on the message list it is given — it
+      // does NOT append the new user message itself. `activeContext.messages`
+      // is only the history, so the new prompt must be appended here or the
+      // provider is called with an empty array (400 Empty input messages).
+      const history = this.activeContext?.messages ?? [];
+      const messages = buildStreamMessages(history, userMessage);
+      if (this.streamState) this.streamState.inputMessageCount = messages.length;
+      this.logChat('send new-arch', { sessionId, userMessage: userMessage.slice(0, 200), msgCount: messages.length });
       // Timeout guard: the streaming provider call can stall in the Obsidian
       // renderer; without this the UI would stay 'executing' forever with no
       // way to stop. Force-finish after a generous window.
       const emit = (event: AgentEvent) => this.handleStreamEvent(event);
       const timeout = this.plugin.settings.maxTurns ? 120000 : 120000; // 2 min
       let done = false;
+      let finalMessages: ChatMessage[] | undefined;
       const timer = setTimeout(() => {
         if (done) return;
         done = true;
@@ -448,45 +457,65 @@ export class ChatView extends ItemView {
           signal: this.currentAbortController?.signal,
         })) {
           if (done) break;
+          if (event.type === 'agent:end') {
+            finalMessages = (event as { messages?: ChatMessage[] }).messages;
+          }
           emit(event);
         }
       } finally {
         done = true;
         clearTimeout(timer);
       }
+      // Keep the legacy chat history in sync so the next turn's
+      // getContextForLLM (and reload) see the full conversation.
+      if (finalMessages?.length) {
+        await this.chatManager.replaceMessages(finalMessages)
+          .catch((e) => console.error('[chat] persist new-arch history failed:', e));
+      }
     } catch (error) {
       if (this.streamState) this.finalizeStream(this.streamState);
       console.error('[chat] new-arch send failed:', error);
+      this.logChat('send failed', error instanceof Error ? error.message : String(error));
       // Surface a system error event so the UI isn't left hanging.
       this.handleStreamEvent({ type: 'system:error', message: error instanceof Error ? error.message : String(error) } as never);
+    }
+  }
+
+  /** Chat-side tracing — routed to the JSONL logger (or console fallback). */
+  private logChat(msg: string, data?: unknown): void {
+    try {
+      const logger = (this.plugin.ctx as { get?: (k: string, o?: boolean) => { get: (n: string) => { info: (m: string, d?: unknown) => void } } } | undefined)?.get?.('logger', false);
+      if (logger) logger.get('chat-view').info(msg, data ?? {});
+      else console.log('[chat]', msg, data ?? '');
+    } catch {
+      console.log('[chat]', msg, data ?? '');
     }
   }
 
   private handleStreamEvent(event: AgentEvent): void {
     const s = this.streamState;
     if (!s) return;
+    // Trace every event into the log (message:update deltas are summarized to
+    // avoid flooding) so we can see whether events reach the UI renderer.
+    if (event.type !== 'message:update' || s.turnText.length === 0) {
+      this.logChat(`event:${event.type}`, event.type === 'message:update' ? { deltaLen: (event as { delta?: string }).delta?.length ?? 0 } : undefined);
+    }
 
     switch (event.type) {
 
+      // Streaming text of the current turn. Placement depends on context:
+      //   - a final answer is already committed  → this is extra reasoning under it
+      //   - a tool is actively running           → this is reasoning before the tool (console)
+      //   - otherwise                           → this is the answer, streaming in the answer area
       case 'message:update': {
-        s.currentTurnResponse += event.delta;
-
-        if (s.currentTurnResponse.includes('<final_answer>')) {
-          s.hasFinalAnswerTag = true;
-          const parts = s.currentTurnResponse.split('<final_answer>');
-          const explanationPart = parts[0];
-          let answerPart = parts[1] || '';
-          if (answerPart.includes('</final_answer>')) {
-            answerPart = answerPart.split('</final_answer>')[0];
-          }
-          s.finalAnswer = answerPart;
-          this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, explanationPart);
+        s.turnText += event.delta;
+        const toolRunning = s.activeTasks.some((t) => t.status === 'executing' || t.status === 'pending' || t.status === 'confirm');
+        if (s.finalAnswer) {
+          this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.turnText);
+        } else if (toolRunning) {
+          this.updateStreaming(s.activeTasks, s.currentStatus, '', s.turnText);
         } else {
-          if (s.activeTasks.length === 0) {
-            this.updateStreaming(s.activeTasks, s.currentStatus, s.currentTurnResponse, s.currentTurnResponse);
-          } else {
-            this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse);
-          }
+          this.updateStreaming(s.activeTasks, s.currentStatus, s.turnText, '');
         }
         break;
       }
@@ -495,44 +524,59 @@ export class ChatView extends ItemView {
       case 'message:end':
         break;
 
+      case 'agent:start':
+      case 'turn:start':
+        s.currentStatus = s.currentStatus === '初始化智能体...' ? '思考中...' : s.currentStatus;
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.turnText);
+        break;
+
+      // A tool call was requested. Commit the current turn's text as this
+      // tool's reasoning, then start a fresh turn buffer.
       case 'tool:start': {
         const shortName = event.toolName.split(':').pop() || event.toolName;
         s.lastToolStatus = { name: shortName, status: 'pending' };
-
-        const existingConfirmTask = s.activeTasks.find(t =>
-          t.status === 'confirm' &&
-          (t.name === event.toolName || `invoke:${t.name}` === event.toolName)
-        );
-        if (existingConfirmTask) {
-          existingConfirmTask.status = 'executing';
-          existingConfirmTask.params = event.args as Record<string, unknown> | undefined;
-        } else {
-          s.activeTasks.push({
-            id: event.toolCallId,
-            name: event.toolName,
-            status: 'executing',
-            params: event.args as Record<string, unknown> | undefined,
-            explanation: s.currentTurnResponse.trim(),
-          });
-        }
-        s.currentTurnResponse = '';
+        s.activeTasks.push({
+          id: event.toolCallId,
+          name: event.toolName,
+          status: 'executing',
+          params: event.args as Record<string, unknown> | undefined,
+          explanation: s.turnText.trim(),
+        });
+        s.turnText = '';
         s.currentStatus = `执行工具: ${shortName}`;
-        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.turnText, true, s.lastToolStatus);
         break;
       }
 
       case 'tool:end': {
-        const shortName = s.activeTasks.find(t => t.id === event.toolCallId)?.name.split(':').pop() || '';
-        if (shortName === s.lastToolStatus.name) {
-          s.lastToolStatus.status = event.isError ? 'error' : 'success';
-        }
         const task = s.activeTasks.find(t => t.id === event.toolCallId);
+        const shortName = task?.name.split(':').pop() || '';
         if (task) {
           task.status = event.isError ? 'error' : 'success';
           task.result = event.result;
         }
+        if (shortName === s.lastToolStatus.name) {
+          s.lastToolStatus.status = event.isError ? 'error' : 'success';
+        }
         s.currentStatus = '';
-        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.turnText, true, s.lastToolStatus);
+        break;
+      }
+
+      // A turn finished. If it carried no tool results, its text is the final
+      // answer — commit it. Otherwise it was a tool-calling turn (text already
+      // captured on tool cards), so clear the buffer.
+      case 'turn:end': {
+        const toolResults = (event as { toolResults?: unknown[] }).toolResults ?? [];
+        if (toolResults.length === 0) {
+          const content = (event as { message?: { content?: string } }).message?.content ?? s.turnText;
+          s.finalAnswer = stripAnswerTags(content);
+          s.turnText = '';
+        } else {
+          s.turnText = '';
+        }
+        s.currentStatus = '';
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.turnText, true);
         break;
       }
 
@@ -544,17 +588,17 @@ export class ChatView extends ItemView {
           name: event.skillName,
           status: 'confirm',
           params: event.params as Record<string, unknown> | undefined,
-          explanation: s.currentTurnResponse.trim(),
+          explanation: s.turnText.trim(),
         });
-        s.currentTurnResponse = '';
+        s.turnText = '';
         s.currentStatus = `等待授权: ${shortName}`;
-        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse, true, s.lastToolStatus);
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.turnText, true, s.lastToolStatus);
         break;
       }
 
       case 'system:status':
         s.currentStatus = event.message;
-        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse);
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.turnText);
         break;
 
       case 'system:steer': {
@@ -568,21 +612,16 @@ export class ChatView extends ItemView {
 
       case 'context:compact:start':
         s.currentStatus = '正在压缩上下文...';
-        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse);
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.turnText);
         break;
 
       case 'context:compact:end':
         s.currentStatus = '';
-        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.currentTurnResponse);
-        break;
-
-      case 'agent:start':
-      case 'turn:start':
-      case 'turn:end':
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, s.turnText);
         break;
 
       case 'agent:end':
-        this.finalizeStream(s);
+        this.finalizeStream(s, (event as { messages?: ChatMessage[] }).messages);
         break;
 
       case 'system:error':
@@ -591,21 +630,34 @@ export class ChatView extends ItemView {
     }
   }
 
-  private finalizeStream(s: NonNullable<typeof this.streamState>): void {
+  private finalizeStream(s: NonNullable<typeof this.streamState>, finalMessages?: ChatMessage[]): void {
     this.streamUnsubscribe?.();
+    this.logChat('finalize', { answerLen: s.finalAnswer.length, turnLen: s.turnText.length });
 
-    if (s.hasFinalAnswerTag) {
-      const parts = s.currentTurnResponse.split('<final_answer>');
-      const explanationPart = parts[0].trim();
-      let answerPart = parts[1] || '';
-      if (answerPart.includes('</final_answer>')) answerPart = answerPart.split('</final_answer>')[0];
-      s.finalAnswer = answerPart.trim();
-      s.currentTurnResponse = explanationPart;
-    } else if (s.currentTurnResponse) {
-      s.finalAnswer = s.finalAnswer ? `${s.finalAnswer}\n\n${s.currentTurnResponse}` : s.currentTurnResponse;
+    // The definitive step: convert the transient streaming bubble into a proper
+    // static assistant message (final answer + tool console) via the theme.
+    if (this.currentStreamingBubble) {
+      let msgs = finalMessages && finalMessages.length
+        ? buildCleanMessages(finalMessages.slice(s.inputMessageCount))
+        : undefined;
+      if (!msgs) {
+        const content = s.finalAnswer || s.turnText;
+        msgs = [{
+          role: 'assistant', content, timestamp: Date.now(),
+          tool_calls: s.activeTasks.length
+            ? s.activeTasks.map((t) => ({ id: t.id, name: t.name, arguments: t.params ?? {} }))
+            : undefined,
+        } as ChatMessage];
+      }
+      try {
+        this.theme.finalizeStreaming(this.currentStreamingBubble, { messages: msgs });
+      } catch (e) {
+        console.error('[chat] finalizeStreaming failed:', e);
+        if (!s.finalAnswer && s.turnText) s.finalAnswer = stripAnswerTags(s.turnText);
+        this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, '', true);
+      }
     }
 
-    this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, '', true);
     this.streamState = null;
     this.currentStreamingBubble = null;
     this.isStreaming = false;
@@ -745,4 +797,50 @@ export class ChatView extends ItemView {
       documentCount: docCount,
     });
   }
+}
+
+/** Strip legacy `<final_answer>…</final_answer>` markers from a committed answer. */
+function stripAnswerTags(text: string): string {
+  if (!text.includes('<final_answer>')) return text;
+  const parts = text.split('<final_answer>');
+  const answerPart = (parts[1] || '').includes('</final_answer>')
+    ? parts[1].split('</final_answer>')[0]
+    : parts[1] || '';
+  return answerPart.trim();
+}
+
+/**
+ * Build a clean messages array for `renderAssistantMessage`.
+ *
+ * The raw conversation has multiple assistant+tool turns. `renderAssistantMessage`
+ * renders every non-final assistant message's content as "explanation" in the
+ * console — leaking every intermediate turn's reasoning text. We avoid that by
+ * flattening all tool calls + responses into one assistant message (no content)
+ * and keeping only the last assistant message (the final answer).
+ */
+function buildCleanMessages(raw: ChatMessage[]): ChatMessage[] {
+  const allToolCalls: ChatMessage['tool_calls'] = [];
+  const toolResponses: ChatMessage[] = [];
+  let lastAssistant: ChatMessage | undefined;
+
+  for (const m of raw) {
+    if (m.role === 'assistant' && m.tool_calls?.length) {
+      allToolCalls.push(...m.tool_calls);
+    } else if (m.role === 'tool') {
+      toolResponses.push(m);
+    } else if (m.role === 'assistant' && !m.metadata?.isSubagent) {
+      lastAssistant = m;
+    }
+  }
+
+  if (!lastAssistant) return raw;
+  const result: ChatMessage[] = [];
+  if (allToolCalls.length) {
+    result.push({
+      role: 'assistant', content: '', tool_calls: allToolCalls, timestamp: Date.now(),
+    });
+  }
+  result.push(...toolResponses);
+  result.push(lastAssistant);
+  return result;
 }
