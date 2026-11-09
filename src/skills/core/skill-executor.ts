@@ -14,6 +14,8 @@ import {
 } from '../skill-types';
 import { safeParseJson } from '../../utils/json-healer';
 import { EventBus } from '../../extensions/event-bus';
+import { DiagnosticsLogger } from '../../agents/agent-types';
+import { abortable, throwIfAborted, errorDetails } from '../../utils/execution';
 
 /**
  * Skill execution options
@@ -23,6 +25,9 @@ export interface ExecutionOptions {
   timeout?: number;            // Execution timeout in ms
   skipConfirmation?: boolean;  // Skip user confirmation even if required
   abortSignal?: AbortSignal;   // Abort signal for execution cancellation
+  sessionId?: string;
+  runId?: string;
+  agentId?: string;
 }
 
 export interface SkillStats {
@@ -37,12 +42,19 @@ export interface SkillStats {
 export class SkillExecutor {
   private executionHistory: SkillCall[] = [];
   private maxHistorySize = 100;
+  private static writeBarriers = new WeakMap<object, { tail: Promise<void> }>();
+  private writeBarrier: { tail: Promise<void> };
 
   constructor(
     private registry: SkillRegistry,
     private context: SkillContext,
     private eventBus?: EventBus,
-  ) {}
+    private diagnosticsLogger?: DiagnosticsLogger,
+  ) {
+    const key = context.vault || context;
+    this.writeBarrier = SkillExecutor.writeBarriers.get(key) || { tail: Promise.resolve() };
+    SkillExecutor.writeBarriers.set(key, this.writeBarrier);
+  }
 
   /**
    * Execute a skill by name
@@ -69,6 +81,7 @@ export class SkillExecutor {
     this.addToHistory(skillCall);
 
     try {
+      throwIfAborted(options.abortSignal);
       // Update status to executing
       skillCall.status = 'executing';
 
@@ -140,15 +153,16 @@ export class SkillExecutor {
         const fullName = typeof namespace === 'string' && namespace.includes(':')
           ? namespace
           : this.registry.getFullName(namespace as SkillNamespace, name);
-        const taskId = `${fullName}:${Date.now()}`;
+        const taskId = `${fullName}:${callId}`;
         this.eventBus?.emit({
           type: 'confirm:request',
           taskId,
           skillName: fullName,
           params: validatedInput,
           message: `智能体申请执行操作: 【${skill.description}】。是否批准？`,
+          sessionId: options.sessionId, runId: options.runId, agentId: options.agentId,
         });
-        const approved = await this.waitForConfirm(taskId);
+        const approved = await this.waitForConfirm(taskId, 300000, options.abortSignal);
         if (!approved) {
           const result: SkillResult = {
             success: false,
@@ -192,6 +206,12 @@ export class SkillExecutor {
       return result;
     } catch (error) {
       console.error(`[SkillExecutor] Error executing skill:`, error);
+      await this.diagnosticsLogger?.logIncident({
+        agentId: options.agentId || 'skill-executor', agentName: 'Skill Executor',
+        sessionId: options.sessionId, runId: options.runId, kind: 'tool', toolName: `${namespace}:${name}`,
+        originalArgs: JSON.stringify(parameters), errorMessage: error instanceof Error ? error.message : String(error),
+        strategy: 'execution', success: false, details: errorDetails(error),
+      });
 
       const result: SkillResult = {
         success: false,
@@ -290,32 +310,33 @@ export class SkillExecutor {
     timeoutMs: number,
     options: ExecutionOptions = {}
   ): Promise<SkillResult> {
-    const promises: Promise<SkillResult>[] = [
-      skill.execute(input)
-    ];
-
-    if (options.abortSignal) {
-      if (options.abortSignal.aborted) {
-        throw new DOMException('The user aborted a request.', 'AbortError');
-      }
-      promises.push(
-        new Promise<SkillResult>((_, reject) => {
-          const onAbort = () => {
-            options.abortSignal?.removeEventListener('abort', onAbort);
-            reject(new DOMException('The user aborted a request.', 'AbortError'));
-          };
-          options.abortSignal?.addEventListener('abort', onAbort);
-        })
-      );
+    throwIfAborted(options.abortSignal);
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(options.abortSignal?.reason);
+    options.abortSignal?.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(new Error('Skill execution timeout; 操作结果尚未确认，请先核对实际结果。')), timeoutMs);
+    const run = async () => {
+      throwIfAborted(controller.signal);
+      return skill.execute(input, { abortSignal: controller.signal });
+    };
+    const serial = skill.metadata?.executionCategory !== 'read';
+    const operation = serial ? this.writeBarrier.tail.then(run) : run();
+    // Keep the write barrier until the actual operation settles, even after timeout.
+    if (serial) this.writeBarrier.tail = operation.then(() => undefined, () => undefined);
+    void operation.then(async result => {
+      if (controller.signal.aborted) await this.diagnosticsLogger?.logIncident({
+        agentId: options.agentId || 'skill-executor', agentName: 'Skill Executor',
+        sessionId: options.sessionId, runId: options.runId, kind: 'tool-late-result', toolName: skill.name,
+        originalArgs: '', errorMessage: '工具在停止等待后返回，已记录实际结果。', strategy: 'late-result',
+        success: result.success, details: { result },
+      });
+    }).catch(error => console.error('[SkillExecutor] Late operation result:', error));
+    try {
+      return await abortable(operation, controller.signal);
+    } finally {
+      clearTimeout(timer);
+      options.abortSignal?.removeEventListener('abort', onAbort);
     }
-
-    promises.push(
-      new Promise<SkillResult>((_, reject) =>
-        window.setTimeout(() => reject(new Error('Skill execution timeout')), timeoutMs)
-      )
-    );
-
-    return Promise.race<SkillResult>(promises);
   }
 
   /**
@@ -449,15 +470,20 @@ export class SkillExecutor {
   /**
    * Wait for user confirmation via EventBus
    */
-  private waitForConfirm(taskId: string, timeout = 300000): Promise<boolean> {
-    return new Promise((resolve) => {
-      const unsub = this.eventBus?.on('confirm:response', (data) => {
+  private async waitForConfirm(taskId: string, timeout = 300000, signal?: AbortSignal): Promise<boolean> {
+    throwIfAborted(signal);
+    let timer: ReturnType<typeof setTimeout>;
+    let unsub: (() => void) | undefined;
+    const pending = new Promise<boolean>((resolve) => {
+      unsub = this.eventBus?.on('confirm:response', (data) => {
         if (data && (data as Record<string, unknown>).taskId === taskId) {
           unsub?.();
           resolve(!!(data as Record<string, unknown>).approved);
         }
       });
-      setTimeout(() => { unsub?.(); resolve(false); }, timeout);
+      timer = setTimeout(() => resolve(false), timeout);
     });
+    try { return await abortable(pending, signal); }
+    finally { clearTimeout(timer!); unsub?.(); }
   }
 }

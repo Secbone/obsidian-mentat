@@ -24,7 +24,7 @@ export class EmbeddingBatch {
 
     const provider = await this.getEmbeddingProvider();
     if (!provider) {
-      return { embeddings: [], tokens: 0 };
+      throw new Error('未配置向量模型，已跳过向量索引。');
     }
 
     // If provider supports native batching (via generateEmbeddings method)
@@ -107,7 +107,8 @@ export class EmbeddingBatch {
     try {
       return await fn();
     } catch (error: unknown) {
-      if (retries <= 0) {
+      const status = (error as { status?: number })?.status;
+      if (retries <= 0 || /not configured|no .*configured|未配置|invalid|unauthorized|forbidden/i.test(String(error)) || (status && status >= 400 && status < 500 && status !== 408 && status !== 429)) {
         throw error;
       }
       console.warn(`Embedding request failed. Retrying in ${delayMs}ms... (Retries left: ${retries}). Error: ${error instanceof Error ? error.message : String(error)}`);
@@ -120,6 +121,6 @@ export class EmbeddingBatch {
    * Delay helper
    */
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => window.setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

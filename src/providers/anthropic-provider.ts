@@ -45,14 +45,14 @@ export class AnthropicProvider implements AIProvider {
             content: prompt
           }
         ]
-      });
+      }, { signal: options?.abortSignal });
 
       // Extract text content from the response
       const textContent = message.content.find(block => block.type === 'text');
       return textContent ? textContent.text : '';
     } catch (error) {
       console.error('AnthropicProvider generate error:', error);
-      throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -85,7 +85,7 @@ export class AnthropicProvider implements AIProvider {
       }
     } catch (error) {
       console.error('AnthropicProvider generateStream error:', error);
-      throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -211,7 +211,7 @@ export class AnthropicProvider implements AIProvider {
       };
     } catch (error) {
       console.error('AnthropicProvider generateWithSkills error:', error);
-      throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -265,6 +265,9 @@ export class AnthropicProvider implements AIProvider {
 
       // Get final message with properly parsed tool calls
       const finalMessage = await stream.finalMessage();
+      if (!finalMessage.stop_reason || finalMessage.stop_reason === 'max_tokens') {
+        throw new Error('模型响应不完整，未执行工具调用。');
+      }
 
       const toolCalls: ToolCall[] = [];
       for (const block of finalMessage.content) {
@@ -309,7 +312,7 @@ export class AnthropicProvider implements AIProvider {
       };
     } catch (error) {
       console.error('AnthropicProvider generateStreamWithSkills error:', error);
-      throw new Error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 

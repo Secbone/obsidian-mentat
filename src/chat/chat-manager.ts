@@ -21,7 +21,7 @@ export class ChatManager {
   private sessionId: string;
   private initialized: Promise<void>;
   private readonly STORAGE_KEY = 'mentat-chat-history';
-  private readonly MAX_HISTORY_SIZE = 100; // Keep last 100 messages
+  private pendingWrite: Promise<void> = Promise.resolve();
 
   constructor(plugin: ChatManager['plugin']) {
      this.plugin = plugin;
@@ -55,11 +55,6 @@ export class ChatManager {
 
     this.history.push(message);
 
-    // Trim history if too large
-    if (this.history.length > this.MAX_HISTORY_SIZE) {
-      this.history = this.history.slice(-this.MAX_HISTORY_SIZE);
-    }
-
     await this.saveHistory();
   }
 
@@ -70,12 +65,7 @@ export class ChatManager {
   async replaceMessages(messages: ChatMessage[]): Promise<void> {
     await this.initialized;
 
-    this.history = messages;
-
-    // Trim history if too large
-    if (this.history.length > this.MAX_HISTORY_SIZE) {
-      this.history = this.history.slice(-this.MAX_HISTORY_SIZE);
-    }
+    this.history = [...messages];
 
     await this.saveHistory();
   }
@@ -168,7 +158,17 @@ export class ChatManager {
       lastUpdated: Date.now()
     };
 
-    await this.storage.write('chat_history.json', JSON.stringify(data, null, 2));
+    const snapshot = JSON.stringify(data, null, 2);
+    const write = this.pendingWrite.catch(() => undefined).then(async () => {
+      if (await this.storage.exists('chat_history.json')) {
+        const previous = await this.storage.read('chat_history.json');
+        JSON.parse(previous);
+        await this.storage.write('chat_history.json.bak', previous);
+      }
+      await this.storage.write('chat_history.json', snapshot);
+    });
+    this.pendingWrite = write;
+    await write;
   }
 
   /**
@@ -180,9 +180,7 @@ export class ChatManager {
         const content = await this.storage.read('chat_history.json');
         const data = parseJson<ChatHistory>(content);
 
-        // Only load if session is recent (within 7 days)
-        const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-        if (data && data.lastUpdated > sevenDaysAgo) {
+        if (data && Array.isArray(data.messages)) {
           this.history = data.messages || [];
           this.sessionId = data.sessionId || this.sessionId;
           this.selectedFiles = new Set(data.selectedFiles || []);
@@ -192,8 +190,7 @@ export class ChatManager {
         const pluginData = await this.plugin.loadData();
         if (pluginData && pluginData[this.STORAGE_KEY]) {
           const data: ChatHistory = pluginData[this.STORAGE_KEY] as ChatHistory;
-          const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-          if (data && data.lastUpdated > sevenDaysAgo) {
+          if (data && Array.isArray(data.messages)) {
             this.history = data.messages || [];
             this.sessionId = data.sessionId || this.sessionId;
             this.selectedFiles = new Set(data.selectedFiles || []);
@@ -206,6 +203,20 @@ export class ChatManager {
       }
     } catch (error) {
       console.error('Failed to load chat history:', error);
+      if (await this.storage.exists('chat_history.json.bak')) {
+        const backup = parseJson<ChatHistory>(await this.storage.read('chat_history.json.bak'));
+        if (Array.isArray(backup.messages)) {
+          this.history = backup.messages;
+          this.sessionId = backup.sessionId;
+          this.selectedFiles = new Set(backup.selectedFiles || []);
+          // Keep the damaged original for diagnosis before restoring the valid backup.
+          const original = await this.storage.read('chat_history.json');
+          await this.storage.write(`chat_history.corrupt-${Date.now()}.json`, original);
+          await this.storage.write('chat_history.json', JSON.stringify(backup));
+          return;
+        }
+      }
+      throw error;
     }
   }
 

@@ -91,7 +91,7 @@ describe('ChatManager Persistence and Barrier Tests', () => {
     expect(await chatManager.getSelectedFiles()).toEqual([]);
   });
 
-  it('should enforce MAX_HISTORY_SIZE limits', async () => {
+  it('should preserve the complete transcript beyond the model context limit', async () => {
     const chatManager = new ChatManager(mockPlugin);
     
     // Push 105 messages
@@ -100,9 +100,19 @@ describe('ChatManager Persistence and Barrier Tests', () => {
     }
     
     const messages = await chatManager.getHistory();
-    expect(messages.length).toBe(100);
-    // Oldest 5 are discarded
-    expect(messages[0].content).toBe('msg-5');
-    expect(messages[99].content).toBe('msg-104');
+    expect(messages.length).toBe(105);
+    expect(messages[0].content).toBe('msg-0');
+    expect(messages[104].content).toBe('msg-104');
+    expect((await new ChatManager(mockPlugin).getHistory()).length).toBe(105);
+  });
+
+  it('recovers a damaged primary file from backup without discarding the damaged evidence', async () => {
+    const base = '.obsidian/plugins/obsidian-mentat/';
+    await platform.write(base + 'chat_history.json', '{broken');
+    await platform.write(base + 'chat_history.json.bak', JSON.stringify({ sessionId: 'old', messages: [{ role: 'user', content: 'recover me', timestamp: 1 }], selectedFiles: [], lastUpdated: 1 }));
+    const manager = new ChatManager(mockPlugin);
+    expect((await manager.getHistory())[0].content).toBe('recover me');
+    expect([...platform.files.keys()].some(p => p.includes('chat_history.corrupt-'))).toBe(true);
+    expect(JSON.parse(await platform.read(base + 'chat_history.json')).sessionId).toBe('old');
   });
 });

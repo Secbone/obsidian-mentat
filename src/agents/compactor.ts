@@ -1,11 +1,13 @@
 // Compactor - Context compaction using LLM summarization
 
 import { AIProvider, ChatMessage } from '../types';
+import { abortable, isAbortError } from '../utils/execution';
 
 export interface CompactionOptions {
   keepRecent?: number;
   summaryPrompt?: string;
   systemPrompt?: string;
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -47,12 +49,13 @@ export class Compactor {
     ].join('\n');
 
     try {
-      const summary = await this.provider.generate(
+      const summary = await abortable(this.provider.generate(
         `${conversationText}\n\n---\n${prompt}`,
-        { systemPrompt: options.systemPrompt, temperature: 0.3 }
-      );
+        { systemPrompt: options.systemPrompt, temperature: 0.3, abortSignal: options.abortSignal }
+      ), options.abortSignal);
       return summary.trim();
     } catch (error) {
+      if (isAbortError(error)) throw error;
       console.warn('[Compactor] Failed to generate summary, returning empty:', error);
       return '';
     }

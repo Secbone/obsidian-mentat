@@ -9,7 +9,8 @@ import { SkillCall, isExecutableSkill, SkillResult, SkillNamespace } from '../sk
 import { AgentConfig, AgentContext, AgentResponse, AgentEvent, DiagnosticsLogger } from './agent-types';
 import { Compactor } from './compactor';
 import { EventBus } from '../extensions/event-bus';
-import { formatDiffAsText } from '../utils/diff';
+import { formatDiffAsText, DiffLine } from '../utils/diff';
+import { throwIfAborted, isAbortError, errorDetails } from '../utils/execution';
 
 interface ToolCallResult {
   toolMessages: ChatMessage[];
@@ -104,13 +105,69 @@ export class BaseAgent {
     prompt: string,
     context: AgentContext
   ): Promise<AgentResponse> {
+    context.runId ||= `run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    context.transcript = [...context.messages];
+    const identity = { sessionId: context.sessionId, runId: context.runId, agentId: this.config.id };
+    let partial = '';
+    let partialStart = context.transcript.length;
+    const emit = (event: AgentEvent) => this.eventBus?.emit({ ...event, ...identity });
+    emit({ type: 'agent:start' });
     const gen = this.executeGenerator(prompt, context);
-    let result = await gen.next();
-    while (!result.done) {
-      this.eventBus?.emit(result.value as AgentEvent);
-      result = await gen.next();
+    try {
+      let result = await gen.next();
+      while (!result.done) {
+        const event = result.value;
+        if (event.type === 'message:start') {
+          partial = '';
+          partialStart = context.transcript.length;
+        }
+        if (event.type === 'message:update') partial += event.delta;
+        if (event.type === 'message:end') partial = '';
+        emit(event);
+        result = await gen.next();
+      }
+      const response = result.value;
+      throwIfAborted(context.abortSignal);
+      response.messages = context.transcript;
+      await context.onCheckpoint?.(response.messages);
+      emit({ type: 'agent:end', messages: response.messages, status: response.metadata?.status as 'completed' | 'max_turns_exceeded' || 'completed' });
+      return response;
+    } catch (error) {
+      const cancelled = isAbortError(error);
+      const savedAssistant = context.transcript.slice(partialStart).some(message => message.role === 'assistant');
+      if (partial && !savedAssistant) context.transcript.push({ role: 'assistant', content: partial, timestamp: Date.now(), metadata: { interrupted: true } });
+      // Pending tool calls must remain paired without claiming their side effects stopped.
+      const completed = new Set(context.transcript.filter(m => m.role === 'tool').map(m => m.tool_call_id));
+      for (const message of [...context.transcript]) {
+        for (const call of message.tool_calls || []) {
+          if (!completed.has(call.id)) {
+            context.transcript.push({ role: 'tool', tool_call_id: call.id, name: call.name, timestamp: Date.now(), content: 'Error: 执行已中断，结果未确认；请先检查实际结果，不要直接重复写入。' });
+          }
+        }
+      }
+      await this.recordIncident(context, cancelled ? 'cancelled' : 'execution', error);
+      try { await context.onCheckpoint?.(context.transcript); } catch (saveError) {
+        await this.recordIncident(context, 'storage', saveError);
+        emit({ type: 'system:error', message: `会话保存失败：${String(saveError)}` });
+      }
+      emit({ type: 'system:error', message: cancelled ? 'AbortError: 已停止生成' : (error instanceof Error ? error.message : String(error)) });
+      emit({ type: 'agent:end', messages: context.transcript, status: cancelled ? 'cancelled' : 'failed' });
+      throw error;
     }
-    return result.value as AgentResponse;
+  }
+
+  private async checkpoint(context: AgentContext, messages: ChatMessage[]): Promise<void> {
+    context.transcript!.push(...messages);
+    await context.onCheckpoint?.([...context.transcript!]);
+  }
+
+  private async recordIncident(context: AgentContext, kind: string, error: unknown, toolName = 'model', originalArgs = ''): Promise<void> {
+    await this.diagnosticsLogger?.logIncident({
+      agentId: this.config.id, agentName: this.config.name, sessionId: context.sessionId,
+      runId: context.runId, kind, toolName, originalArgs,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      strategy: kind, success: false, details: { ...errorDetails(error), providerId: this.provider.id, providerName: this.provider.name },
+    });
   }
 
   /**
@@ -123,15 +180,20 @@ export class BaseAgent {
     const startTime = Date.now();
     const systemPrompt = this.buildSystemPrompt();
 
-    yield { type: 'agent:start' };
     yield { type: 'system:status', message: '初始化智能体...' };
+
+    const userMessage: ChatMessage = {
+      role: 'user', content: prompt, timestamp: Date.now(),
+      metadata: context.metadata?.sessionContextPayload ? { sessionContextPayload: context.metadata.sessionContextPayload } : undefined,
+    };
+    await this.checkpoint(context, [userMessage]);
 
     if (context.abortSignal?.aborted) {
       throw new DOMException('The user aborted a request.', 'AbortError');
     }
 
     // If skills are disabled or not supported, run simple single-turn generation
-    if (!this.config.enableSkills || !this.provider.supportsSkills?.()) {
+    if (context.metadata?.enableSkills === false || !this.config.enableSkills || !this.provider.supportsSkills?.()) {
       yield { type: 'system:status', message: '正在思考...' };
 
       if (context.abortSignal?.aborted) {
@@ -140,26 +202,24 @@ export class BaseAgent {
 
       const messages: ChatMessage[] = [
         ...context.messages,
-        { role: 'user', content: prompt, timestamp: Date.now() }
+        userMessage
       ];
 
       let responseContent = '';
-      try {
-        responseContent = yield* this.streamModelSimple(prompt, {
-          systemPrompt,
-          temperature: this.config.temperature || 0.7,
-          abortSignal: context.abortSignal
-        });
-      } catch (err: unknown) {
-        yield { type: 'system:error', message: `大模型执行异常: ${err instanceof Error ? err.message : String(err)}` };
-        throw err;
-      }
+      yield { type: 'message:start', role: 'assistant' };
+      responseContent = yield* this.streamModelSimple(messages.map(m => `[${m.role}]: ${m.content}`).join('\n\n'), {
+        systemPrompt,
+        temperature: this.config.temperature || 0.7,
+        abortSignal: context.abortSignal
+      });
 
       messages.push({
         role: 'assistant',
         content: responseContent,
         timestamp: Date.now()
       });
+      await this.checkpoint(context, [messages[messages.length - 1]]);
+      yield { type: 'message:end', role: 'assistant', content: responseContent };
 
       return {
         content: responseContent,
@@ -183,19 +243,6 @@ export class BaseAgent {
     // Configure cyclic loop detection parameters with safe defaults
     const maxCycleLength = (context.metadata as Record<string, number> | undefined)?.maxCycleLength ?? 4;
     const minRepeats = (context.metadata as Record<string, number> | undefined)?.minRepeats ?? 4;
-
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: prompt,
-      timestamp: Date.now()
-    };
-
-    if (context.metadata?.sessionContextPayload) {
-      userMessage.metadata = {
-        ...userMessage.metadata,
-        sessionContextPayload: context.metadata.sessionContextPayload
-      };
-    }
 
     let state: AgentState = {
       messages: [
@@ -231,16 +278,18 @@ export class BaseAgent {
           yield { type: 'system:steer', message: steerText };
 
           // 强行将这一步的人类干预追加到大模型当前轮 of context messages 中！
-          state.messages.push({
+          const intervention: ChatMessage = {
             role: 'user',
             content: `[HUMAN DYNAMIC INTERVENTION]: ${steerText}`,
             timestamp: Date.now()
-          });
+          };
+          state.messages.push(intervention);
+          await this.checkpoint(context, [intervention]);
         }
       }
 
       // 自动上下文压缩检查
-      if (this.compactor && state.turnCount > 1 && state.turnCount % 3 === 0) {
+      if (this.compactor && (state.turnCount === 1 || state.turnCount % 3 === 0)) {
         const totalTokens = Compactor.estimateTokens(state.messages);
         const budget = this.provider.getContextWindow();
         const threshold = this.provider.getCompactionThreshold();
@@ -248,13 +297,13 @@ export class BaseAgent {
           yield { type: 'system:status', message: `正在压缩上下文 (${Math.round(totalTokens / 1000)}k tokens)...` };
           yield { type: 'context:compact:start' };
 
-          const summary = await this.compactor.compact(state.messages, { keepRecent: 6 });
+          const summary = await this.compactor.compact(state.messages, { keepRecent: 6, abortSignal: context.abortSignal });
           if (summary) {
             const keepRecent = 6;
             const recentMessages = state.messages.slice(-keepRecent);
             state.messages = [
               {
-                role: 'system',
+                role: 'user',
                 content: `--- Context Summary ---\n${summary}\n\n--- Continuing Conversation ---`,
                 timestamp: Date.now()
               } as ChatMessage,
@@ -271,38 +320,32 @@ export class BaseAgent {
       yield { type: 'message:start', role: 'assistant' };
 
       // Node A: Stream Model
-      let result: GenerateResponse;
-      try {
-        const modelMessages = state.messages.map((m, idx) => {
-          const isFirstUser = idx === state.messages.findIndex(msg => msg.role === 'user');
-          const payload = m.metadata?.sessionContextPayload || context.metadata?.sessionContextPayload;
-          if (isFirstUser && payload) {
-            return {
-              ...m,
-              content: `${payload}\n\n[User Query]\n${m.content}`
-            };
-          }
-          return m;
-        });
-
-        result = yield* this.streamModel(modelMessages, {
-          temperature: this.config.temperature || 0.7,
-          systemPrompt: state.systemPrompt,
-          skills: state.skills,
-          toolChoice: 'auto',
-          abortSignal: context.abortSignal
-        });
-
-        if (result.usage) {
-          promptTokens += result.usage.promptTokens;
-          completionTokens += result.usage.completionTokens;
-          totalTokens += result.usage.totalTokens;
-          cacheReadTokens += result.usage.cacheReadTokens ?? 0;
-          cacheCreationTokens += result.usage.cacheCreationTokens ?? 0;
+      const modelMessages = state.messages.map((m, idx) => {
+        const isFirstUser = idx === state.messages.findIndex(msg => msg.role === 'user');
+        const payload = m.metadata?.sessionContextPayload || context.metadata?.sessionContextPayload;
+        if (isFirstUser && payload) {
+          return {
+            ...m,
+            content: `${payload}\n\n[User Query]\n${m.content}`
+          };
         }
-      } catch (err: unknown) {
-        yield { type: 'system:error', message: `大模型决策异常: ${err instanceof Error ? err.message : String(err)}` };
-        throw err;
+        return m;
+      });
+
+      const result = yield* this.streamModel(modelMessages, {
+        temperature: this.config.temperature || 0.7,
+        systemPrompt: state.systemPrompt,
+        skills: state.skills,
+        toolChoice: 'auto',
+        abortSignal: context.abortSignal
+      });
+
+      if (result.usage) {
+        promptTokens += result.usage.promptTokens;
+        completionTokens += result.usage.completionTokens;
+        totalTokens += result.usage.totalTokens;
+        cacheReadTokens += result.usage.cacheReadTokens ?? 0;
+        cacheCreationTokens += result.usage.cacheCreationTokens ?? 0;
       }
 
       // Update state with assistant response
@@ -310,9 +353,11 @@ export class BaseAgent {
         role: 'assistant',
         content: result.content,
         timestamp: Date.now(),
-        tool_calls: result.toolCalls
+        tool_calls: result.toolCalls,
+        metadata: { usage: result.usage, contextTokens: result.usage?.promptTokens, contextWindow: this.provider.getContextWindow(), runId: context.runId }
       };
 
+      await this.checkpoint(context, [assistantMessage]);
       yield { type: 'message:end', role: 'assistant', content: result.content };
 
       state = this.mergeState(state, {
@@ -345,16 +390,14 @@ export class BaseAgent {
       yield { type: 'turn:end', turnIndex: state.turnCount, message: assistantMessage, toolResults };
     }
 
-    const isLimitReached = state.turnCount >= state.maxTurns;
+    const lastAssistant = state.messages.filter(m => m.role === 'assistant').at(-1);
+    const isLimitReached = state.turnCount >= state.maxTurns && !!lastAssistant?.tool_calls?.length;
     if (isLimitReached) {
       console.warn('[BaseAgent] Reached maximum turns limit');
-      yield { type: 'system:error', message: '⚠️ 智能体执行已达到最大轮数限制，已被强制熔断。' };
+      yield { type: 'system:status', message: '已达到工具轮数上限，当前进度已保存。' };
     }
 
-    yield { type: 'system:status', message: '任务完成！' };
-
-    // 在新事件中附加 metadata
-    yield { type: 'agent:end', messages: state.messages };
+    if (!isLimitReached) yield { type: 'system:status', message: '任务完成！' };
 
     // Attach usage stats to the last assistant message
     const assistantMsgs = state.messages.filter(m => m.role === 'assistant');
@@ -363,13 +406,6 @@ export class BaseAgent {
       lastMsg.metadata = {
         ...lastMsg.metadata,
         isMaxTurnsReached: isLimitReached || undefined,
-        usage: {
-          promptTokens,
-          completionTokens,
-          totalTokens,
-          cacheReadTokens,
-          cacheCreationTokens
-        }
       };
     }
 
@@ -400,162 +436,54 @@ export class BaseAgent {
     messages: ChatMessage[],
     options: StreamOptions
   ): AsyncGenerator<AgentEvent, GenerateResponse, unknown> {
-    const queue: AgentEvent[] = [];
-    let resolveNext: (() => void) | null = null;
-    let completed = false;
-    let finalResult: GenerateResponse | null = null;
-    let error: unknown = null;
-
-    const onAbort = () => {
-      completed = true;
-      if (resolveNext) {
-        resolveNext();
-        resolveNext = null;
-      }
-    };
-
-    if (options?.abortSignal) {
-      if (options.abortSignal.aborted) {
-        throw new DOMException('The user aborted a request.', 'AbortError');
-      }
-      options.abortSignal.addEventListener('abort', onAbort);
-    }
-
-    if (!this.provider.generateStreamWithSkills) {
-      yield { type: 'system:error', message: '当前 AI 服务商不支持技能工具调用，请切换到 OpenAI 或 Anthropic 提供商。' };
-      return { content: '', toolCalls: [], finishReason: 'stop' };
-    }
-
-    this.provider.generateStreamWithSkills(
-      messages,
-      (chunk: string) => {
-        queue.push({ type: 'message:update', delta: chunk });
-        if (resolveNext) {
-          resolveNext();
-          resolveNext = null;
-        }
-      },
-      undefined,
-      options
-    ).then((result) => {
-      finalResult = result;
-      completed = true;
-      if (resolveNext) {
-        resolveNext();
-        resolveNext = null;
-      }
-    }).catch((err) => {
-      error = err;
-      completed = true;
-      if (resolveNext) {
-        resolveNext();
-        resolveNext = null;
-      }
-    });
-
-    try {
-      while (!completed || queue.length > 0) {
-        if (options?.abortSignal?.aborted) {
-          throw new DOMException('The user aborted a request.', 'AbortError');
-        }
-        if (queue.length === 0) {
-          await new Promise<void>((resolve) => {
-            resolveNext = resolve;
-          });
-        }
-        while (queue.length > 0) {
-          yield queue.shift()!;
-        }
-      }
-    } finally {
-      if (options?.abortSignal) {
-        options.abortSignal.removeEventListener('abort', onAbort);
-      }
-    }
-
-    if (error) {
-      throw error instanceof Error ? error : new Error(String(error));
-    }
-
-    return finalResult!;
+    if (!this.provider.generateStreamWithSkills) throw new Error('当前 AI 服务商不支持工具调用');
+    const result = yield* this.bridgeStream(
+      onChunk => this.provider.generateStreamWithSkills!(messages, onChunk, undefined, options), options.abortSignal
+    );
+    if (!result) throw new Error('模型响应为空，请重试当前请求。');
+    return result;
   }
 
-  private async *streamModelSimple(
-    prompt: string,
-    options: StreamOptions
-  ): AsyncGenerator<AgentEvent, string, unknown> {
+  private async *streamModelSimple(prompt: string, options: StreamOptions): AsyncGenerator<AgentEvent, string, unknown> {
+    let content = '';
+    yield* this.bridgeStream(async onChunk => {
+      await this.provider.generateStream(prompt, chunk => { content += chunk; onChunk(chunk); }, options);
+      return content;
+    }, options.abortSignal);
+    return content;
+  }
+
+  private async *bridgeStream<T>(start: (onChunk: (chunk: string) => void) => Promise<T>, signal?: AbortSignal): AsyncGenerator<AgentEvent, T, unknown> {
+    throwIfAborted(signal);
     const queue: AgentEvent[] = [];
-    let resolveNext: (() => void) | null = null;
+    let wake: (() => void) | undefined;
     let completed = false;
-    let error: unknown = null;
-    let fullResponse = '';
-
+    let value: T;
+    let failure: unknown;
+    const notify = () => { wake?.(); wake = undefined; };
     const onAbort = () => {
+      failure = new DOMException('已停止生成', 'AbortError');
       completed = true;
-      if (resolveNext) {
-        resolveNext();
-        resolveNext = null;
-      }
+      notify();
     };
-
-    if (options?.abortSignal) {
-      if (options.abortSignal.aborted) {
-        throw new DOMException('The user aborted a request.', 'AbortError');
-      }
-      options.abortSignal.addEventListener('abort', onAbort);
-    }
-
-    this.provider.generateStream(
-      prompt,
-      (chunk: string) => {
-        fullResponse += chunk;
-        queue.push({ type: 'message:update', delta: chunk });
-        if (resolveNext) {
-          resolveNext();
-          resolveNext = null;
-        }
-      },
-      options
-    ).then(() => {
-      completed = true;
-      if (resolveNext) {
-        resolveNext();
-        resolveNext = null;
-      }
-    }).catch((err) => {
-      error = err;
-      completed = true;
-      if (resolveNext) {
-        resolveNext();
-        resolveNext = null;
-      }
-    });
-
+    signal?.addEventListener('abort', onAbort, { once: true });
+    // Always observe the provider promise, including its late rejection after cancellation.
+    Promise.resolve().then(() => {
+      throwIfAborted(signal);
+      return start(chunk => { if (!completed) { queue.push({ type: 'message:update', delta: chunk }); notify(); } });
+    }).then(result => { value = result; completed = true; notify(); }, error => { failure = error; completed = true; notify(); });
     try {
-      while (!completed || queue.length > 0) {
-        if (options?.abortSignal?.aborted) {
-          throw new DOMException('The user aborted a request.', 'AbortError');
-        }
-        if (queue.length === 0) {
-          await new Promise<void>((resolve) => {
-            resolveNext = resolve;
-          });
-        }
-        while (queue.length > 0) {
-          yield queue.shift()!;
-        }
+      while (!completed || queue.length) {
+        throwIfAborted(signal);
+        if (!queue.length && !completed) await new Promise<void>(resolve => { wake = resolve; });
+        throwIfAborted(signal);
+        while (queue.length) yield queue.shift()!;
       }
+      if (failure) throw failure;
+      return value!;
     } finally {
-      if (options?.abortSignal) {
-        options.abortSignal.removeEventListener('abort', onAbort);
-      }
+      signal?.removeEventListener('abort', onAbort);
     }
-
-    if (error) {
-      throw error instanceof Error ? error : new Error(String(error));
-    }
-
-    return fullResponse;
   }
 
   private mergeState(current: AgentState, update: Partial<AgentState>): AgentState {
@@ -651,6 +579,7 @@ export class BaseAgent {
     }
 
     const executableCalls = validCalls.filter(c => !c.isLoop).map(c => c.toolCall);
+    if (results.length) await this.checkpoint(context, results.flatMap(r => r.toolMessages));
     if (executableCalls.length === 0) return results;
 
     const mode = this.config.toolExecutionMode || 'parallel';
@@ -663,7 +592,7 @@ export class BaseAgent {
       const serialCalls: ToolCall[] = [];
 
       for (const tc of executableCalls) {
-        const cat = this.getToolCategory(tc.name);
+        const cat = this.getToolCategory(tc);
         if (cat === 'read') {
           readCalls.push(tc);
         } else {
@@ -673,27 +602,33 @@ export class BaseAgent {
 
       // 先并行执行所有只读调用
       if (readCalls.length > 0) {
-        const readCollected = await Promise.all(
-          readCalls.map(tc =>
-            collectGeneratorEvents(this.executeSingleToolCall(tc, context))
-          )
-        );
-
-        for (let i = 0; i < readCalls.length; i++) {
-          const tc = readCalls[i];
+        const parallelism = Math.max(1, Math.min(20, this.config.maxParallelTools || 5));
+        for (let offset = 0; offset < readCalls.length; offset += parallelism) {
+          const batch = readCalls.slice(offset, offset + parallelism);
+          throwIfAborted(context.abortSignal);
+          for (const tc of batch) yield { type: 'tool:start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
+          const readCollected = await Promise.all(batch.map(async tc => {
+            const collected = await collectGeneratorEvents(this.executeSingleToolCall(tc, context));
+            await this.checkpoint(context, collected.result.toolMessages);
+            return collected;
+          }));
+        for (let i = 0; i < batch.length; i++) {
+          const tc = batch[i];
           const { events, result: runResult } = readCollected[i];
-          yield { type: 'tool:start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
           for (const event of events) yield event;
           const sr = runResult.skillCalls?.[0]?.result;
           yield { type: 'tool:end', toolCallId: tc.id, toolName: tc.name, result: sr ?? null, isError: sr ? !sr.success : true };
           results.push(runResult);
         }
+        }
       }
 
       // 再串行执行所有写操作（保持原始顺序）
       for (const tc of serialCalls) {
+        throwIfAborted(context.abortSignal);
         yield { type: 'tool:start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
         const runRes = yield* this.executeSingleToolCall(tc, context);
+        await this.checkpoint(context, runRes.toolMessages);
         const sr = runRes.skillCalls?.[0]?.result;
         yield { type: 'tool:end', toolCallId: tc.id, toolName: tc.name, result: sr ?? null, isError: sr ? !sr.success : true };
         results.push(runRes);
@@ -701,8 +636,10 @@ export class BaseAgent {
     } else {
       // 串行执行（保持原始 toolCalls 顺序）
       for (const tc of executableCalls) {
+        throwIfAborted(context.abortSignal);
         yield { type: 'tool:start', toolCallId: tc.id, toolName: tc.name, args: tc.arguments };
         const runRes = yield* this.executeSingleToolCall(tc, context);
+        await this.checkpoint(context, runRes.toolMessages);
         const sr = runRes.skillCalls?.[0]?.result;
         yield { type: 'tool:end', toolCallId: tc.id, toolName: tc.name, result: sr ?? null, isError: sr ? !sr.success : true };
         results.push(runRes);
@@ -712,8 +649,16 @@ export class BaseAgent {
     return results;
   }
 
-  private getToolCategory(toolName: string): string | undefined {
-    if (toolName === 'spec' || toolName === 'invoke') return 'read';
+  private getToolCategory(call: ToolCall): string | undefined {
+    let toolName = call.name;
+    if (toolName === 'spec') return 'read';
+    if (toolName === 'invoke') {
+      try {
+        const args = typeof call.arguments === 'string' ? safeParseJson(call.arguments) : call.arguments;
+        toolName = (args as Record<string, unknown>).skill_name as string;
+        if (!toolName || toolName === 'invoke') return undefined;
+      } catch { return undefined; }
+    }
     if (toolName.startsWith('mcp:')) return 'external';
 
     const skill = this.skillRegistry.get(toolName) || this.skillRegistry.get(toolName.replace(/__/g, ':'));
@@ -854,20 +799,23 @@ export class BaseAgent {
 
     try {
       let runResult: SkillResult;
+      const executionOptions = { abortSignal: context.abortSignal, sessionId: context.sessionId, runId: context.runId, agentId: this.config.id,
+        timeout: ['obsidian:web_fetch', 'obsidian:run_command'].includes(targetSkillName) && typeof (targetParams as Record<string, unknown>)?.timeout === 'number'
+          ? (targetParams as Record<string, number>).timeout + 1000 : undefined };
       if (isMeta) {
         const { namespace, name } = this.skillRegistry.parseName(targetSkillName);
-        runResult = await this.skillExecutor.execute(namespace, name, targetParams as Record<string, unknown>, { abortSignal: context.abortSignal });
+        runResult = await this.skillExecutor.execute(namespace, name, targetParams as Record<string, unknown>, executionOptions);
       } else {
         const execToolCall = { ...toolCall, arguments: targetParams as Record<string, unknown> };
-        runResult = await this.skillExecutor.executeFromToolCall(execToolCall, { abortSignal: context.abortSignal });
+        runResult = await this.skillExecutor.executeFromToolCall(execToolCall, executionOptions);
       }
 
       if (runResult.success) {
         const diff = (runResult.metadata as Record<string, unknown> | undefined)?.diff;
-        let content = JSON.stringify(runResult.data, null, 2);
+        let content = JSON.stringify(runResult.data, null, 2) ?? '';
         if (diff && Array.isArray(diff)) {
           const filePath = (runResult.data as Record<string, unknown> | undefined)?.path as string || '';
-          content = formatDiffAsText(filePath, diff as any) + '\n\n' + content;
+          content = formatDiffAsText(filePath, diff as DiffLine[]) + '\n\n' + content;
         }
 
         const mainMessage: ChatMessage = {
@@ -892,6 +840,7 @@ export class BaseAgent {
           }]
         };
       } else {
+        await this.recordIncident(context, 'tool', new Error(runResult.error || 'Unknown tool error'), targetSkillName, JSON.stringify(targetParams));
         yield { type: 'system:status', message: `⚠️ 工具 [${targetSkillName}] 运行失败，正在自动引导纠错...` };
         
         return {

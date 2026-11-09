@@ -24,6 +24,7 @@ import { IndexManager } from '../indexing/index-manager';
 import { MentatSettings } from '../settings/settings';
 import { App } from 'obsidian';
 import { z } from 'zod';
+import { errorDetails } from '../utils/execution';
 
 export interface ChatQueryOptions {
   enableSkills?: boolean;
@@ -112,8 +113,10 @@ export class ChatOrchestrator {
       readTracker: this.readTracker
     };
 
-    this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext, this.eventBus);
-    this.diagnosticsLogger = new VaultDiagnosticsLogger(platform.getVault());
+    this.diagnosticsLogger = new VaultDiagnosticsLogger(platform.getVault(), () => [
+      ...this.settings.aiProviders.map(p => p.apiKey || ''), this.settings.browserlessApiKey || '', this.settings.braveSearchApiKey || '',
+    ]);
+    this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext, this.eventBus, this.diagnosticsLogger);
   }
 
   private getApp(): App {
@@ -234,7 +237,7 @@ export class ChatOrchestrator {
       throw new Error('请先在设置中配置 AI 服务商 (API Key)。No AI provider configured. Please add one in Mentat settings.');
     }
 
-    const messages = options.contextMessages || [];
+    const messages = options.context?.messages || options.contextMessages || [];
     
     // Find if we already have a session context in the history
     const firstUserMsg = messages.find(m => m.role === 'user');
@@ -252,6 +255,7 @@ export class ChatOrchestrator {
         sessionContextPayload
       },
     };
+    context.metadata = { ...context.metadata, sessionContextPayload, enableSkills: options.enableSkills };
 
     try {
       await this.agentManager.execute(
@@ -261,7 +265,14 @@ export class ChatOrchestrator {
       );
     } catch (error) {
       console.error('[ChatOrchestrator] sendMessage failed:', error);
+      throw error;
     }
+  }
+
+  async reportFailure(error: unknown, kind: string, sessionId?: string, runId?: string): Promise<void> {
+    await this.diagnosticsLogger.logIncident({ agentId: 'default-chat-agent', agentName: 'Chat Agent',
+      sessionId, runId, kind, toolName: kind, originalArgs: '', strategy: kind,
+      errorMessage: error instanceof Error ? error.message : String(error), success: false, details: errorDetails(error) });
   }
 
   private async buildVaultSessionContextPayload(): Promise<string> {
@@ -343,7 +354,7 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
 
     // Clear existing skills
     this.skillRegistry = new SkillRegistry();
-    this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext, this.eventBus);
+    this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext, this.eventBus, this.diagnosticsLogger);
 
     // Reload all skills
     await this.loadAllSkills(skillContext);
@@ -967,12 +978,13 @@ OTHERWISE:
     const delegateTaskSkill: SkillDefinition<{ agentId: string; prompt: string }> = {
       name: 'delegate_task',
       namespace: 'obsidian',
+      metadata: { executionCategory: 'read' },
       description: 'Delegate a specific task or prompt to a specialized subagent (e.g. writer-agent, reviewer-agent) and get its output.',
       schema: z.object({
         agentId: z.string().describe('The ID of the agent to delegate to (e.g. "writer-agent", "reviewer-agent")'),
         prompt: z.string().describe('The detailed instructions or content for the agent to process')
       }),
-      execute: async (input: { agentId: string; prompt: string }) => {
+      execute: async (input: { agentId: string; prompt: string }, options) => {
         try {
           const agent = this.agentManager.getAgent(input.agentId);
           if (!agent) {
@@ -984,7 +996,7 @@ OTHERWISE:
           // Execute agent to completion
           const response = await agent.execute(input.prompt, {
             messages: [], // Isolated context
-            sessionId: `subagent-${Date.now()}`
+            sessionId: `subagent-${Date.now()}`, abortSignal: options?.abortSignal,
           });
           
           return {
@@ -1006,13 +1018,14 @@ OTHERWISE:
     const spawnSubagentSkill: SkillDefinition<{ name: string; systemPrompt: string; prompt: string }> = {
       name: 'spawn_subagent',
       namespace: 'obsidian',
+      metadata: { executionCategory: 'read' },
       description: 'Dynamically spawn a temporary subagent with custom roles and prompts to assist with a sub-task.',
       schema: z.object({
         name: z.string().describe('The name of the temporary subagent (e.g. "Translator", "Summarizer")'),
         systemPrompt: z.string().describe('The system instructions defining the behavior and constraints of the subagent'),
         prompt: z.string().describe('The instructions or prompt to execute')
       }),
-      execute: async (input: { name: string; systemPrompt: string; prompt: string }) => {
+      execute: async (input: { name: string; systemPrompt: string; prompt: string }, options) => {
         const tempAgentId = `temp-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
         try {
           const tempConfig: AgentConfig = {
@@ -1032,7 +1045,7 @@ OTHERWISE:
           
           const response = await tempAgent.execute(input.prompt, {
             messages: [],
-            sessionId: `subagent-${Date.now()}`
+            sessionId: `subagent-${Date.now()}`, abortSignal: options?.abortSignal,
           });
           
           return {

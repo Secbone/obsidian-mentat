@@ -1,3 +1,4 @@
+import { throwIfAborted } from '../../../src/utils/execution';
 // Batch Operation Implementation
 // Core logic for batch operations on Obsidian documents
 
@@ -184,6 +185,7 @@ async function performOperation(
   const errors: Array<{ path: string; error: string }> = [];
 
   for (const file of files) {
+    throwIfAborted(context.abortSignal);
     try {
       let modified = false;
 
@@ -252,6 +254,7 @@ async function addTags(
   if (!dryRun) {
     frontmatter.tags = newTags;
     const newContent = buildContent(frontmatter, bodyContent);
+    throwIfAborted(context.abortSignal);
     await context.vault.modify(file, newContent);
   }
 
@@ -283,6 +286,7 @@ async function removeTags(
   if (!dryRun) {
     frontmatter.tags = newTags;
     const newContent = buildContent(frontmatter, bodyContent);
+    throwIfAborted(context.abortSignal);
     await context.vault.modify(file, newContent);
   }
 
@@ -306,6 +310,7 @@ async function updateFrontmatter(
 
   if (!dryRun) {
     const newContent = buildContent(newFrontmatter, bodyContent);
+    throwIfAborted(context.abortSignal);
     await context.vault.modify(file, newContent);
   }
 
@@ -328,6 +333,7 @@ async function appendContent(
   if (!dryRun) {
     const currentContent = await context.vault.read(file);
     const newContent = currentContent + '\n\n' + content;
+    throwIfAborted(context.abortSignal);
     await context.vault.modify(file, newContent);
   }
 

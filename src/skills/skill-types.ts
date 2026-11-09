@@ -56,7 +56,7 @@ export interface SkillDefinition<TInput = unknown, TOutput = unknown> {
   schema: ZodTypeAny;
 
   // Execution function
-  execute: (input: TInput) => Promise<SkillResult<TOutput>>;
+  execute: (input: TInput, options?: { abortSignal?: AbortSignal }) => Promise<SkillResult<TOutput>>;
 
   // Metadata
   metadata?: {
@@ -117,6 +117,7 @@ export interface ToolCall {
  * Skill execution context - provides access to plugin resources
  */
 export interface SkillContext {
+  abortSignal?: AbortSignal;
   vault: Vault;
   metadataCache: MetadataCache;
   workspace: Workspace;

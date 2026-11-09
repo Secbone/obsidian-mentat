@@ -208,21 +208,25 @@ export class SkillLoader {
     context: SkillContext
   ): Promise<SkillDefinition | null> {
     // Get implementation from map (compile-time imports for built-in skills)
-    const impl = this.implementationMap.get(metadata.name) as { createSkill: (context: SkillContext) => { schema: import('zod').ZodTypeAny; execute: (input: unknown) => Promise<import('../skill-types').SkillResult<unknown>> } } | undefined;
+    const impl = this.implementationMap.get(metadata.name) as { metadata?: SkillDefinition['metadata']; schema?: import('zod').ZodTypeAny; execute?: (input: unknown, context: SkillContext) => Promise<SkillResult>; createSkill?: (context: SkillContext) => { schema: import('zod').ZodTypeAny; execute: (input: unknown) => Promise<SkillResult> } } | undefined;
 
     if (impl) {
       // Built-in skill: use compile-time import
-      const skillImpl = impl.createSkill(context);
+      const skillImpl = impl.createSkill?.(context);
       return {
         name: metadata.name,
         namespace: 'obsidian',
         description: metadata.description,
-        schema: skillImpl.schema,
-        execute: skillImpl.execute,
+        schema: skillImpl?.schema || impl.schema!,
+        execute: (input, options) => {
+          const runContext = { ...context, abortSignal: options?.abortSignal };
+          return impl.createSkill ? impl.createSkill(runContext).execute(input) : impl.execute!(input, runContext);
+        },
         metadata: {
+          ...impl.metadata,
           version: metadata.metadata?.version || '1.0.0',
           tags: metadata.metadata?.tags || [],
-          requiresConfirmation: metadata.metadata?.requiresConfirmation || false,
+          requiresConfirmation: metadata.metadata?.requiresConfirmation ?? impl.metadata?.requiresConfirmation ?? false,
           documentation: metadata.content
         }
       };

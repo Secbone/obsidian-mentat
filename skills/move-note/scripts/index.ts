@@ -1,3 +1,4 @@
+import { throwIfAborted } from '../../../src/utils/execution';
 import { z } from 'zod';
 import { TFile } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
@@ -68,6 +69,7 @@ export async function execute(
 
   try {
     // Use FileManager.renameFile to automatically update all links
+    throwIfAborted(context.abortSignal);
     await context.plugin.app.fileManager.renameFile(sourceFile, input.new_path);
 
     // Update read tracker

@@ -73,6 +73,9 @@ export class IndexManager {
     // 4. Generate embeddings for all chunks
     const texts = chunks.map(c => c.content);
     const { embeddings } = await this.embeddingBatch.generateBatch(texts);
+    if (embeddings.length !== chunks.length || embeddings.some(vector => !vector?.length || vector.some(n => !Number.isFinite(n)))) {
+      throw new Error('向量结果数量或内容无效，未更新索引。');
+    }
 
     // 5. Assemble complete chunks with embeddings
     const fullChunks: FileChunk[] = chunks.map((chunk, i) => ({
@@ -154,11 +157,7 @@ export class IndexManager {
       }
     }
 
-    if (filesToIndex.length > 0) {
-      await this.indexFiles(filesToIndex, onProgress);
-    }
-
-    return filesToIndex.length;
+    return filesToIndex.length > 0 ? (await this.indexFiles(filesToIndex, onProgress)).length : 0;
   }
 
   /**
@@ -207,6 +206,10 @@ export class IndexManager {
 
     // Search in vector store
     return this.vectorStore.search(embedding, options);
+  }
+
+  async canSearch(): Promise<boolean> {
+    return !!(await this.getEmbeddingProvider());
   }
 
   /**

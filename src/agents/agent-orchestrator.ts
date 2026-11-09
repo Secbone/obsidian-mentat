@@ -203,6 +203,7 @@ export class AgentOrchestrator {
       }
 
       const response = await agent.execute(currentPrompt, currentContext);
+      yield { type: 'agent:end', messages: response.messages, activeAgentId: agentId, sessionId: currentContext.sessionId, runId: currentContext.runId, agentId };
 
       currentContext = {
         ...currentContext,

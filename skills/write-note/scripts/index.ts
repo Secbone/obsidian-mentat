@@ -1,3 +1,4 @@
+import { throwIfAborted } from '../../../src/utils/execution';
 // Write Note Implementation
 // Create/overwrite notes with mutiple operation modes (create, append, prepend, section, replace-all)
 
@@ -208,10 +209,11 @@ async function createFile(
     content = frontmatterText + '\n\n' + content;
   }
 
+    throwIfAborted(context.abortSignal);
   const file = await context.vault.create(input.path, content);
 
   let reindexed = false;
-  if (input.triggerReindex && context.indexManager) {
+  if (input.triggerReindex && context.indexManager && (!context.indexManager.canSearch || await context.indexManager.canSearch())) {
     try {
       await context.indexManager.indexFile(file);
       reindexed = true;
@@ -258,10 +260,11 @@ async function handleSection(
     );
   }
 
+    throwIfAborted(context.abortSignal);
   await context.vault.modify(file, newContent);
 
   let reindexed = false;
-  if (input.triggerReindex && context.indexManager) {
+  if (input.triggerReindex && context.indexManager && (!context.indexManager.canSearch || await context.indexManager.canSearch())) {
     try {
       await context.indexManager.indexFile(file);
       reindexed = true;
@@ -291,10 +294,11 @@ async function appendContent(
   const previousLength = currentContent.length;
 
   const newContent = currentContent + '\n\n' + input.content;
+    throwIfAborted(context.abortSignal);
   await context.vault.modify(file, newContent);
 
   let reindexed = false;
-  if (input.triggerReindex && context.indexManager) {
+  if (input.triggerReindex && context.indexManager && (!context.indexManager.canSearch || await context.indexManager.canSearch())) {
     try {
       await context.indexManager.indexFile(file);
       reindexed = true;
@@ -334,10 +338,11 @@ async function prependContent(
     newContent = input.content + '\n\n' + currentContent;
   }
 
+    throwIfAborted(context.abortSignal);
   await context.vault.modify(file, newContent);
 
   let reindexed = false;
-  if (input.triggerReindex && context.indexManager) {
+  if (input.triggerReindex && context.indexManager && (!context.indexManager.canSearch || await context.indexManager.canSearch())) {
     try {
       await context.indexManager.indexFile(file);
       reindexed = true;
@@ -373,10 +378,11 @@ async function replaceAllContent(
     newContent = frontmatterText + '\n\n' + newContent;
   }
 
+    throwIfAborted(context.abortSignal);
   await context.vault.modify(file, newContent);
 
   let reindexed = false;
-  if (input.triggerReindex && context.indexManager) {
+  if (input.triggerReindex && context.indexManager && (!context.indexManager.canSearch || await context.indexManager.canSearch())) {
     try {
       await context.indexManager.indexFile(file);
       reindexed = true;

@@ -160,7 +160,7 @@ export class SettingsTab extends PluginSettingTab {
           dropdown
             .setValue(this.plugin.settings.taskRouting[task.key as keyof typeof this.plugin.settings.taskRouting] || '')
             .onChange(async (value) => {
-              (this.plugin.settings as Record<string, unknown>)[task.key] = value;
+              this.plugin.settings.taskRouting[task.key as keyof typeof this.plugin.settings.taskRouting] = value;
               await this.plugin.saveSettings();
             });
         });

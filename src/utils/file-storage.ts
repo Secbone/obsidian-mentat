@@ -39,6 +39,7 @@ export class FileStorage {
    */
   async write(relativePath: string, data: string): Promise<void> {
     const fullPath = this.getFullPath(relativePath);
+    if (!(await this.platform.exists(this.basePath))) await this.platform.mkdir(this.basePath);
     
     // Ensure parent directory exists
     const parts = relativePath.split('/');

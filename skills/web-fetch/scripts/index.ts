@@ -1,3 +1,4 @@
+import { abortable, throwIfAborted } from '../../../src/utils/execution';
 import { z } from 'zod';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 import TurndownService from 'turndown';
@@ -73,10 +74,11 @@ type FetchResult = {
 };
 
 // Strategy 1: Jina AI Reader
-async function fetchWithJina(url: string): Promise<FetchResult> {
+async function fetchWithJina(url: string, signal?: AbortSignal): Promise<FetchResult> {
   try {
     const jinaUrl = `https://r.jina.ai/${url}`;
-    const response = await requestUrl({
+    throwIfAborted(signal);
+    const response = await abortable(requestUrl({
       url: jinaUrl,
       method: 'GET',
       headers: {
@@ -84,7 +86,7 @@ async function fetchWithJina(url: string): Promise<FetchResult> {
         'X-Return-Format': 'markdown'
       },
       throw: false
-    });
+    }), signal);
 
     if (!response) {
       return {
@@ -142,7 +144,7 @@ async function fetchWithJina(url: string): Promise<FetchResult> {
 }
 
 // Strategy 2: Browserless API
-async function fetchWithBrowserless(url: string, apiKey: string): Promise<FetchResult> {
+async function fetchWithBrowserless(url: string, apiKey: string, signal?: AbortSignal): Promise<FetchResult> {
   if (!apiKey) {
     return {
       success: false,
@@ -153,7 +155,8 @@ async function fetchWithBrowserless(url: string, apiKey: string): Promise<FetchR
 
   try {
     const browserlessUrl = `https://chrome.browserless.io/content?token=${apiKey}`;
-    const response = await requestUrl({
+    throwIfAborted(signal);
+    const response = await abortable(requestUrl({
       url: browserlessUrl,
       method: 'POST',
       headers: {
@@ -163,7 +166,7 @@ async function fetchWithBrowserless(url: string, apiKey: string): Promise<FetchR
         url: url
       }),
       throw: false
-    });
+    }), signal);
 
     if (!response) {
       return {
@@ -204,7 +207,7 @@ async function fetchWithBrowserless(url: string, apiKey: string): Promise<FetchR
 }
 
 // Strategy 3: Direct HTTP Request
-async function fetchDirect(input: Input): Promise<FetchResult> {
+async function fetchDirect(input: Input, signal?: AbortSignal): Promise<FetchResult> {
   try {
     const requestHeaders: Record<string, string> = {
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -216,13 +219,14 @@ async function fetchDirect(input: Input): Promise<FetchResult> {
       ...input.headers
     };
 
-    const response = await requestUrl({
+    throwIfAborted(signal);
+    const response = await abortable(requestUrl({
       url: input.url,
       method: input.method || 'GET',
       headers: requestHeaders,
       body: input.body,
       throw: false
-    });
+    }), signal);
 
     if (!response) {
       return {
@@ -271,7 +275,12 @@ async function fetchDirect(input: Input): Promise<FetchResult> {
 
 async function execute(input: Input, context: SkillContext): Promise<SkillResult> {
   const startTime = Date.now();
-
+  throwIfAborted(context.abortSignal);
+  const controller = new AbortController();
+  const cancel = () => controller.abort(context.abortSignal?.reason);
+  context.abortSignal?.addEventListener('abort', cancel, { once: true });
+  const timer = setTimeout(() => controller.abort(new DOMException('Web fetch timeout', 'TimeoutError')), input.timeout || 30000);
+  const signal = controller.signal;
   try {
     const parsedUrl = new URL(input.url);
 
@@ -310,27 +319,29 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
     const browserlessApiKey = context.plugin.settings.browserlessApiKey || '';
 
     if (strategy === 'jina') {
-      result = await fetchWithJina(input.url);
+      result = await fetchWithJina(input.url, signal);
       if (!result.success) {
         errors.push(`Jina: ${result.error}`);
       }
     }
 
+    throwIfAborted(signal);
     // Fallback to browserless ONLY if jina failed with non-timeout error
     if (!result?.success &&
         !result?.isTimeout &&
         (strategy === 'browserless' || originalStrategy === 'auto')) {
-      result = await fetchWithBrowserless(input.url, browserlessApiKey);
+      result = await fetchWithBrowserless(input.url, browserlessApiKey, signal);
       if (!result.success) {
         errors.push(`Browserless: ${result.error}`);
       }
     }
 
+    throwIfAborted(signal);
     // Fallback to direct if previous strategies failed (also skip on timeout)
     if (!result?.success &&
         !result?.isTimeout &&
         (strategy === 'direct' || originalStrategy === 'auto')) {
-      result = await fetchDirect(input);
+      result = await fetchDirect(input, signal);
       if (!result.success) {
         errors.push(`Direct: ${result.error}`);
       }
@@ -418,6 +429,9 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
       error: error.message,
       data: { duration }
     };
+  } finally {
+    clearTimeout(timer);
+    context.abortSignal?.removeEventListener('abort', cancel);
   }
 }
 

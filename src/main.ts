@@ -126,12 +126,9 @@ export default class MentatPlugin extends Plugin {
 
         try {
           const files = this.app.vault.getMarkdownFiles();
-          let processedCount = 0;
-
-          await this.indexManager.indexFiles(
+          const results = await this.indexManager.indexFiles(
             files,
             (progress) => {
-              processedCount = progress.current;
               notice.setMessage(
                 `Indexing: ${progress.current}/${progress.total} - ${progress.currentFile}`
               );
@@ -139,7 +136,7 @@ export default class MentatPlugin extends Plugin {
           );
 
           notice.hide();
-          new Notice(`✓ Indexed ${processedCount} documents successfully`);
+          new Notice(`Indexed ${results.length}/${files.length} documents${results.length < files.length ? '；部分文档失败，请查看日志。' : ' successfully'}`);
         } catch (error: unknown) {
           notice.hide();
           new Notice(`✗ Indexing failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -271,7 +268,13 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const saved = await this.loadData() || {};
+    this.settings = { ...DEFAULT_SETTINGS, ...saved, taskRouting: { ...DEFAULT_SETTINGS.taskRouting, ...saved.taskRouting } };
+    // Older routing controls wrote these values at the root of data.json.
+    for (const task of Object.values(TaskType)) {
+      if (!this.settings.taskRouting[task] && typeof saved[task] === 'string') this.settings.taskRouting[task] = saved[task];
+      delete (this.settings as unknown as Record<string, unknown>)[task];
+    }
     this.prevTheme = this.settings.chatTheme || 'bubble';
     this.prevPreset = this.settings.terminalPreset || 'green';
   }

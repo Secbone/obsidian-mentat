@@ -1,3 +1,4 @@
+import { throwIfAborted } from '../../../src/utils/execution';
 // Edit Note Implementation
 // Targeted text replacement using old_string / new_string (like Claude Code / OpenCode Edit)
 
@@ -91,10 +92,11 @@ export async function execute(
       input.old_string,
       input.new_string
     );
+    throwIfAborted(context.abortSignal);
     await context.vault.modify(file, newContent);
 
     let reindexed = false;
-    if (input.triggerReindex && context.indexManager) {
+    if (input.triggerReindex && context.indexManager && (!context.indexManager.canSearch || await context.indexManager.canSearch())) {
       try {
         await context.indexManager.indexFile(file);
         reindexed = true;

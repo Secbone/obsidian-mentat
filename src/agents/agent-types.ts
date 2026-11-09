@@ -27,6 +27,10 @@ export interface AgentContext {
   metadata?: Record<string, unknown>;
   pendingSteerMessages?: string[];
   abortSignal?: AbortSignal;
+  runId?: string;
+  onCheckpoint?: (messages: ChatMessage[]) => Promise<void>;
+  /** Full transcript is kept independently of the model's compacted context. */
+  transcript?: ChatMessage[];
 }
 
 /**
@@ -44,10 +48,12 @@ export interface AgentResponse {
  * Organized by multi-level namespace (domain:entity:action)
  * Designed for responsive UI and human-in-the-loop interactions
  */
-export type AgentEvent =
+export type AgentEvent = AgentEventData & { sessionId?: string; runId?: string; agentId?: string };
+
+type AgentEventData =
   // agent 生命周期
   | { type: 'agent:start' }
-  | { type: 'agent:end'; messages: ChatMessage[] }
+  | { type: 'agent:end'; messages: ChatMessage[]; status?: 'completed' | 'failed' | 'cancelled' | 'max_turns_exceeded' }
 
   // turn 生命周期（一次 LLM 调用 + 可能的工具执行）
   | { type: 'turn:start'; turnIndex: number }
@@ -88,6 +94,10 @@ export interface DiagnosticsLogger {
     strategy: string;
     repairedArgs?: string;
     success: boolean;
+    sessionId?: string;
+    runId?: string;
+    kind?: string;
+    details?: Record<string, unknown>;
   }): Promise<void>;
 }
 

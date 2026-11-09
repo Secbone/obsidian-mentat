@@ -3,6 +3,8 @@ import MentatPlugin from '../main';
 import { ChatManager } from '../chat/chat-manager';
 import { ChatMessage } from '../types';
 import { parseJson } from '../utils/json-healer';
+import { redactDiagnostics } from './vault-diagnostics-logger';
+import { TaskType } from '../types';
 
 interface DiagnosticLogEntry {
   timestamp: number;
@@ -11,6 +13,10 @@ interface DiagnosticLogEntry {
   strategy: string;
   originalArgs: string;
   repairedArgs?: string;
+  success?: boolean;
+  sessionId?: string;
+  runId?: string;
+  details?: Record<string, unknown>;
 }
 
 export class DiagnosticsExporter {
@@ -24,18 +30,18 @@ export class DiagnosticsExporter {
     try {
       const history = await chatManager.getHistory();
       if (history.length === 0) {
-        new Notice('❌ 无法导出诊断报告：当前会话没有消息历史。');
-        return null;
+        new Notice('当前没有已保存的消息，将导出环境信息与可用错误日志。');
       }
 
       const sessionInfo = chatManager.getSessionInfo();
       const sessionId = sessionInfo.sessionId;
       const startTime = sessionInfo.startTime || 0;
-      const endTime = sessionInfo.lastUpdated || Date.now();
+      const endTime = Date.now();
 
       // Gather environment settings
       const settings = plugin.settings;
-      const providerId = settings.taskRouting?.chat || settings.defaultProvider;
+      const runtimeProvider = await plugin.aiRouter?.getProvider(TaskType.CHAT);
+      const providerId = runtimeProvider?.id || settings.taskRouting?.chat || settings.defaultProvider || settings.aiProviders.find(p => p.enabled)?.id;
       const activeProvider = settings.aiProviders.find(p => p.id === providerId);
       const modelName = activeProvider ? activeProvider.model : '未知大模型';
       const providerType = activeProvider ? activeProvider.type : '未知';
@@ -50,7 +56,8 @@ export class DiagnosticsExporter {
       const directCallCount = directCallSkills.length;
 
       // 1. Resolve and parse diagnostic logs (.mentat/diagnostics.jsonl)
-      const logs = await DiagnosticsExporter.retrieveIncidentLogs(plugin, startTime, endTime);
+      const logWarnings: string[] = [];
+      const logs = await DiagnosticsExporter.retrieveIncidentLogs(plugin, startTime, endTime, sessionId, logWarnings);
 
       // 2. Generate Mermaid Sequence Diagram
       const mermaidDiagram = DiagnosticsExporter.generateMermaidDiagram(history);
@@ -60,7 +67,7 @@ export class DiagnosticsExporter {
 
       // 4. Render Markdown Document Content
       const dateStr = new Date(endTime).toLocaleString();
-      const fileTimestamp = new Date(endTime).toISOString().replace(/:/g, '-').split('.')[0];
+      const fileTimestamp = new Date(endTime).toISOString().replace(/[:.]/g, '-');
       const filename = `Session_Diagnostics_${sessionId}_${fileTimestamp}.md`;
 
       const folderPath = settings.diagnosticsFolder?.trim() || 'Mentat/Diagnostics';
@@ -100,9 +107,10 @@ export class DiagnosticsExporter {
 
       // ⚠️ Diagnostics logs section
       markdownContent += `## ⚠️ 语法解析与执行错误日志 (故障排查)\n\n`;
+      if (!history.length) markdownContent += '> [!WARNING]\n> 缺少已保存的会话历史；此报告不能还原完整 API 请求。\n\n';
+      if (logWarnings.length) markdownContent += `> [!WARNING]\n> 日志读取不完整：${logWarnings.join('；')}\n\n`;
       if (logs.length === 0) {
-        markdownContent += `> [!SUCCESS]\n`;
-        markdownContent += `> **本会话期间未捕获到任何 JSON 语法解析失败或工具运行异常记录！** 所有的工具解析及执行调用全部运作正常。\n\n`;
+        markdownContent += `> 未检索到诊断事件。日志缺失或旧版本记录范围有限时，此结果不能证明执行正常。\n\n`;
       } else {
         markdownContent += `> [!IMPORTANT]\n`;
         markdownContent += `> 以下是本会话期间捕获的运行时报错及参数解析失败数据。这些信息有助于大模型精准定位并修正 JSON 参数错误。\n\n`;
@@ -113,6 +121,8 @@ export class DiagnosticsExporter {
           markdownContent += `* **触发时间**: \`${new Date(log.timestamp as number).toLocaleString()}\`\n`;
           markdownContent += `* **应用策略**: \`${log.strategy || 'Strict'}\`\n`;
           markdownContent += `* **异常信息**: \`${log.errorMessage}\`\n`;
+          if (log.sessionId) markdownContent += `* **会话 / 执行**: \`${log.sessionId}\` / \`${log.runId || '未记录'}\`\n`;
+          if (log.details) markdownContent += `\n\`\`\`json\n${JSON.stringify(log.details, null, 2)}\n\`\`\`\n\n`;
           markdownContent += `* **原始模型返回参数 (Malformed String)**:\n`;
           markdownContent += `\`\`\`json\n`;
           markdownContent += `${log.originalArgs}\n`;
@@ -173,9 +183,9 @@ export class DiagnosticsExporter {
       markdownContent += `---\n\n`;
 
       // 📦 Collapsible copyable API payload
-      markdownContent += `## 📦 API Compliant Messages (用于大模型离线微调或 API 调试)\n\n`;
+      markdownContent += `## 📦 内部消息快照 (用于诊断)\n\n`;
       markdownContent += `> [!TIP]\n`;
-      markdownContent += `> 以下是一个完全符合 OpenAI / Anthropic 格式要求的 Messages 消息数组。你可以随时一键复制代码块，直接粘给外部模型或 API 测试脚本中进行复现诊断。\n\n`;
+      markdownContent += `> 以下是内部消息快照。服务商适配器还会转换工具名、角色与配对关系；此快照不包含完整请求设置，不能直接视为实际 API 请求。\n\n`;
       markdownContent += `<details>\n`;
       markdownContent += `<summary>点击展开完整的 API Payload</summary>\n\n`;
       markdownContent += `\`\`\`json\n`;
@@ -193,15 +203,7 @@ export class DiagnosticsExporter {
       };
 
       // Calculate turn-by-turn metrics
-      const getModelContextLimit = (model: string): number => {
-        const m = model.toLowerCase();
-        if (m.includes('claude-3-5') || m.includes('claude-3.5')) return 200000;
-        if (m.includes('gpt-4o') || m.includes('gpt-4-turbo')) return 128000;
-        if (m.includes('deepseek')) return 64000;
-        if (m.includes('llama3') || m.includes('qwen')) return 32000;
-        return 8000; // standard fallback limit
-      };
-      const contextLimit = getModelContextLimit(modelName);
+      const contextLimit = activeProvider?.contextWindow || runtimeProvider?.getContextWindow() || 0;
 
       const turnsData: Array<{ turn: number; tokens: number; saturation: number; cacheHit: number }> = [];
       let cumulativeTokens = 0;
@@ -259,7 +261,9 @@ export class DiagnosticsExporter {
         }
 
         cumulativeTokens += turnTotalTokens;
-        const saturation = parseFloat(((cumulativeTokens / contextLimit) * 100).toFixed(2));
+        const lastUsage = group.assistantMsgs.at(-1)?.metadata?.usage as { promptTokens?: number } | undefined;
+        const contextTokens = lastUsage?.promptTokens || 0;
+        const saturation = contextLimit > 0 ? parseFloat(((contextTokens / contextLimit) * 100).toFixed(2)) : 0;
         const cacheHit = turnPromptTokens > 0
           ? parseFloat(((turnCacheReadTokens / turnPromptTokens) * 100).toFixed(2))
           : 0;
@@ -282,6 +286,7 @@ export class DiagnosticsExporter {
       markdownContent += `## 🚀 运行期性能与上下文健康度看板 (Session Health Dashboard)\n\n`;
       markdownContent += `> [!TIP]\n`;
       markdownContent += `> 此看板动态追踪并反馈当前会话的上下文饱和度以及智能体提示词缓存命中率。这可帮助您直观掌握大模型的运行效能与防范过载。\n\n`;
+      markdownContent += '> 累计 Token 表示调用消耗；上下文占用使用各交互最后一次请求的 prompt tokens。无用量数据时显示 0，表示未知，并非空上下文。\n\n';
 
       markdownContent += `<div style="display: flex; gap: 20px; flex-wrap: wrap; margin: 20px 0;">\n`;
       markdownContent += `  <div style="flex: 1; min-width: 250px; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; background: var(--background-primary-alt);">\n`;
@@ -291,7 +296,7 @@ export class DiagnosticsExporter {
       markdownContent += `    </div>\n`;
       markdownContent += `    <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-top: 5px; color: var(--text-muted);">\n`;
       markdownContent += `      <span>当前: ${lastSaturation}%</span>\n`;
-      markdownContent += `      <span>上限: 200,000 Tokens</span>\n`;
+      markdownContent += `      <span>上限: ${contextLimit ? contextLimit.toLocaleString() : '未知'} Tokens</span>\n`;
       markdownContent += `    </div>\n`;
       markdownContent += `  </div>\n`;
       markdownContent += `  <div style="flex: 1; min-width: 250px; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; background: var(--background-primary-alt);">\n`;
@@ -301,7 +306,7 @@ export class DiagnosticsExporter {
       markdownContent += `    </div>\n`;
       markdownContent += `    <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-top: 5px; color: var(--text-muted);">\n`;
       markdownContent += `      <span>平均缓存命中: ${averageCacheHit}%</span>\n`;
-      markdownContent += `      <span>节约成本: ~${(averageCacheHit * 0.75).toFixed(1)}%</span>\n`;
+      markdownContent += `      <span>实际成本以服务商账单为准</span>\n`;
       markdownContent += `    </div>\n`;
       markdownContent += `  </div>\n`;
       markdownContent += `</div>\n\n`;
@@ -343,7 +348,8 @@ export class DiagnosticsExporter {
       }
 
       const fileFullPath = `${folderPath}/${filename}`;
-      const file = await vault.create(fileFullPath, markdownContent);
+      const secrets = [...settings.aiProviders.map(p => p.apiKey || ''), settings.browserlessApiKey || '', settings.braveSearchApiKey || ''];
+      const file = await vault.create(fileFullPath, redactDiagnostics(markdownContent, secrets) as string);
 
       new Notice(`✅ 诊断报告导出成功！保存在 \`${fileFullPath}\``);
 
@@ -366,7 +372,9 @@ export class DiagnosticsExporter {
   private static async retrieveIncidentLogs(
     plugin: MentatPlugin,
     startTime: number,
-    endTime: number
+    endTime: number,
+    sessionId?: string,
+    warnings: string[] = []
   ): Promise<unknown[]> {
     const logs: unknown[] = [];
     try {
@@ -381,15 +389,17 @@ export class DiagnosticsExporter {
             const entry = parseJson<DiagnosticLogEntry>(line);
             const startLimit = startTime > 0 ? startTime : Date.now() - 3600000;
             const ts = entry.timestamp as number;
-            if (ts >= startLimit && ts <= endTime) {
+            const entrySession = (entry as unknown as { sessionId?: string }).sessionId;
+            if ((!entrySession || !sessionId || entrySession === sessionId) && ts >= startLimit && ts <= endTime) {
               logs.push(entry);
             }
           } catch {
-            // Ignore parse errors on individual broken jsonl lines
+            warnings.push('存在损坏的日志行，已跳过');
           }
         }
       }
     } catch (e) {
+      warnings.push(e instanceof Error ? e.message : String(e));
       console.warn('[DiagnosticsExporter] Failed to retrieve incident logs:', e);
     }
     return logs;
@@ -513,7 +523,7 @@ export class DiagnosticsExporter {
     const logPath = '.mentat/diagnostics.jsonl';
     
     if (!(await adapter.exists(logPath))) {
-      new Notice('No diagnostics logs found. Everything is running smoothly!');
+      new Notice('未找到诊断日志；这不代表执行没有发生错误。');
       return;
     }
     
@@ -526,6 +536,7 @@ export class DiagnosticsExporter {
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
       
       let totalIncidents = 0;
+      let malformedLines = 0;
       const toolFailures: Record<string, number> = {};
       const dailyIncidents: Record<string, number> = {};
       
@@ -539,7 +550,7 @@ export class DiagnosticsExporter {
         if (!line.trim()) return;
         try {
           const entry = parseJson<DiagnosticLogEntry>(line);
-          if (entry.timestamp >= sevenDaysAgo) {
+          if (entry.timestamp >= sevenDaysAgo && entry.success !== true) {
             totalIncidents++;
             toolFailures[entry.toolName] = (toolFailures[entry.toolName] || 0) + 1;
             const dateKey = new Date(entry.timestamp).toLocaleDateString();
@@ -548,7 +559,7 @@ export class DiagnosticsExporter {
             }
           }
         } catch (_e) {
-          // Ignore malformed
+          malformedLines++;
         }
       });
       
@@ -558,6 +569,7 @@ export class DiagnosticsExporter {
 
       const lines = content.trim().split('\n').reverse().slice(0, 50); // Get latest 50 incidents
       let markdownContent = `# Mentat Diagnostics & Debug Log\n\n`;
+      if (malformedLines) markdownContent += `> [!WARNING]\n> ${malformedLines} 条日志无法解析，统计不完整。\n\n`;
       
       // Render 7-Day Cross-Run Performance Analytics Card
       markdownContent += `## 📊 7天系统异常走势与工具故障分析 (7-Day Cross-Run Analytics)\n\n`;
@@ -589,7 +601,7 @@ export class DiagnosticsExporter {
       markdownContent += `Showing the latest ${lines.length} incidents (newest first). The complete log is saved at \`${logPath}\`.\n\n`;
       
       if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
-        markdownContent += `✓ No incident records found. All processes parsed cleanly!\n`;
+        markdownContent += `未找到事件记录；这不代表所有执行正常。\n`;
       } else {
         lines.forEach((line, index) => {
           try {
@@ -599,6 +611,7 @@ export class DiagnosticsExporter {
             markdownContent += `- **Tool / Skill**: \`${entry.toolName}\`\n`;
             markdownContent += `- **Error Message**: *${entry.errorMessage}*\n`;
             markdownContent += `- **Recovery Strategy**: *${entry.strategy}*\n`;
+            if (entry.details) markdownContent += `\n\`\`\`json\n${JSON.stringify(entry.details, null, 2)}\n\`\`\`\n`;
             markdownContent += `\n### Original Arguments (Unparsed)\n\`\`\`json\n${entry.originalArgs}\n\`\`\`\n`;
             if (entry.repairedArgs) {
               markdownContent += `\n### Repaired & Recovered Arguments\n\`\`\`json\n${entry.repairedArgs}\n\`\`\`\n`;
@@ -611,7 +624,9 @@ export class DiagnosticsExporter {
       }
 
       // Write to a temporary markdown file
-      await adapter.write(debugNotePath, markdownContent);
+      await adapter.write(debugNotePath, redactDiagnostics(markdownContent, [
+        ...plugin.settings.aiProviders.map(p => p.apiKey || ''), plugin.settings.browserlessApiKey || '', plugin.settings.braveSearchApiKey || '',
+      ]) as string);
       
       // Open the note in workspace
       const tFile = plugin.app.vault.getAbstractFileByPath(debugNotePath);

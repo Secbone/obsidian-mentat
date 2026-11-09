@@ -91,11 +91,15 @@ export class AIRouter {
    * Get the best available provider for a specific task type
    */
   async getProvider(taskType: TaskType): Promise<AIProvider | null> {
+    const capable = (provider: AIProvider | undefined): provider is AIProvider => !!provider && (
+      taskType !== TaskType.EMBEDDING || this.settings.aiProviders.some(config => config.id === provider.id &&
+        (config.type === 'openai' || config.type === 'ollama') && !!config.embeddingModel?.trim())
+    );
     // 1. Try task-specific routing
     const taskProviderId = this.settings.taskRouting[taskType];
     if (taskProviderId) {
       const provider = this.providers.get(taskProviderId);
-      if (provider) {
+      if (capable(provider)) {
         return provider;
       }
     }
@@ -103,7 +107,7 @@ export class AIRouter {
     // 2. Try default provider
     if (this.settings.defaultProvider) {
       const provider = this.providers.get(this.settings.defaultProvider);
-      if (provider) {
+      if (capable(provider)) {
         return provider;
       }
     }
@@ -112,7 +116,7 @@ export class AIRouter {
     for (const provider of this.providers.values()) {
       // For embedding tasks, only use providers that support it
       if (taskType === TaskType.EMBEDDING) {
-        if (provider.type === 'ollama' || provider.type === 'openai') {
+        if (capable(provider)) {
           return provider;
         }
       } else {

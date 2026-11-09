@@ -114,7 +114,7 @@ export async function execute(
     // Semantic search (if query provided and index manager available)
     let resultsWithScores: Array<{ file: TFile; score: number }> = [];
 
-    if (input.query && context.indexManager) {
+    if (input.query && context.indexManager && (!context.indexManager.canSearch || await context.indexManager.canSearch())) {
       try {
         const searchResults = await context.indexManager.search(input.query, {
           topK: input.limit * 2,

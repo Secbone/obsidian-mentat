@@ -60,12 +60,12 @@ export class OpenAIProvider implements AIProvider {
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
         max_tokens: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT),
         stop: options?.stopSequences
-      });
+      }, { signal: options?.abortSignal });
 
       return response.choices[0]?.message?.content || '';
     } catch (error: unknown) {
       console.error('OpenAIProvider generate error:', error);
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -101,14 +101,15 @@ export class OpenAIProvider implements AIProvider {
       });
 
       for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
+        if (!chunk) continue;
+        const content = chunk.choices?.[0]?.delta?.content;
         if (content) {
           onChunk(content);
         }
       }
     } catch (error: unknown) {
       console.error('OpenAIProvider generateStream error:', error);
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -129,7 +130,7 @@ export class OpenAIProvider implements AIProvider {
       };
     } catch (error: unknown) {
       console.error('OpenAIProvider generateEmbedding error:', error);
-      throw new Error(`OpenAI Embedding error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -155,7 +156,7 @@ export class OpenAIProvider implements AIProvider {
       };
     } catch (error: unknown) {
       console.error('OpenAIProvider generateEmbeddings error:', error);
-      throw new Error(`OpenAI Embeddings error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -282,7 +283,7 @@ export class OpenAIProvider implements AIProvider {
       };
     } catch (error: unknown) {
       console.error('OpenAIProvider generateWithSkills error:', error);
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -340,6 +341,7 @@ export class OpenAIProvider implements AIProvider {
       let finalUsage: { completion_tokens?: number; prompt_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } } | undefined = undefined;
 
       for await (const chunk of stream) {
+        if (!chunk) continue;
         if (chunk.usage) {
           finalUsage = chunk.usage;
         }
@@ -380,7 +382,11 @@ export class OpenAIProvider implements AIProvider {
       }
 
       // Convert in-progress tool calls to final format
+      if (!finishReason || finishReason === 'length' || (!fullContent && toolCallsInProgress.size === 0)) {
+        throw new Error(finishReason === 'length' ? '模型输出被长度限制截断，未执行不完整的工具调用。' : '模型响应不完整或为空，未执行工具调用。');
+      }
       for (const tc of toolCallsInProgress.values()) {
+        if (!tc.id || !tc.name) throw new Error('模型返回的工具调用缺少 ID 或名称。');
         const toolCall: ToolCall = {
           id: tc.id,
           name: tc.name,
@@ -408,7 +414,7 @@ export class OpenAIProvider implements AIProvider {
       };
     } catch (error: unknown) {
       console.error('OpenAIProvider generateStreamWithSkills error:', error);
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 

@@ -1,3 +1,4 @@
+import { throwIfAborted } from '../../../src/utils/execution';
 // Run Terminal Command Skill Implementation
 // Core logic for executing system terminal commands in a secure sandboxed vault context
 
@@ -74,6 +75,7 @@ export async function execute(
   input: Input,
   context: SkillContext
 ): Promise<SkillResult> {
+  throwIfAborted(context.abortSignal);
   const startTime = Date.now();
   const { command, timeout } = input;
 
@@ -122,6 +124,7 @@ export async function execute(
       {
         cwd: targetCwd,
         timeout: timeout,
+        signal: context.abortSignal,
         maxBuffer: 10 * 1024 * 1024 // 10MB maximum buffer
       },
       (error, stdout, stderr) => {

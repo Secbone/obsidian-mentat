@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 import { UserInputModal } from '../../../src/ui/user-input-modal';
+import { throwIfAborted } from '../../../src/utils/execution';
 
 /**
  * Skill metadata
@@ -40,6 +41,7 @@ export async function execute(
   context: SkillContext
 ): Promise<SkillResult> {
   try {
+    throwIfAborted(context.abortSignal);
     // Create and show modal - this returns a Promise that blocks until user responds
     const answer = await new Promise<string>((resolve, reject) => {
       const modal = new UserInputModal(
@@ -50,6 +52,7 @@ export async function execute(
         input.defaultValue,
         input.requiresInput,
         (result) => {
+          context.abortSignal?.removeEventListener('abort', onAbort);
           if (result.cancelled) {
             reject(new Error('User cancelled the request'));
           } else {
@@ -57,6 +60,8 @@ export async function execute(
           }
         }
       );
+      const onAbort = () => { modal.close(); reject(new DOMException('已停止生成', 'AbortError')); };
+      context.abortSignal?.addEventListener('abort', onAbort, { once: true });
       modal.open();
     });
 

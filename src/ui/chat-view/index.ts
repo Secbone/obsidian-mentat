@@ -20,6 +20,7 @@ import {
 import { InputHandler, InputHandlerCallbacks } from './input-handler';
 import { ConfirmationModal } from '../confirmation-modal';
 import { EventBus } from '../../extensions/event-bus';
+import { errorMessage } from '../../utils/execution';
 
 export const CHAT_VIEW_TYPE = 'mentat-chat';
 
@@ -55,6 +56,7 @@ export class ChatView extends ItemView {
     hasFinalAnswerTag: boolean;
     activeTasks: ActiveTask[];
     currentStatus: string;
+    error?: string;
     lastToolStatus: { name: string; status: 'success' | 'error' | 'pending' };
   } | null = null;
 
@@ -118,6 +120,8 @@ export class ChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.currentAbortController?.abort();
+    this.streamUnsubscribe?.();
     this.themeRegistry.dispose();
   }
 
@@ -287,7 +291,7 @@ export class ChatView extends ItemView {
   }
 
   private async handleSend(): Promise<void> {
-    if (!this.inputHandler) return;
+    if (!this.inputHandler || this.isStreaming) return;
     const userMessage = this.inputHandler.getRawTextContent();
     const referencedFiles = this.inputHandler.getContextPillPaths();
 
@@ -322,13 +326,11 @@ export class ChatView extends ItemView {
 
         const notice = new Notice(`正在重建 ${filesToSearch.length} 个文档的向量索引...`, 0);
         try {
-          let processed = 0;
-          await this.plugin.indexManager.indexFiles(filesToSearch, (progress: { current: number; total: number; currentFile: string }) => {
-            processed = progress.current;
+          const results = await this.plugin.indexManager.indexFiles(filesToSearch, (progress: { current: number; total: number; currentFile: string }) => {
             notice.setMessage(`索引进度: ${progress.current}/${progress.total} - ${progress.currentFile}`);
           });
           notice.hide();
-          new Notice(`✓ 成功索引了 ${processed} 个文档`);
+          new Notice(`已索引 ${results.length}/${filesToSearch.length} 个文档${results.length < filesToSearch.length ? '；部分失败，请查看日志。' : ''}`);
         } catch (err) {
           notice.hide();
           new Notice(`✗ 索引失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -377,26 +379,37 @@ export class ChatView extends ItemView {
     });
 
     this.currentAbortController = new AbortController();
+    const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    try {
+    const history = await this.chatManager.getHistory();
+    await this.chatManager.addMessage('user', userMessage);
     this.activeContext = {
-      messages: (await this.chatManager.getContextForLLM({ maxMessages: 50 })) as ChatMessage[],
+      messages: history,
       sessionId: this.chatManager.getSessionInfo().sessionId || Date.now().toString(),
+      runId,
       metadata: { maxTurns: this.plugin.settings.maxTurns || 20 },
       pendingSteerMessages: [],
       abortSignal: this.currentAbortController.signal,
+      onCheckpoint: messages => this.chatManager.replaceMessages(messages),
     };
 
     this.streamUnsubscribe = this.eventBus.on('*', (event) => this.handleStreamEvent(event));
 
-    this.chatOrchestrator.sendMessage(userMessage, {
+    await this.chatOrchestrator.sendMessage(userMessage, {
       enableSkills: this.plugin.settings.skillsEnabled,
       maxTurns: this.plugin.settings.maxTurns || 20,
       context: this.activeContext ?? undefined,
     });
+    } catch (error) {
+      await this.chatOrchestrator.reportFailure(error, 'chat', this.chatManager.getSessionInfo().sessionId, runId);
+      if (this.streamState) this.showError(errorMessage(error));
+    }
   }
 
   private handleStreamEvent(event: AgentEvent): void {
     const s = this.streamState;
     if (!s) return;
+    if (!this.activeContext || event.sessionId !== this.activeContext.sessionId || event.runId !== this.activeContext.runId || event.agentId !== 'default-chat-agent') return;
 
     switch (event.type) {
 
@@ -514,16 +527,16 @@ export class ChatView extends ItemView {
         break;
 
       case 'agent:end':
-        this.finalizeStream(s);
+        this.finalizeStream(s, event.messages);
         break;
 
       case 'system:error':
-        this.showError(event.message);
+        s.error = errorMessage(event.message);
         break;
     }
   }
 
-  private finalizeStream(s: NonNullable<typeof this.streamState>): void {
+  private finalizeStream(s: NonNullable<typeof this.streamState>, messages?: ChatMessage[]): void {
     this.streamUnsubscribe?.();
 
     if (s.hasFinalAnswerTag) {
@@ -537,7 +550,15 @@ export class ChatView extends ItemView {
       s.finalAnswer = s.finalAnswer ? `${s.finalAnswer}\n\n${s.currentTurnResponse}` : s.currentTurnResponse;
     }
 
-    this.updateStreaming(s.activeTasks, s.currentStatus, s.finalAnswer, '', true);
+    if (this.currentStreamingBubble && messages) {
+      const runMessages = messages.slice((this.activeContext?.messages.length || 0) + 1);
+      const element = this.theme.finalizeStreaming(this.currentStreamingBubble, { messages: runMessages });
+      if (s.error) element.appendChild(/abort|cancel/i.test(s.error)
+        ? this.theme.renderInfoBanner('已停止生成，当前进度已保存')
+        : this.theme.renderError(s.error));
+    } else {
+      this.updateStreaming(s.activeTasks, '', s.finalAnswer, '', true);
+    }
     this.streamState = null;
     this.currentStreamingBubble = null;
     this.isStreaming = false;
@@ -554,6 +575,11 @@ export class ChatView extends ItemView {
   }
 
   private showError(message: string): void {
+    if (this.streamState && this.currentStreamingBubble) {
+      this.streamState.error = message;
+      this.finalizeStream(this.streamState, this.activeContext?.transcript || []);
+      return;
+    }
     this.streamUnsubscribe?.();
     const isAbort = message.toLowerCase().includes('abort') || message.toLowerCase().includes('cancel');
     if (this.currentStreamingBubble) {
@@ -561,7 +587,7 @@ export class ChatView extends ItemView {
         this.currentStreamingBubble.answerContainer.appendChild(this.theme.renderInfoBanner('已终止生成'));
       } else {
         this.currentStreamingBubble.answerContainer.appendChild(
-          this.theme.renderError(`${message}. 请检查 AI 服务商设置。`)
+          this.theme.renderError(message)
         );
       }
     }
