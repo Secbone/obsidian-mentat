@@ -15,12 +15,17 @@ import {
 import { safeParseJson } from '../../utils/json-healer';
 import { EventBus } from '../../extensions/event-bus';
 import { DiagnosticsLogger } from '../../agents/agent-types';
-import { abortable, throwIfAborted, errorDetails } from '../../utils/execution';
+import { RunRuntime, RunBlocked, RunSuspended } from '../../runtime/types';
+import { fingerprint } from '../../runtime/fingerprint';
+import { abortable, throwIfAborted, errorDetails, isAbortError } from '../../utils/execution';
 
 /**
  * Skill execution options
  */
 export interface ExecutionOptions {
+  runtime?: RunRuntime;
+  operationId?: string;
+  fingerprint?: string;
   dryRun?: boolean;           // If true, validate but don't execute
   timeout?: number;            // Execution timeout in ms
   skipConfirmation?: boolean;  // Skip user confirmation even if required
@@ -66,7 +71,7 @@ export class SkillExecutor {
     options: ExecutionOptions = {}
   ): Promise<SkillResult> {
     const startTime = Date.now();
-    const callId = this.generateCallId();
+    const callId = options.operationId || this.generateCallId();
 
     // Create skill call record
     const skillCall: SkillCall = {
@@ -119,6 +124,12 @@ export class SkillExecutor {
         throw new Error(`Invalid skill type: ${fullName}`);
       }
 
+      const category = skill.metadata?.executionCategory || 'external';
+      const previous = options.runtime?.getOperation(callId);
+      if (previous?.status === 'finished' && previous.result) return previous.result;
+      if (previous?.status === 'unknown' || previous?.status === 'running') throw new RunBlocked('操作结果尚未确认，不能重复执行');
+      await options.runtime?.setOperation({ id: callId, name: fullName, category, status: 'planned' });
+
       // Validate input
       const validatedInput = this.validateInput(skill, parameters);
 
@@ -132,10 +143,11 @@ export class SkillExecutor {
           const denied = declaredPermissions.filter(p => !allowedPermissions.includes(p));
           if (denied.length > 0) {
             const result: SkillResult = {
-              success: false,
+              success: false, outcome: 'denied',
               error: `Skill requires permissions [${denied.join(', ')}] which are not granted in settings`,
               metadata: { executionTime: Date.now() - startTime }
             };
+            await options.runtime?.setOperation({ id: callId, name: fullName, category, status: 'finished', result });
             skillCall.result = result;
             skillCall.status = 'error';
             return result;
@@ -153,25 +165,18 @@ export class SkillExecutor {
         const fullName = typeof namespace === 'string' && namespace.includes(':')
           ? namespace
           : this.registry.getFullName(namespace as SkillNamespace, name);
-        const taskId = `${fullName}:${callId}`;
-        this.eventBus?.emit({
-          type: 'confirm:request',
-          taskId,
-          skillName: fullName,
-          params: validatedInput,
-          message: `智能体申请执行操作: 【${skill.description}】。是否批准？`,
-          sessionId: options.sessionId, runId: options.runId, agentId: options.agentId,
-        });
-        const approved = await this.waitForConfirm(taskId, 300000, options.abortSignal);
-        if (!approved) {
-          const result: SkillResult = {
-            success: false,
-            error: 'Operation cancelled by user',
-            metadata: { executionTime: Date.now() - startTime }
-          };
-          skillCall.result = result;
-          skillCall.status = 'error';
-          return result;
+        if (options.runtime) {
+          options.fingerprint = await this.approvalFingerprint(fullName, validatedInput);
+          const response = await options.runtime.interact({ id: `${callId}:approval`, operationId: callId, kind: 'approval',
+            question: `允许执行 ${fullName}？`, context: JSON.stringify(validatedInput, null, 2), fingerprint: options.fingerprint });
+          if (response.kind !== 'approved') return { success: false, outcome: response.kind === 'expired' ? 'expired' : response.kind === 'rejected' ? 'denied' : 'cancelled', error: '操作未获授权' };
+        } else {
+          const taskId = `${fullName}:${callId}`;
+          const response = this.waitForConfirm(taskId, 300000, options.abortSignal);
+          this.eventBus?.emit({ type: 'confirm:request', taskId, skillName: fullName, params: validatedInput,
+            message: `智能体申请执行操作: 【${skill.description}】。是否批准？`, sessionId: options.sessionId, runId: options.runId, agentId: options.agentId });
+          const outcome = await response;
+          if (outcome !== 'approved') return { success: false, outcome: outcome === 'expired' ? 'expired' : 'denied', error: outcome === 'expired' ? 'Approval expired' : 'Operation rejected by user' };
         }
       }
 
@@ -188,7 +193,7 @@ export class SkillExecutor {
       }
 
       // Execute with timeout
-      const timeoutMs = options.timeout || 30000; // Default 30s
+      const timeoutMs = category === 'interaction' ? 0 : options.timeout || 30000; // Default 30s
       const result = await this.executeWithTimeout(
         skill,
         validatedInput,
@@ -196,6 +201,8 @@ export class SkillExecutor {
         options
       );
 
+      result.outcome ||= result.success ? 'success' : 'failure';
+      await options.runtime?.setOperation({ id: callId, name: fullName, category, status: 'finished', result });
       // Update call record
       skillCall.result = result;
       skillCall.status = result.success ? 'success' : 'error';
@@ -205,8 +212,18 @@ export class SkillExecutor {
 
       return result;
     } catch (error) {
+      if (error instanceof RunSuspended) {
+        const operation = options.runtime?.getOperation(callId);
+        if (operation?.category === 'orchestration') await options.runtime!.setOperation({ ...operation, status: 'planned' });
+        throw error;
+      }
+      if (error instanceof RunBlocked) {
+        const operation = options.runtime?.getOperation(callId);
+        if (operation?.status === 'running') await options.runtime!.setOperation({ ...operation, status: 'unknown' });
+        throw error;
+      }
       console.error(`[SkillExecutor] Error executing skill:`, error);
-      await this.diagnosticsLogger?.logIncident({
+      if (!options.runtime) await this.diagnosticsLogger?.logIncident({
         agentId: options.agentId || 'skill-executor', agentName: 'Skill Executor',
         sessionId: options.sessionId, runId: options.runId, kind: 'tool', toolName: `${namespace}:${name}`,
         originalArgs: JSON.stringify(parameters), errorMessage: error instanceof Error ? error.message : String(error),
@@ -215,14 +232,20 @@ export class SkillExecutor {
 
       const result: SkillResult = {
         success: false,
+        outcome: isAbortError(error) ? 'cancelled' : error instanceof z.ZodError || /Validation failed/.test(String(error)) ? 'input_error' : /timeout/i.test(String(error)) ? 'timeout' : 'failure',
         error: error instanceof Error ? error.message : String(error) || 'Unknown error',
         metadata: { executionTime: Date.now() - startTime }
       };
 
+      const operation = options.runtime?.getOperation(callId);
+      if (operation) {
+        const uncertain = operation.status === 'running' && operation.category !== 'read' && operation.category !== 'interaction';
+        if (uncertain) result.outcome = 'unknown';
+        await options.runtime!.setOperation({ ...operation, status: uncertain ? 'unknown' : 'finished', result });
+      }
       skillCall.result = result;
       skillCall.status = 'error';
       skillCall.executionTime = Date.now() - startTime;
-
       return result;
     }
   }
@@ -264,7 +287,7 @@ export class SkillExecutor {
       return this.executeMCPSkill(normalizedName, parameters, options);
     } else {
       // Built-in skill
-      return this.execute(namespace, name, parameters, options);
+      return this.execute(namespace, name, parameters, { ...options, operationId: options.operationId || toolCall.id });
     }
   }
 
@@ -314,23 +337,34 @@ export class SkillExecutor {
     const controller = new AbortController();
     const onAbort = () => controller.abort(options.abortSignal?.reason);
     options.abortSignal?.addEventListener('abort', onAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(new Error('Skill execution timeout; 操作结果尚未确认，请先核对实际结果。')), timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const run = async () => {
       throwIfAborted(controller.signal);
-      return skill.execute(input, { abortSignal: controller.signal });
+      if (options.fingerprint && options.fingerprint !== await this.approvalFingerprint(skill.namespace + ':' + skill.name, input as Record<string, unknown>)) throw new RunBlocked('授权后文件已变化，请重新核对并授权');
+      if (options.runtime && options.operationId && skill.metadata?.executionCategory !== 'interaction') {
+        const operation = options.runtime.getOperation(options.operationId)!;
+        await options.runtime.setOperation({ ...operation, status: 'running' });
+      }
+      throwIfAborted(controller.signal);
+      if (timeoutMs > 0) timer = setTimeout(() => controller.abort(new Error('Skill execution timeout; 操作结果尚未确认，请先核对实际结果。')), timeoutMs);
+      return skill.execute(input, { abortSignal: controller.signal, runtime: options.runtime, operationId: options.operationId });
     };
-    const serial = skill.metadata?.executionCategory !== 'read';
+    const serial = !['read', 'interaction', 'orchestration'].includes(skill.metadata?.executionCategory || 'external');
     const operation = serial ? this.writeBarrier.tail.then(run) : run();
     // Keep the write barrier until the actual operation settles, even after timeout.
     if (serial) this.writeBarrier.tail = operation.then(() => undefined, () => undefined);
     void operation.then(async result => {
-      if (controller.signal.aborted) await this.diagnosticsLogger?.logIncident({
+      if (controller.signal.aborted && options.runtime && options.operationId) {
+        const operation = options.runtime.getOperation(options.operationId);
+        if (operation) await options.runtime.setOperation({ ...operation, status: 'finished', result });
+      }
+      if (controller.signal.aborted && !options.runtime) await this.diagnosticsLogger?.logIncident({
         agentId: options.agentId || 'skill-executor', agentName: 'Skill Executor',
         sessionId: options.sessionId, runId: options.runId, kind: 'tool-late-result', toolName: skill.name,
         originalArgs: '', errorMessage: '工具在停止等待后返回，已记录实际结果。', strategy: 'late-result',
         success: result.success, details: { result },
       });
-    }).catch(error => console.error('[SkillExecutor] Late operation result:', error));
+    }).catch(error => { if (controller.signal.aborted) console.error('[SkillExecutor] Late operation result:', error); });
     try {
       return await abortable(operation, controller.signal);
     } finally {
@@ -467,21 +501,37 @@ export class SkillExecutor {
     Object.assign(this.context, updates);
   }
 
+  private async approvalFingerprint(name: string, input: Record<string, unknown>): Promise<string> {
+    const paths = new Set<string>();
+    const visit = (value: unknown, key = '') => {
+      if (typeof value === 'string' && /path(s)?$/i.test(key)) paths.add(value);
+      else if (Array.isArray(value)) value.forEach(item => visit(item, key));
+      else if (value && typeof value === 'object') Object.entries(value).forEach(([k,v]) => visit(v,k));
+    };
+    visit(input);
+    const files: Record<string, string | null> = {};
+    for (const path of paths) {
+      const file = this.context.vault?.getAbstractFileByPath(path);
+      files[path] = file && 'extension' in file ? await this.context.vault.read(file as import('obsidian').TFile) : null;
+    }
+    return fingerprint({ name, input, files });
+  }
+
   /**
    * Wait for user confirmation via EventBus
    */
-  private async waitForConfirm(taskId: string, timeout = 300000, signal?: AbortSignal): Promise<boolean> {
+  private async waitForConfirm(taskId: string, timeout = 300000, signal?: AbortSignal): Promise<'approved' | 'rejected' | 'expired'> {
     throwIfAborted(signal);
     let timer: ReturnType<typeof setTimeout>;
     let unsub: (() => void) | undefined;
-    const pending = new Promise<boolean>((resolve) => {
+    const pending = new Promise<'approved' | 'rejected' | 'expired'>((resolve) => {
       unsub = this.eventBus?.on('confirm:response', (data) => {
         if (data && (data as Record<string, unknown>).taskId === taskId) {
           unsub?.();
-          resolve(!!(data as Record<string, unknown>).approved);
+          resolve((data as Record<string, unknown>).approved ? 'approved' : 'rejected');
         }
       });
-      timer = setTimeout(() => resolve(false), timeout);
+      timer = setTimeout(() => resolve('expired'), timeout);
     });
     try { return await abortable(pending, signal); }
     finally { clearTimeout(timer!); unsub?.(); }

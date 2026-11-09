@@ -14,6 +14,11 @@ describe('DiagnosticsExporter', () => {
       expect(output).toBe("Read note 'Daily Log'  containing special  brackets  &  arrows");
     });
 
+    it('escapes semicolons in diagnostic errors so they cannot terminate a sequence statement', () => {
+      const text = escapeMermaid('Error: Skill execution timeout; operation unknown');
+      expect(text).toBe('Error: Skill execution timeout； operation unknown');
+    });
+
     it('should limit string length and replace newlines', () => {
       const input = 'First line\nSecond line exceeding details limit and very long...'.repeat(5);
       const output = escapeMermaid(input);
@@ -48,7 +53,7 @@ describe('DiagnosticsExporter', () => {
       expect(diagram).toContain('sequenceDiagram');
       expect(diagram).toContain('autonumber');
       expect(diagram).toContain('User->>Agent: "Get tomorrow schedule"');
-      expect(diagram).toContain('Agent->>Skill: list_notes (folder=Daily)');
+      expect(diagram).toContain('Agent->>Skill: obsidian:list_notes (folder=Daily)');
       expect(diagram).toContain("Skill-->>Agent: [Success] \"'Daily/2026-05-27.md'\"");
       expect(diagram).toContain('Agent->>User: "Tomorrow note found."');
     });
@@ -70,7 +75,7 @@ describe('DiagnosticsExporter', () => {
       ];
 
       const diagram = generateMermaid(history);
-      expect(diagram).toContain("Agent->>Skill: edit_note (params.path='AI.md')");
+      expect(diagram).toContain("Agent->>Skill: invoke:obsidian:edit_note (params.path='AI.md')");
       expect(diagram).not.toContain('object Object');
     });
   });

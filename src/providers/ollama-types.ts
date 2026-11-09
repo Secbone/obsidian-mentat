@@ -1,6 +1,7 @@
 export interface OllamaChatResponse {
   message?: { role: string; content: string };
   done?: boolean;
+  done_reason?: string;
   model?: string;
   created_at?: string;
   total_duration?: number;
@@ -26,4 +27,7 @@ export interface OllamaTagsResponse {
 export interface OllamaStreamChunk {
   message?: { role: string; content: string };
   done?: boolean;
+  done_reason?: string;
+  prompt_eval_count?: number;
+  eval_count?: number;
 }

@@ -1,3 +1,4 @@
+import { ModelResponseError } from '../runtime/model-gateway';
 // OpenAI-compatible API Provider
 // Supports OpenAI, DeepSeek, and any OpenAI-compatible endpoints
 
@@ -206,6 +207,8 @@ export class OpenAIProvider implements AIProvider {
     return 8192;
   }
 
+  getMaxOutputTokens(): number { return Math.min(this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT); }
+
   getCompactionThreshold(): number {
     return this.config.compactionThreshold ?? 0.8;
   }
@@ -338,7 +341,7 @@ export class OpenAIProvider implements AIProvider {
       const toolCalls: ToolCall[] = [];
       const toolCallsInProgress: Map<number, { id: string; name: string; arguments: string }> = new Map();
       let finishReason: string | undefined;
-      let finalUsage: { completion_tokens?: number; prompt_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } } | undefined = undefined;
+      let finalUsage: { completion_tokens?: number; prompt_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } } | undefined = undefined;
 
       for await (const chunk of stream) {
         if (!chunk) continue;
@@ -381,9 +384,14 @@ export class OpenAIProvider implements AIProvider {
         }
       }
 
-      // Convert in-progress tool calls to final format
+      // Preserve usage and safe partial diagnostics before rejecting an incomplete response.
       if (!finishReason || finishReason === 'length' || (!fullContent && toolCallsInProgress.size === 0)) {
-        throw new Error(finishReason === 'length' ? '模型输出被长度限制截断，未执行不完整的工具调用。' : '模型响应不完整或为空，未执行工具调用。');
+        throw new ModelResponseError(finishReason === 'length' ? '模型输出被长度限制截断，未执行不完整的工具调用。' : '模型响应不完整或为空，未执行工具调用。', {
+          content: fullContent, finishReason: (finishReason ?? undefined) as GenerateResponse['finishReason'],
+          diagnostics: { partialContent: fullContent.slice(0, 2000), pendingToolCalls: toolCallsInProgress.size,
+            reasoningTokens: finalUsage?.completion_tokens_details?.reasoning_tokens },
+          usage: finalUsage ? { promptTokens: finalUsage.prompt_tokens ?? 0, completionTokens: finalUsage.completion_tokens ?? 0, totalTokens: finalUsage.total_tokens ?? 0 } : undefined
+        });
       }
       for (const tc of toolCallsInProgress.values()) {
         if (!tc.id || !tc.name) throw new Error('模型返回的工具调用缺少 ID 或名称。');
@@ -404,6 +412,7 @@ export class OpenAIProvider implements AIProvider {
         content: fullContent,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         finishReason: (finishReason ?? undefined) as GenerateResponse['finishReason'],
+        diagnostics: { reasoningTokens: finalUsage?.completion_tokens_details?.reasoning_tokens },
         usage: finalUsage ? {
           promptTokens: finalUsage.prompt_tokens ?? 0,
           completionTokens: finalUsage.completion_tokens ?? 0,

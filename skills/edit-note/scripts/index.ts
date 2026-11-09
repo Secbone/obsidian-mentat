@@ -1,11 +1,11 @@
-import { throwIfAborted } from '../../../src/utils/execution';
 // Edit Note Implementation
 // Targeted text replacement using old_string / new_string (like Claude Code / OpenCode Edit)
 
 import { z } from 'zod';
 import { TFile } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
-import { NoteLinter } from '../../../src/utils/note-linter';
+import { writeVerifiedArtifact } from '../../../src/skills/verified-artifact';
+import { RunBlocked, RunSuspended } from '../../../src/runtime/types';
 import { computeDiff } from '../../../src/utils/diff';
 import { exactReplaceString } from '../../../src/utils/note-manipulator';
 
@@ -92,50 +92,10 @@ export async function execute(
       input.old_string,
       input.new_string
     );
-    throwIfAborted(context.abortSignal);
-    await context.vault.modify(file, newContent);
-
+    await writeVerifiedArtifact(context, input.path, newContent, currentContent);
     let reindexed = false;
     if (input.triggerReindex && context.indexManager && (!context.indexManager.canSearch || await context.indexManager.canSearch())) {
-      try {
-        await context.indexManager.indexFile(file);
-        reindexed = true;
-      } catch (error) {
-        console.warn('[EditNote] Failed to reindex:', error);
-      }
-    }
-
-    // Linter Validation & Rollback Guard
-    const updatedFile = context.vault.getAbstractFileByPath(input.path);
-    if (updatedFile instanceof TFile) {
-      const verifiedContent = await context.vault.read(updatedFile);
-      const linterResult = NoteLinter.validate(verifiedContent);
-
-      if (!linterResult.isValid) {
-        let isIncrementalImprovement = false;
-
-        if (previousContent !== null) {
-          const originalLinterResult = NoteLinter.validate(previousContent);
-          if (linterResult.errors.length <= originalLinterResult.errors.length) {
-            isIncrementalImprovement = true;
-          }
-        }
-
-        if (!isIncrementalImprovement) {
-          try {
-            if (previousContent !== null) {
-              await context.vault.modify(updatedFile, previousContent);
-            }
-          } catch (rollbackError) {
-            console.error('[EditNote] Rollback failed:', rollbackError);
-          }
-
-          return {
-            success: false,
-            error: `Note Linter Validation Failed!\nYour edit introduced formatting errors:\n${linterResult.errors.map(err => `- ${err}`).join('\n')}\n\nYour changes have been safely rolled back. Please correct these formatting issues and try again.`
-          };
-        }
-      }
+      try { await context.indexManager.indexFile(file); reindexed = true; } catch (error) { console.warn('[EditNote] Reindex failed after verified write', error); }
     }
 
     const result: EditResult = {
@@ -159,21 +119,8 @@ export async function execute(
       }
     };
   } catch (error) {
-    console.error('[EditNote] Error:', error);
-
-    try {
-      const crashedFile = context.vault.getAbstractFileByPath(input.path);
-      if (crashedFile instanceof TFile && previousContent !== null) {
-        await context.vault.modify(crashedFile, previousContent);
-      }
-    } catch (rollbackError) {
-      console.error('[EditNote] Rollback on crash failed:', rollbackError);
-    }
-
-    return {
-      success: false,
-      error: (error as Error).message || 'Failed to edit note'
-    };
+    if (error instanceof RunBlocked || error instanceof RunSuspended) throw error;
+    return { success: false, outcome: 'input_error', error: error instanceof Error ? error.message : String(error) };
   }
 }
 

@@ -1,3 +1,5 @@
+import { RunController } from '../../src/runtime/run-controller';
+import { RunStore } from '../../src/runtime/run-store';
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('obsidian');
@@ -199,19 +201,35 @@ describe('Chat reliability regressions', () => {
       theme: { renderUserMessage: vi.fn(), createStreamingBubble: () => ({}), updateInputState: vi.fn(), updateStreamingUI: vi.fn(), finalizeStreaming: vi.fn(() => document.createElement('div')) },
       chatOrchestrator: { sendMessage: (_q: string, options: any) => agent.execute(_q, options.context), reportFailure: vi.fn() },
     });
+    const runtime = new RunController(new RunStore(platform), bus, manager, async (_q, context) => { await agent.execute(_q, context); });
+    await runtime.initialize();
+    view.plugin.runController = runtime;
+    view.runtimeUnsubscribe = bus.on('*', (event: AgentEvent) => view.handleRuntimeEvent(event));
+    view.renderRunControls = vi.fn();
     await view.handleSend();
+    await runtime.wait(runtime.list()[0].id);
     prompt = 'second';
     await view.handleSend();
+    await runtime.wait(runtime.list()[0].id);
     expect(view.theme.finalizeStreaming).toHaveBeenCalledTimes(2);
     expect(view.isStreaming).toBe(false);
     expect((await manager.getHistory()).map(m => m.content)).toEqual(['first', 'answer', 'second', 'answer']);
     expect(view.chatOrchestrator.reportFailure).not.toHaveBeenCalled();
   });
 
+  it('detaches a closing chat view without cancelling its plugin-owned run', async()=>{
+    const view=Object.create(ChatView.prototype) as any;
+    view.runtimeUnsubscribe=vi.fn();view.streamUnsubscribe=vi.fn();view.themeRegistry={dispose:vi.fn()};
+    view.plugin={runController:{cancel:vi.fn()}};
+    await view.onClose();
+    expect(view.runtimeUnsubscribe).toHaveBeenCalledOnce();
+    expect(view.plugin.runController.cancel).not.toHaveBeenCalled();
+  });
+
   it('keeps the raw archive when the model receives a compacted context', async () => {
-    const { agent, provider } = setup({ getContextWindow: () => 100 });
+    const { agent, provider } = setup({ getContextWindow: () => 4096 });
     (agent as any).compactor = { compact: vi.fn(async () => 'compacted decisions') };
-    const history = Array.from({ length: 10 }, (_, n) => ({ role: n % 2 ? 'assistant' : 'user', content: `original-${n} ${'x'.repeat(100)}`, timestamp: n + 1 })) as any[];
+    const history = Array.from({ length: 10 }, (_, n) => ({ role: n % 2 ? 'assistant' : 'user', content: `original-${n} ${'x'.repeat(2000)}`, timestamp: n + 1 })) as any[];
     const result = await agent.execute('next', { messages: history, sessionId: 's' });
     expect(provider.generateStreamWithSkills.mock.calls[0][0][0].content).toContain('compacted decisions');
     expect(result.messages[0].content).toBe(history[0].content);

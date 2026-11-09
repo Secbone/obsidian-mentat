@@ -32,18 +32,18 @@ export const schema = z.object({
   includeBacklinks: z.boolean().default(false).describe('Include backlinks'),
 
   // === NEW: Line-based partial reading ===
-  startLine: z.number().optional().describe('Starting line number (1-based, inclusive)'),
-  endLine: z.number().optional().describe('Ending line number (1-based, inclusive)'),
+  startLine: z.number().int().min(1).optional().describe('Starting line number (1-based, inclusive)'),
+  endLine: z.number().int().min(1).optional().describe('Ending line number (1-based, inclusive)'),
 
   // === NEW: Character-based partial reading ===
-  startChar: z.number().optional().describe('Starting character offset (0-based)'),
-  length: z.number().optional().describe('Number of characters to read from startChar'),
+  startChar: z.number().int().min(0).optional().describe('Starting character offset (0-based)'),
+  length: z.number().int().min(1).optional().describe('Number of characters to read from startChar'),
 
   // === NEW: Multi-section reading ===
   sections: z.array(z.string()).optional().describe('Array of section headings to extract'),
 
   // === NEW: Context control ===
-  contextLines: z.number().optional().describe('Number of context lines before/after range')
+  contextLines: z.number().int().min(0).optional().describe('Number of context lines before/after range')
 });
 
 export type Input = z.infer<typeof schema>;
@@ -57,7 +57,7 @@ interface DocumentContent {
   content: string;
 
   // NEW: Range metadata
-  lineRange?: { start: number; end: number; totalLines: number };
+  lineRange?: { start: number; end: number; totalLines: number; requestedEnd?: number };
   charRange?: { start: number; end: number; totalChars: number };
 
   // NEW: Multi-section results
@@ -94,7 +94,7 @@ interface LineRangeResult {
   content: string;
   beforeContext?: string;
   afterContext?: string;
-  lineRange: { start: number; end: number; totalLines: number };
+  lineRange: { start: number; end: number; totalLines: number; requestedEnd?: number };
 }
 
 function extractLineRange(
@@ -110,10 +110,12 @@ function extractLineRange(
   if (startLine < 1 || startLine > totalLines) {
     throw new Error(`Start line ${startLine} is out of range (1-${totalLines})`);
   }
-  if (endLine < startLine || endLine > totalLines) {
+  if (endLine < startLine) {
     throw new Error(`End line ${endLine} is invalid (must be between ${startLine}-${totalLines})`);
   }
 
+  const requestedEnd = endLine;
+  endLine = Math.min(endLine, totalLines);
   // Convert to 0-based indices
   const startIdx = startLine - 1;
   const endIdx = endLine; // endLine is inclusive, so we want lines[startIdx] to lines[endIdx-1]
@@ -141,7 +143,7 @@ function extractLineRange(
     content: mainContent,
     beforeContext,
     afterContext,
-    lineRange: { start: startLine, end: endLine, totalLines }
+    lineRange: { start: startLine, end: endLine, totalLines, requestedEnd: requestedEnd > totalLines ? requestedEnd : undefined }
   };
 }
 
@@ -364,12 +366,12 @@ export async function execute(
       result.content = extracted;
     }
     // 3. Else if `startLine` & `endLine` provided → Extract line range
-    else if (input.startLine !== undefined && input.endLine !== undefined) {
+    else if (input.startLine !== undefined || input.endLine !== undefined) {
       try {
         const rangeResult = extractLineRange(
           fullContent,
-          input.startLine,
-          input.endLine,
+          input.startLine ?? 1,
+          input.endLine ?? fullContent.split('\n').length,
           input.contextLines
         );
         result.content = rangeResult.content;
@@ -384,9 +386,9 @@ export async function execute(
       }
     }
     // 4. Else if `startChar` & `length` provided → Extract character range
-    else if (input.startChar !== undefined && input.length !== undefined) {
+    else if (input.startChar !== undefined || input.length !== undefined) {
       try {
-        const charResult = extractCharRange(fullContent, input.startChar, input.length);
+        const charResult = extractCharRange(fullContent, input.startChar ?? 0, input.length ?? fullContent.length - (input.startChar ?? 0));
         result.content = charResult.content;
         result.charRange = charResult.charRange;
       } catch (error) {

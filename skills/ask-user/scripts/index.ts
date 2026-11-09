@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 import { UserInputModal } from '../../../src/ui/user-input-modal';
+import { RunSuspended, RunBlocked } from '../../../src/runtime/types';
 import { throwIfAborted } from '../../../src/utils/execution';
 
 /**
@@ -15,7 +16,7 @@ export const metadata = {
   version: '1.0.0',
   tags: ['interaction', 'guidance', 'clarification'],
   performance: 'fast',
-  executionCategory: 'read',
+  executionCategory: 'interaction',
   permissions: ['read'],
   category: 'user-interaction'
 };
@@ -42,6 +43,11 @@ export async function execute(
 ): Promise<SkillResult> {
   try {
     throwIfAborted(context.abortSignal);
+    if (context.runtime && context.operationId) {
+      const outcome = await context.runtime.interact({ id: `${context.operationId}:question`, operationId: context.operationId, kind: 'question', ...input });
+      if (outcome.kind !== 'answered') return { success: false, outcome: outcome.kind === 'expired' ? 'expired' : 'cancelled', error: '人工问答已结束' };
+      return { success: true, outcome: 'success', data: { answer: outcome.answer, timestamp: Date.now() } };
+    }
     // Create and show modal - this returns a Promise that blocks until user responds
     const answer = await new Promise<string>((resolve, reject) => {
       const modal = new UserInputModal(
@@ -74,6 +80,7 @@ export async function execute(
       }
     };
   } catch (error) {
+    if (error instanceof RunSuspended || error instanceof RunBlocked) throw error;
     console.error('[AskUser] Error:', error);
     return {
       success: false,

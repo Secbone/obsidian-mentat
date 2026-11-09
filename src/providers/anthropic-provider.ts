@@ -1,3 +1,4 @@
+import { ModelResponseError } from '../runtime/model-gateway';
 // Anthropic Provider - Native Claude API support
 
 import { AIProvider, GenerateOptions, GenerateResponse, ChatMessage, ToolCall } from '../types';
@@ -143,6 +144,8 @@ export class AnthropicProvider implements AIProvider {
     return 100000;
   }
 
+  getMaxOutputTokens(): number { return this.config.maxTokens ?? 4096; }
+
   getCompactionThreshold(): number {
     return this.config.compactionThreshold ?? 0.8;
   }
@@ -266,7 +269,7 @@ export class AnthropicProvider implements AIProvider {
       // Get final message with properly parsed tool calls
       const finalMessage = await stream.finalMessage();
       if (!finalMessage.stop_reason || finalMessage.stop_reason === 'max_tokens') {
-        throw new Error('模型响应不完整，未执行工具调用。');
+        throw new ModelResponseError('模型响应不完整或输出截断，未执行工具调用。', { content: fullContent, finishReason: finalMessage.stop_reason === 'max_tokens' ? 'length' : undefined, diagnostics: { partialContent: fullContent.slice(0, 2000), pendingToolCalls: finalMessage.content.filter(b => b.type === 'tool_use').length }, usage: { promptTokens: finalMessage.usage.input_tokens, completionTokens: finalMessage.usage.output_tokens, totalTokens: finalMessage.usage.input_tokens + finalMessage.usage.output_tokens } });
       }
 
       const toolCalls: ToolCall[] = [];
@@ -301,7 +304,7 @@ export class AnthropicProvider implements AIProvider {
        return {
         content: fullContent,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finishReason: (finalMessage.stop_reason ?? undefined) as GenerateResponse['finishReason'],
+        finishReason: finalMessage.stop_reason === 'tool_use' ? 'tool_calls' : 'stop',
         usage: finalMessage.usage ? {
           promptTokens: finalMessage.usage.input_tokens,
           completionTokens: finalMessage.usage.output_tokens,

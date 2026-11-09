@@ -219,7 +219,7 @@ export class SkillLoader {
         description: metadata.description,
         schema: skillImpl?.schema || impl.schema!,
         execute: (input, options) => {
-          const runContext = { ...context, abortSignal: options?.abortSignal };
+          const runContext = { ...context, abortSignal: options?.abortSignal, runtime: options?.runtime, operationId: options?.operationId };
           return impl.createSkill ? impl.createSkill(runContext).execute(input) : impl.execute!(input, runContext);
         },
         metadata: {

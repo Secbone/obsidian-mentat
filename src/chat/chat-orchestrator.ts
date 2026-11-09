@@ -1,3 +1,4 @@
+import { RunSuspended, RunBlocked } from '../runtime/types';
 // ChatOrchestrator - Orchestrates chat conversations with agent and skill support
 
 import { TaskType, ChatMessage } from '../types';
@@ -233,12 +234,15 @@ export class ChatOrchestrator {
     userQuery: string,
     options: ChatQueryOptions = {}
   ): Promise<void> {
+    const pinnedProvider = options.context?.metadata?.providerId;
+    if (pinnedProvider && (await this.aiRouter.getProvider(TaskType.CHAT))?.id !== pinnedProvider) throw new Error('模型路由已变化，请恢复原模型配置后继续该运行。');
     if (!this.defaultAgent) {
       throw new Error('请先在设置中配置 AI 服务商 (API Key)。No AI provider configured. Please add one in Mentat settings.');
     }
 
     const messages = options.context?.messages || options.contextMessages || [];
     
+    if (options.context?.metadata?.resume) this.readTracker.restore(messages);
     // Find if we already have a session context in the history
     const firstUserMsg = messages.find(m => m.role === 'user');
     let sessionContextPayload = firstUserMsg?.metadata?.sessionContextPayload;
@@ -978,7 +982,7 @@ OTHERWISE:
     const delegateTaskSkill: SkillDefinition<{ agentId: string; prompt: string }> = {
       name: 'delegate_task',
       namespace: 'obsidian',
-      metadata: { executionCategory: 'read' },
+      metadata: { executionCategory: 'orchestration' },
       description: 'Delegate a specific task or prompt to a specialized subagent (e.g. writer-agent, reviewer-agent) and get its output.',
       schema: z.object({
         agentId: z.string().describe('The ID of the agent to delegate to (e.g. "writer-agent", "reviewer-agent")'),
@@ -994,9 +998,13 @@ OTHERWISE:
           new Notice(`🤖 正在委派任务给 ${agent.getName()}...`);
           
           // Execute agent to completion
+          const child = options?.runtime && options.operationId ? options.runtime.child(options.operationId) : undefined;
+          if (child?.messages.length) this.readTracker.restore(child.messages);
           const response = await agent.execute(input.prompt, {
-            messages: [], // Isolated context
-            sessionId: `subagent-${Date.now()}`, abortSignal: options?.abortSignal,
+            messages: child?.messages || [], runtime: child?.runtime, onCheckpoint: child?.checkpoint,
+            runId: options?.runtime?.runId,
+            metadata: { resume: !!child?.messages.length },
+            sessionId: options?.runtime?.sessionId || `subagent-${Date.now()}`, abortSignal: options?.abortSignal,
           });
           
           return {
@@ -1008,6 +1016,7 @@ OTHERWISE:
             }
           };
         } catch (err: unknown) {
+          if (err instanceof RunSuspended || err instanceof RunBlocked) throw err;
           return { success: false, error: `Delegation error: ${err instanceof Error ? err.message : String(err)}` };
         }
       }
@@ -1018,7 +1027,7 @@ OTHERWISE:
     const spawnSubagentSkill: SkillDefinition<{ name: string; systemPrompt: string; prompt: string }> = {
       name: 'spawn_subagent',
       namespace: 'obsidian',
-      metadata: { executionCategory: 'read' },
+      metadata: { executionCategory: 'orchestration' },
       description: 'Dynamically spawn a temporary subagent with custom roles and prompts to assist with a sub-task.',
       schema: z.object({
         name: z.string().describe('The name of the temporary subagent (e.g. "Translator", "Summarizer")'),
@@ -1043,9 +1052,12 @@ OTHERWISE:
           
           new Notice(`🤖 正在生成子智能体: ${input.name}...`);
           
+          const child = options?.runtime && options.operationId ? options.runtime.child(options.operationId) : undefined;
+          if (child?.messages.length) this.readTracker.restore(child.messages);
           const response = await tempAgent.execute(input.prompt, {
-            messages: [],
-            sessionId: `subagent-${Date.now()}`, abortSignal: options?.abortSignal,
+            messages: child?.messages || [], runtime: child?.runtime, onCheckpoint: child?.checkpoint,
+            runId: options?.runtime?.runId, metadata: { resume: !!child?.messages.length },
+            sessionId: options?.runtime?.sessionId || `subagent-${Date.now()}`, abortSignal: options?.abortSignal,
           });
           
           return {
@@ -1057,6 +1069,7 @@ OTHERWISE:
             }
           };
         } catch (err: unknown) {
+          if (err instanceof RunSuspended || err instanceof RunBlocked) throw err;
           return { success: false, error: `Spawning error: ${err instanceof Error ? err.message : String(err)}` };
         } finally {
           this.agentManager.unregisterAgent(tempAgentId);

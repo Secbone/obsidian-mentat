@@ -2,6 +2,7 @@ import { IPlatformAdapter, IPlatformFile, IFileCache } from '../../src/types/pla
 
 export class MemoryPlatformAdapter implements IPlatformAdapter {
   files: Map<string, { content: string; file: IPlatformFile; cache?: IFileCache }> = new Map();
+  directories = new Set<string>();
   pluginData: any = {};
   configDir: string = '.obsidian';
   activeFile: IPlatformFile | null = null;
@@ -72,7 +73,7 @@ export class MemoryPlatformAdapter implements IPlatformAdapter {
   }
 
   async exists(path: string): Promise<boolean> {
-    return this.files.has(path);
+    return this.files.has(path) || this.directories.has(path);
   }
 
   async read(path: string): Promise<string> {
@@ -99,7 +100,7 @@ export class MemoryPlatformAdapter implements IPlatformAdapter {
   }
 
   async mkdir(path: string): Promise<void> {
-    // Memory simulation doesn't strictly need directory structure, but we can support folder creation implicitly
+    this.directories.add(path);
   }
 
   async list(path: string): Promise<{ files: string[]; folders: string[] }> {

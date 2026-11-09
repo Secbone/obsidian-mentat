@@ -1,3 +1,4 @@
+import { projectRunIncidents, renderRunFacts } from './run-diagnostics';
 import { Notice, TFile } from 'obsidian';
 import MentatPlugin from '../main';
 import { ChatManager } from '../chat/chat-manager';
@@ -56,8 +57,11 @@ export class DiagnosticsExporter {
       const directCallCount = directCallSkills.length;
 
       // 1. Resolve and parse diagnostic logs (.mentat/diagnostics.jsonl)
-      const logWarnings: string[] = [];
-      const logs = await DiagnosticsExporter.retrieveIncidentLogs(plugin, startTime, endTime, sessionId, logWarnings);
+      const logWarnings: string[] = [...(plugin.runController?.store.warnings || [])];
+      const legacyLogs = await DiagnosticsExporter.retrieveIncidentLogs(plugin, startTime, endTime, sessionId, logWarnings) as DiagnosticLogEntry[];
+      const runs = plugin.runController?.list(sessionId) || [];
+      const runIds = new Set(runs.map(r => r.id));
+      const logs = [...legacyLogs.filter(log => !log.runId || !runIds.has(log.runId)), ...projectRunIncidents(runs)];
 
       // 2. Generate Mermaid Sequence Diagram
       const mermaidDiagram = DiagnosticsExporter.generateMermaidDiagram(history);
@@ -96,17 +100,15 @@ export class DiagnosticsExporter {
       markdownContent += `## 📊 会话调用流可视化 (Mermaid 时序图)\n\n`;
       markdownContent += `> [!TIP]\n`;
       markdownContent += `> 这是一个自动生成的 Mermaid 序列图。在 Obsidian 预览模式下将自动渲染为清晰的多轮交互时序图。\n\n`;
-      markdownContent += `<details open>\n`;
-      markdownContent += `<summary>展开会话流程图</summary>\n\n`;
       markdownContent += `\`\`\`mermaid\n`;
       markdownContent += `${mermaidDiagram}`;
       markdownContent += `\`\`\`\n\n`;
-      markdownContent += `</details>\n\n`;
 
       markdownContent += `---\n\n`;
 
+      markdownContent += renderRunFacts(runs);
       // ⚠️ Diagnostics logs section
-      markdownContent += `## ⚠️ 语法解析与执行错误日志 (故障排查)\n\n`;
+      markdownContent += `## ⚠️ 执行异常与交互结果 (故障排查)\n\n`;
       if (!history.length) markdownContent += '> [!WARNING]\n> 缺少已保存的会话历史；此报告不能还原完整 API 请求。\n\n';
       if (logWarnings.length) markdownContent += `> [!WARNING]\n> 日志读取不完整：${logWarnings.join('；')}\n\n`;
       if (logs.length === 0) {
@@ -123,7 +125,7 @@ export class DiagnosticsExporter {
           markdownContent += `* **异常信息**: \`${log.errorMessage}\`\n`;
           if (log.sessionId) markdownContent += `* **会话 / 执行**: \`${log.sessionId}\` / \`${log.runId || '未记录'}\`\n`;
           if (log.details) markdownContent += `\n\`\`\`json\n${JSON.stringify(log.details, null, 2)}\n\`\`\`\n\n`;
-          markdownContent += `* **原始模型返回参数 (Malformed String)**:\n`;
+          markdownContent += `* **工具参数（如已记录）**:\n`;
           markdownContent += `\`\`\`json\n`;
           markdownContent += `${log.originalArgs}\n`;
           markdownContent += `\`\`\`\n\n`;
@@ -186,12 +188,9 @@ export class DiagnosticsExporter {
       markdownContent += `## 📦 内部消息快照 (用于诊断)\n\n`;
       markdownContent += `> [!TIP]\n`;
       markdownContent += `> 以下是内部消息快照。服务商适配器还会转换工具名、角色与配对关系；此快照不包含完整请求设置，不能直接视为实际 API 请求。\n\n`;
-      markdownContent += `<details>\n`;
-      markdownContent += `<summary>点击展开完整的 API Payload</summary>\n\n`;
       markdownContent += `\`\`\`json\n`;
       markdownContent += `${cleanJsonHistory}\n`;
       markdownContent += `\`\`\`\n\n`;
-      markdownContent += `</details>\n\n`;
 
       // Estimate msg tokens helper
       const estimateMsgTokens = (msg: ChatMessage): number => {
@@ -447,9 +446,10 @@ export class DiagnosticsExporter {
             } catch {
               // Keep original displayName
             }
-            const cleanName = displayName.split(':').pop() || displayName;
+            const cleanName = tc.name === 'spec' ? `查询工具说明 ${displayName.replace(/^spec:/, '')}` : displayName;
+            const safeName = DiagnosticsExporter.escapeMermaidText(cleanName);
             const paramStr = displayParams ? ` (${DiagnosticsExporter.escapeMermaidText(displayParams)})` : '';
-            diagram += `    Agent->>Skill: ${cleanName}${paramStr}\n`;
+            diagram += `    Agent->>Skill: ${safeName}${paramStr}\n`;
           }
         }
         if (msg.content && msg.content.trim()) {
@@ -477,6 +477,7 @@ export class DiagnosticsExporter {
     if (!text) return '';
     return text
       .replace(/"/g, "'") // Replace inner double quotes with single quotes to keep valid string boundaries
+      .replace(/;/g, '；') // Mermaid treats ASCII semicolons as statement boundaries.
       .replace(/\n/g, ' ')
       .replace(/[\r]/g, '')
       .replace(/[[\](){}<>]/g, ' ') // Clean up special Mermaid delimiters to protect diagram compilation
@@ -522,13 +523,16 @@ export class DiagnosticsExporter {
     const adapter = plugin.app.vault.adapter;
     const logPath = '.mentat/diagnostics.jsonl';
     
-    if (!(await adapter.exists(logPath))) {
-      new Notice('未找到诊断日志；这不代表执行没有发生错误。');
-      return;
-    }
-    
     try {
-      const content = await adapter.read(logPath);
+      const runs = plugin.runController?.list() || [];
+      const runIds = new Set(runs.map(run => run.id));
+      const legacy = await adapter.exists(logPath) ? await adapter.read(logPath) : '';
+      const legacyLines = legacy.split('\n').filter(line => {
+        if (!line.trim()) return false;
+        try { const entry = parseJson<DiagnosticLogEntry>(line); return !entry.runId || !runIds.has(entry.runId); } catch { return true; }
+      });
+      const current = projectRunIncidents(runs).sort((a,b) => a.timestamp-b.timestamp);
+      const content = [...legacyLines, ...current.map(entry => JSON.stringify(entry))].join('\n');
       const debugNotePath = 'Mentat Debug Log.md';
       
       // Calculate 7-Day Performance & Failure Analytics
@@ -569,6 +573,9 @@ export class DiagnosticsExporter {
 
       const lines = content.trim().split('\n').reverse().slice(0, 50); // Get latest 50 incidents
       let markdownContent = `# Mentat Diagnostics & Debug Log\n\n`;
+      markdownContent += renderRunFacts(runs.slice(0, 20));
+      if (plugin.runController?.store.warnings.length) markdownContent += `> [!WARNING]\n> ${plugin.runController.store.warnings.join('；')}\n\n`;
+      if (legacyLines.length) markdownContent += '> 旧版日志缺少完整操作标识，可能包含多层重复记录；新版运行按操作归并。\n\n';
       if (malformedLines) markdownContent += `> [!WARNING]\n> ${malformedLines} 条日志无法解析，统计不完整。\n\n`;
       
       // Render 7-Day Cross-Run Performance Analytics Card

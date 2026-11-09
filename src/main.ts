@@ -1,3 +1,7 @@
+import { RunHistoryModal } from './ui/run-history-modal';
+import { ChatManager } from './chat/chat-manager';
+import { RunController } from './runtime/run-controller';
+import { RunStore } from './runtime/run-store';
 import { Plugin, Notice } from 'obsidian';
 import { MentatSettings, DEFAULT_SETTINGS } from './settings/settings';
 import { SettingsTab } from './settings/settings-tab';
@@ -18,6 +22,8 @@ export default class MentatPlugin extends Plugin {
   openCodeIntegration!: OpenCodeIntegration;
   indexManager!: IndexManager;
   chatOrchestrator!: ChatOrchestrator;
+  chatManager!: ChatManager;
+  runController!: RunController;
   agentManager!: AgentManager;
   platform!: ObsidianAdapter;
   extensionManager!: ExtensionManager;
@@ -57,6 +63,13 @@ export default class MentatPlugin extends Plugin {
       new Notice('Mentat: 未检测到 AI 服务商配置。请在设置中配置 API Key。No AI provider configured — add one in Mentat settings.');
     }
 
+    this.chatManager = new ChatManager(this);
+    await this.chatManager.getHistory();
+    this.runController = new RunController(new RunStore(platform), this.eventBus, this.chatManager,
+      (prompt, context) => this.chatOrchestrator.sendMessage(prompt, { context, enableSkills: context.metadata?.enableSkills as boolean | undefined }));
+    await this.runController.initialize();
+    if (this.runController.store.warnings.length) new Notice('部分运行记录损坏，自动执行已暂停；请导出诊断检查。');
+
     // Get AgentManager reference (for advanced usage)
     this.agentManager = this.chatOrchestrator.getAgentManager();
 
@@ -95,6 +108,7 @@ export default class MentatPlugin extends Plugin {
 
   onunload(): void {
     console.log('Unloading Mentat plugin');
+    void this.runController?.dispose().catch(error => console.error('[Mentat] Runtime shutdown failed', error));
     try {
       this.chatOrchestrator?.dispose();
     } catch (error: unknown) {
@@ -104,6 +118,7 @@ export default class MentatPlugin extends Plugin {
   }
 
   private registerCommands(): void {
+    this.addCommand({ id: 'manage-runs', name: 'Open run history and recovery', callback: () => new RunHistoryModal(this).open() });
     // Chat command
     this.addCommand({
       id: 'open-chat',

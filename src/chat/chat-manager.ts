@@ -88,6 +88,14 @@ export class ChatManager {
     await this.saveHistory();
   }
 
+  async restoreSession(sessionId: string, messages: ChatMessage[]): Promise<void> {
+    await this.initialized;
+    this.sessionId = sessionId;
+    this.history = [...messages];
+    this.selectedFiles.clear();
+    await this.saveHistory();
+  }
+
   /**
    * Get session information
    */

@@ -1,3 +1,5 @@
+import type { RunRecord, InteractionRequest } from '../../runtime/types';
+import { UserInputModal } from '../user-input-modal';
 import { ItemView, WorkspaceLeaf, setIcon, TFile, Notice } from 'obsidian';
 import { DiagnosticsExporter } from '../../diagnostics/diagnostics-exporter';
 import { ChatManager } from '../../chat/chat-manager';
@@ -44,7 +46,9 @@ export class ChatView extends ItemView {
 
   private isStreaming: boolean = false;
   private currentStreamingBubble: StreamingBubble | null = null;
-  private currentAbortController: AbortController | null = null;
+  private activeRunId: string | null = null;
+  private runtimeUnsubscribe: (() => void) | null = null;
+  private streamingMessageStart = 0;
   private activeContext: AgentContext | null = null;
 
   private inputHandler: InputHandler | null = null;
@@ -63,7 +67,7 @@ export class ChatView extends ItemView {
   constructor(leaf: WorkspaceLeaf, plugin: MentatPlugin) {
     super(leaf);
     this.plugin = plugin;
-    this.chatManager = new ChatManager(plugin);
+    this.chatManager = plugin.chatManager || new ChatManager(plugin);
     this.messageRenderer = new MessageRenderer();
     this.chatOrchestrator = plugin.chatOrchestrator;
 
@@ -117,12 +121,25 @@ export class ChatView extends ItemView {
     await this.loadHistory();
     this.renderDocumentList();
     await this.inputHandler?.restoreDraft();
+    this.runtimeUnsubscribe = this.eventBus.on('*', event => this.handleRuntimeEvent(event));
+    const record = this.plugin.runController?.list(this.chatManager.getSessionInfo().sessionId).find(r => ['running','waiting_for_user','waiting_for_approval','interrupted','failed'].includes(r.status));
+    if (record && ['running','waiting_for_user','waiting_for_approval'].includes(record.status)) this.attachRun(record, (await this.chatManager.getHistory()).length);
+    this.renderRunControls(record);
   }
 
   async onClose(): Promise<void> {
-    this.currentAbortController?.abort();
+    this.runtimeUnsubscribe?.();
     this.streamUnsubscribe?.();
     this.themeRegistry.dispose();
+  }
+
+  async refreshRuntime(): Promise<void> {
+    this.activeRunId = null; this.activeContext = null; this.streamState = null; this.currentStreamingBubble = null; this.isStreaming = false;
+    this.theme.getMessagesContainer().empty();
+    await this.loadHistory();
+    const record = this.plugin.runController.list(this.chatManager.getSessionInfo().sessionId)[0];
+    if (record && ['running','waiting_for_user','waiting_for_approval'].includes(record.status)) this.attachRun(record, record.messages.length);
+    this.renderRunControls(record);
   }
 
   async switchTheme(themeId: string): Promise<void> {
@@ -282,6 +299,7 @@ export class ChatView extends ItemView {
 
     this.inputHandler.clearInput();
 
+    if (this.activeRunId) { this.plugin.runController.steer(this.activeRunId, text); return; }
     if (this.activeContext) {
       if (!this.activeContext.pendingSteerMessages) {
         this.activeContext.pendingSteerMessages = [];
@@ -378,32 +396,77 @@ export class ChatView extends ItemView {
       documentCount: this.inputHandler.getContextPillPaths().length,
     });
 
-    this.currentAbortController = new AbortController();
-    const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try {
-    const history = await this.chatManager.getHistory();
-    await this.chatManager.addMessage('user', userMessage);
-    this.activeContext = {
-      messages: history,
-      sessionId: this.chatManager.getSessionInfo().sessionId || Date.now().toString(),
-      runId,
-      metadata: { maxTurns: this.plugin.settings.maxTurns || 20 },
-      pendingSteerMessages: [],
-      abortSignal: this.currentAbortController.signal,
-      onCheckpoint: messages => this.chatManager.replaceMessages(messages),
-    };
+      const history = await this.chatManager.getHistory();
+      this.streamingMessageStart = history.length + 1;
+      const provider = await this.plugin.aiRouter?.getProvider('chat' as import('../../types').TaskType);
+      await this.plugin.runController.start(userMessage, { sessionId: this.chatManager.getSessionInfo().sessionId,
+        messages: history, maxTurns: this.plugin.settings.maxTurns || 20, enableSkills: this.plugin.settings.skillsEnabled, providerId: provider?.id });
+    } catch (error) { this.showError(errorMessage(error)); }
+  }
 
-    this.streamUnsubscribe = this.eventBus.on('*', (event) => this.handleStreamEvent(event));
+  private attachRun(record: RunRecord, messageStart?: number): void {
+    this.activeRunId = record.id;
+    this.activeContext = { sessionId: record.sessionId, runId: record.id, messages: record.messages.slice(0, record.baseMessageCount) };
+    if (messageStart !== undefined) this.streamingMessageStart = messageStart;
+    else if (!this.currentStreamingBubble) this.streamingMessageStart = record.messages.length;
+    this.isStreaming = true;
+    if (!this.currentStreamingBubble) this.currentStreamingBubble = this.theme.createStreamingBubble();
+    this.streamState ||= { currentTurnResponse: '', finalAnswer: '', hasFinalAnswerTag: false, activeTasks: [], currentStatus: '', lastToolStatus: { name: '', status: 'pending' } };
+    this.theme.updateInputState({ isStreaming: true, charCount: 0, documentCount: this.chatManager.selectedFilesList.length });
+  }
 
-    await this.chatOrchestrator.sendMessage(userMessage, {
-      enableSkills: this.plugin.settings.skillsEnabled,
-      maxTurns: this.plugin.settings.maxTurns || 20,
-      context: this.activeContext ?? undefined,
-    });
-    } catch (error) {
-      await this.chatOrchestrator.reportFailure(error, 'chat', this.chatManager.getSessionInfo().sessionId, runId);
-      if (this.streamState) this.showError(errorMessage(error));
+  private handleRuntimeEvent(event: AgentEvent): void {
+    if (event.sessionId !== this.chatManager.getSessionInfo().sessionId || event.agentId !== 'default-chat-agent') return;
+    const record = event.runId ? this.plugin.runController.get(event.runId) : undefined;
+    if (event.type === 'run:changed' && record) {
+      if (['running','waiting_for_user','waiting_for_approval'].includes(record.status)) {
+        if (!this.activeRunId) this.attachRun(record);
+        if (this.streamState && record.status !== 'running') {
+          this.streamState.currentStatus = record.status === 'waiting_for_user' ? '等待你的回答，可稍后继续' : '等待你的授权，可稍后继续';
+          this.updateStreaming(this.streamState.activeTasks, this.streamState.currentStatus, this.streamState.finalAnswer, this.streamState.currentTurnResponse, true);
+        }
+      } else if (this.activeRunId === record.id && this.streamState) {
+        this.streamState.error = record.error;
+        this.finalizeStream(this.streamState, record.messages);
+      }
+      this.renderRunControls(record);
+      return;
     }
+    if (event.type === 'interaction:request' && record) { this.renderRunControls(record); return; }
+    this.handleStreamEvent(event);
+  }
+
+  private presentInteraction(record: RunRecord, request: InteractionRequest): void {
+    const approval = request.kind === 'approval';
+    new UserInputModal(this.app, request.question, request.context, approval ? ['批准此操作', '拒绝此操作'] : request.options,
+      undefined, request.requiresInput ?? true, result => {
+        const outcome: NonNullable<InteractionRequest['outcome']> = result.cancelled ? { kind: 'cancelled' }
+          : approval ? { kind: result.answer === '批准此操作' ? 'approved' : 'rejected' } : { kind: 'answered', answer: result.answer };
+        void this.plugin.runController.respond(record.id, request.id, outcome).catch(error => new Notice(errorMessage(error)));
+      }).open();
+  }
+
+  private renderRunControls(record?: RunRecord): void {
+    this.containerEl.querySelector('.mentat-run-controls')?.remove();
+    if (!record || record.status === 'completed') return;
+    const panel = this.theme.getMessagesContainer().createDiv({ cls: 'mentat-run-controls' });
+    panel.createEl('p', { text: record.error || ({ running: '任务正在执行', waiting_for_user: '等待回答', waiting_for_approval: '等待授权', interrupted: '任务已中断，可从检查点继续', failed: '任务失败，进度已保存', cancelled: '任务已停止' }[record.status]) });
+    const action = (text: string, run: () => Promise<void>) => panel.createEl('button', { text }).addEventListener('click', () => { void run().catch(error => new Notice(errorMessage(error))); });
+    for (const request of Object.values(record.interactions)) if (!request.outcome) action(request.kind === 'approval' ? '查看并处理审批' : '回答问题', async () => { this.presentInteraction(record, request); });
+    const unknown = Object.values(record.operations).filter(op => op.status === 'unknown');
+    for (const operation of unknown) action(`核对 ${operation.name} 的实际结果`, async () => {
+      new UserInputModal(this.app, '请先检查实际文件或外部操作，再选择核对结果', operation.name,
+        ['确认未执行，允许重新申请执行', '确认已执行，填写实际结果'], undefined, true, result => {
+          if (result.cancelled) return;
+          if (result.answer.startsWith('确认未执行')) void this.plugin.runController.reconcile(record.id, operation.id, null).catch(error => new Notice(errorMessage(error)));
+          else new UserInputModal(this.app, '填写已核验的实际结果', '此结果将作为原工具调用的执行结果，不会再次执行工具。', undefined, undefined, true, verified => {
+            if (!verified.cancelled) void this.plugin.runController.reconcile(record.id, operation.id, { success: true, outcome: 'success', data: { verifiedByUser: true, result: verified.answer } }).catch(error => new Notice(errorMessage(error)));
+          }).open();
+        }).open();
+    });
+    if (['interrupted','failed'].includes(record.status) && !unknown.length) action('从检查点继续', () => this.plugin.runController.resume(record.id));
+    if (record.status !== 'cancelled') action('停止此任务', () => this.plugin.runController.cancel(record.id));
   }
 
   private handleStreamEvent(event: AgentEvent): void {
@@ -551,7 +614,7 @@ export class ChatView extends ItemView {
     }
 
     if (this.currentStreamingBubble && messages) {
-      const runMessages = messages.slice((this.activeContext?.messages.length || 0) + 1);
+      const runMessages = messages.slice(this.streamingMessageStart);
       const element = this.theme.finalizeStreaming(this.currentStreamingBubble, { messages: runMessages });
       if (s.error) element.appendChild(/abort|cancel/i.test(s.error)
         ? this.theme.renderInfoBanner('已停止生成，当前进度已保存')
@@ -562,7 +625,7 @@ export class ChatView extends ItemView {
     this.streamState = null;
     this.currentStreamingBubble = null;
     this.isStreaming = false;
-    this.currentAbortController = null;
+    this.activeRunId = null;
     this.activeContext = null;
 
     this.theme.updateInputState({
@@ -593,7 +656,7 @@ export class ChatView extends ItemView {
     }
     this.currentStreamingBubble = null;
     this.isStreaming = false;
-    this.currentAbortController = null;
+    this.activeRunId = null;
     this.activeContext = null;
     this.streamState = null;
 
@@ -646,10 +709,7 @@ export class ChatView extends ItemView {
   }
 
   private handleCancel(): void {
-    if (this.currentAbortController) {
-      this.currentAbortController.abort();
-      this.currentAbortController = null;
-    }
+    if (this.activeRunId) void this.plugin.runController.cancel(this.activeRunId).catch(error => new Notice(errorMessage(error)));
   }
 
   private async confirmClear(): Promise<boolean> {

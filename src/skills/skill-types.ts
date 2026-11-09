@@ -1,3 +1,4 @@
+import type { RunRuntime, OutcomeKind } from '../runtime/types';
 // Core types for Skill system
 
 import { ZodTypeAny } from 'zod';
@@ -19,6 +20,7 @@ export type SkillNamespace = 'obsidian' | 'mcp' | 'meta' | 'guard' | 'custom';
  */
 export interface SkillResult<T = unknown> {
   success: boolean;
+  outcome?: OutcomeKind;
   data?: T;
   error?: string;
   metadata?: {
@@ -56,7 +58,7 @@ export interface SkillDefinition<TInput = unknown, TOutput = unknown> {
   schema: ZodTypeAny;
 
   // Execution function
-  execute: (input: TInput, options?: { abortSignal?: AbortSignal }) => Promise<SkillResult<TOutput>>;
+  execute: (input: TInput, options?: { abortSignal?: AbortSignal; runtime?: RunRuntime; operationId?: string }) => Promise<SkillResult<TOutput>>;
 
   // Metadata
   metadata?: {
@@ -68,7 +70,7 @@ export interface SkillDefinition<TInput = unknown, TOutput = unknown> {
       description: string;
     }>;
     requiresConfirmation?: boolean; // Whether to ask user before executing
-    executionCategory?: 'read' | 'write' | 'mutate' | 'external';
+    executionCategory?: 'read' | 'write' | 'mutate' | 'external' | 'interaction' | 'orchestration';
     // read     → 纯读取，完全并行安全
     // write    → 文件写入，同组串行
     // mutate   → 修改 vault 结构（move/delete/rename），与 write 互斥
@@ -117,6 +119,8 @@ export interface ToolCall {
  * Skill execution context - provides access to plugin resources
  */
 export interface SkillContext {
+  runtime?: RunRuntime;
+  operationId?: string;
   abortSignal?: AbortSignal;
   vault: Vault;
   metadataCache: MetadataCache;

@@ -1,6 +1,7 @@
+import { ModelResponseError } from '../runtime/model-gateway';
 // Ollama Provider - Local AI models (HTTP API)
 
-import { AIProvider, GenerateOptions } from '../types';
+import { AIProvider, GenerateOptions, GenerateResponse } from '../types';
 import { requestUrl } from 'obsidian';
 import { parseJson } from '../utils/json-healer';
 import {
@@ -81,7 +82,7 @@ export class OllamaProvider implements AIProvider {
       return data.message?.content || '';
     } catch (error: unknown) {
       console.error('OllamaProvider generate error:', error);
-      throw new Error(`Ollama error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -133,28 +134,33 @@ export class OllamaProvider implements AIProvider {
       }
 
       const decoder = new TextDecoder();
-      // eslint-disable-next-line no-constant-condition -- reader.read() loop terminates on done:true
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n').filter(line => line.trim());
-
-        for (const line of lines) {
-          try {
-            const data = parseJson<OllamaStreamChunk>(line);
-            if (data.message?.content) {
-              onChunk(data.message.content);
-            }
-            } catch (_e) {
-            // Skip invalid JSON lines
-          }
+      let buffer = '', content = '';
+      let final: OllamaStreamChunk | undefined;
+      const consume = (line: string) => {
+        if (!line.trim()) return;
+        const data = parseJson<OllamaStreamChunk>(line);
+        if (data.message?.content) { content += data.message.content; onChunk(data.message.content); }
+        if (data.done) final = data;
+      };
+      try {
+        // Network chunks do not necessarily end at a JSON line boundary.
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let newline: number;
+          while ((newline = buffer.indexOf('\n')) >= 0) { consume(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1); }
         }
-      }
+        buffer += decoder.decode();
+        consume(buffer);
+      } finally { reader.releaseLock(); }
+      const result: GenerateResponse = { content, finishReason: final?.done_reason === 'length' ? 'length' : final ? 'stop' : undefined,
+        usage: final ? { promptTokens: final.prompt_eval_count || 0, completionTokens: final.eval_count || 0, totalTokens: (final.prompt_eval_count || 0) + (final.eval_count || 0) } : undefined };
+      if (!final || result.finishReason === 'length') throw new ModelResponseError('模型响应不完整或输出截断，当前进度已保存。', result);
+      options?.onResponse?.(result);
     } catch (error: unknown) {
       console.error('OllamaProvider generateStream error:', error);
-      throw new Error(`Ollama error: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -253,6 +259,8 @@ export class OllamaProvider implements AIProvider {
     if (model.includes('phi') || model.includes('gemma')) return 8192;
     return 8192;
   }
+
+  getMaxOutputTokens(): number { return this.config.maxTokens ?? 16384; }
 
   getCompactionThreshold(): number {
     return this.config.compactionThreshold ?? 0.8;

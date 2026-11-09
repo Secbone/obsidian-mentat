@@ -30,7 +30,8 @@ export function resolveToolDisplayName(name: string, arguments_: unknown): strin
 }
 
 export function getToolShortName(displayName: string): string {
-  return displayName.split(':').pop() || displayName;
+  const shortName = displayName.split(':').pop() || displayName;
+  return displayName === 'spec' || displayName.startsWith('spec:') ? `查看工具说明 · ${shortName}` : shortName;
 }
 
 export function truncateText(text: string, threshold: number = 500): {

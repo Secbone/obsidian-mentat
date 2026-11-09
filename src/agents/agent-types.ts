@@ -1,5 +1,6 @@
 // Agent Types - Core type definitions for the Agent system
 
+import type { RunRuntime, RunStatus, InteractionRequest } from '../runtime/types';
 import { ChatMessage } from '../types';
 import { SkillCall, SkillResult } from '../skills/skill-types';
 
@@ -22,6 +23,7 @@ export interface AgentConfig {
  * Agent execution context
  */
 export interface AgentContext {
+  runtime?: RunRuntime;
   messages: ChatMessage[];
   sessionId: string;
   metadata?: Record<string, unknown>;
@@ -52,6 +54,8 @@ export type AgentEvent = AgentEventData & { sessionId?: string; runId?: string; 
 
 type AgentEventData =
   // agent 生命周期
+  | { type: 'run:changed'; status: RunStatus; error?: string }
+  | { type: 'interaction:request'; request: InteractionRequest }
   | { type: 'agent:start' }
   | { type: 'agent:end'; messages: ChatMessage[]; status?: 'completed' | 'failed' | 'cancelled' | 'max_turns_exceeded' }
 
