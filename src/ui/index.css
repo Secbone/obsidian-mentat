@@ -1,8 +1,7 @@
 /* Personal Agent - Component Styles Index */
 
 /* Theme styles */
-@import './themes/bubble/style.css';
-@import './themes/terminal/style.css';
+@import './chat-cards/style.css';
 @import './themes/smart-scroll.css';
 
 /* Chat UI components (shared structural styles, no visual theme) */
@@ -17,3 +16,13 @@
 
 /* Global responsive adjustments (must be last) */
 @import './responsive/style.css';
+
+/* Run inspection shares the normal Obsidian theme. */
+.mentat-run-inspector-modal { width: min(1100px, 95vw); }
+.mentat-run-inspector-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mentat-run-inspector-controls select { flex: 1 1 100%; max-width: 100%; }
+.mentat-run-inspector-controls input[type="search"] { flex: 1 1 260px; min-width: 0; }
+.mentat-run-inspector-controls label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.mentat-run-inspector details { margin-block: 8px; }
+.mentat-run-inspector summary { cursor: pointer; overflow-wrap: anywhere; }
+.mentat-run-inspector pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 45vh; overflow: auto; }

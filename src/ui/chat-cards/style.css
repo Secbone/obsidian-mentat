@@ -1,0 +1,110 @@
+/* The native view adds no second inset; only the timeline owns its outer spacing. */
+.mentat-chat-host { padding:0 !important; background:transparent !important; overflow:hidden; }
+.mentat-chat-shell {
+  --card-user: #3973ce; --card-activity: #8659bd; --card-tool: #148692;
+  --card-reply: #38804e; --card-wait: #a97512; --card-error: #c34545; --card-system: #7b8490;
+  position:relative; display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0;
+  color: var(--text-normal); background: transparent; font-size: var(--font-ui-small);
+  container: mentat-chat / inline-size;
+}
+.theme-dark .mentat-chat-shell {
+  --card-user: #83b1fa; --card-activity: #b49be9; --card-tool: #6dc7cb;
+  --card-reply: #87c39a; --card-wait: #e7bc68; --card-error: #f18c8c; --card-system: #929da9;
+}
+.mentat-chat-header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--background-modifier-border); flex-shrink:0; }
+.mentat-chat-header strong { font-size:15px; letter-spacing:.01em; }
+.mentat-chat-header-actions { display:flex; align-items:center; gap:6px; }
+.mentat-chat-icon { display:inline-flex; align-items:center; padding:5px; background:transparent; box-shadow:none; }
+.mentat-chat-icon svg { width:17px; height:17px; }
+.mentat-chat-menu { position:relative; }
+.mentat-chat-menu summary { cursor:pointer; font-size:12px; padding:5px; list-style:none; }
+.mentat-chat-menu-body { position:absolute; right:0; top:100%; z-index:30; min-width:145px; padding:6px; display:grid; gap:4px; border:1px solid var(--background-modifier-border); border-radius:6px; background:var(--background-primary); box-shadow:var(--shadow-s); }
+.mentat-chat-menu:not([open]) .mentat-chat-menu-body { display:none; }
+.mentat-chat-menu-body button { justify-content:flex-start; }
+.mentat-chat-status { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; padding:8px 14px; min-height:36px; background:var(--background-secondary); flex-shrink:0; font-size:12px; }
+.mentat-chat-status > span:first-child { flex:1 1 120px; }
+.mentat-chat-elapsed { color:var(--text-muted); font-variant-numeric:tabular-nums; }
+.mentat-chat-status button { font-size:11px; padding:3px 8px; height:auto; }
+.mentat-chat-context { padding:6px 14px; border-bottom:1px solid var(--background-modifier-border); flex-shrink:0; font-size:12px; }
+.mentat-chat-context > summary { cursor:pointer; color:var(--text-muted); }
+.mentat-chat-context-controls { padding-top:6px; }
+.mentat-chat-context-controls button { font-size:11px; }
+.mentat-chat-document-list { display:flex; flex-wrap:wrap; gap:6px; max-height:130px; overflow:auto; padding-block:6px; }
+.mentat-chat-document-list .document-item { display:flex; align-items:center; gap:6px; max-width:100%; padding:3px 7px; border:1px solid var(--background-modifier-border); border-radius:4px; }
+.mentat-chat-document-list .document-name { overflow:hidden; text-overflow:ellipsis; }
+.mentat-chat-document-list .document-icon svg { width:13px; height:13px; }
+.mentat-chat-document-list .document-remove-button { padding:0; background:transparent; box-shadow:none; }
+.mentat-chat-document-list .document-remove-button svg { width:12px; height:12px; }
+.mentat-chat-document-list .document-list-empty, .mentat-chat-document-list .document-list-hint { color:var(--text-muted); font-size:11px; }
+.mentat-card-scroll { flex:1; min-height:0; min-width:0; overflow-y:auto; overflow-x:hidden; padding:14px; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.mentat-card-list:empty::after { content:'输入问题开始，执行过程和结果会显示在这里。'; color:var(--text-muted); display:block; padding:20px 2px; line-height:1.7; }
+.mentat-card { --card-color:var(--card-system); border:0; border-inline-start:3px solid var(--card-color); padding:10px 0 12px 13px; margin:0; min-width:0; border-radius:0; background:transparent; }
+.mentat-card + .mentat-card { margin-top:4px; }
+.mentat-card[data-kind="user"] { --card-color:var(--card-user); }
+.mentat-card[data-kind="activity"], .mentat-card[data-kind="process"] { --card-color:var(--card-activity); }
+.mentat-card[data-kind="tool"] { --card-color:var(--card-tool); }
+.mentat-card[data-kind="reply"], .mentat-card[data-kind="artifact"] { --card-color:var(--card-reply); }
+.mentat-card[data-kind="interaction"], .mentat-card[data-status="unknown"], .mentat-card[data-status="interrupted"] { --card-color:var(--card-wait); }
+.mentat-card[data-status="failed"] { --card-color:var(--card-error); }
+.mentat-card[data-kind="user"]:not(:first-child) { margin-top:22px; }
+.mentat-card-header { display:flex; align-items:baseline; gap:4px 9px; min-width:0; line-height:1.6; }
+.mentat-card-title { min-width:0; font-weight:600; font-size:12px; color:var(--card-color); overflow-wrap:anywhere; }
+.mentat-card-status { flex-shrink:0; font-size:11px; color:var(--text-muted); }
+.mentat-card[data-status="failed"] .mentat-card-status, .mentat-card[data-status="unknown"] .mentat-card-status { color:var(--card-color); }
+.mentat-card-time { margin-inline-start:auto; color:var(--text-faint); font-size:11px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.mentat-card-header .mentat-card-detail-toggle { flex-shrink:0; height:auto; padding:0; border:0; background:transparent; box-shadow:none; color:var(--text-muted); font-size:11px; white-space:nowrap; }
+.mentat-card-detail-toggle:hover { color:var(--text-normal); }
+.mentat-card-detail-toggle[hidden] { display:none; }
+.mentat-card-body { margin-top:5px; white-space:pre-wrap; line-height:1.65; overflow-wrap:anywhere; min-width:0; }
+.mentat-card-body .markdown-rendered { white-space:normal; }
+.mentat-card[data-kind="activity"] .mentat-card-body, .mentat-card[data-kind="tool"] .mentat-card-body { font-size:12px; color:var(--text-muted); }
+.mentat-card-body :is(h1,h2,h3,h4) { font-size:1.1em; margin-block:14px 7px; line-height:1.5; }
+.mentat-card-body :is(p,ul,ol,pre,blockquote) { margin-block:6px; }
+.mentat-card-body :is(table,pre) { max-width:100%; overflow:auto; }
+.mentat-card-body table { display:block; font-size:12px; }
+.mentat-card-body blockquote { margin-inline:0; padding-inline-start:10px; }
+.mentat-card-details { font-size:11px; color:var(--text-muted); }
+.mentat-card-details[open] { margin-top:5px; }
+.mentat-card-details > summary { display:none; }
+.mentat-card-details pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; padding:10px; background:var(--background-secondary); border-radius:4px; user-select:text; }
+.mentat-card-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+.mentat-card-actions:empty { display:none; }
+.mentat-card-actions button { font-size:11px; height:auto; padding:3px 9px; }
+.mentat-card-actions textarea { flex:1 1 100%; width:100%; min-height:58px; resize:vertical; }
+.mentat-card[data-kind="interaction"][data-status="waiting"] { background:color-mix(in srgb,var(--card-wait) 6%,transparent); padding-inline-end:10px; }
+.mentat-composer { flex-shrink:0; padding:10px 12px 7px; border-top:1px solid var(--background-modifier-border); background:transparent; }
+.mentat-composer-wrapper { position:relative; display:flex; align-items:flex-end; gap:8px; padding:8px; border:1px solid var(--background-modifier-border); border-radius:6px; }
+.mentat-composer-wrapper:focus-within { border-color:var(--interactive-accent); }
+.mentat-composer-input { flex:1; min-width:0; min-height:28px; max-height:180px; overflow:auto; outline:0; white-space:pre-wrap; line-height:1.6; padding:2px; }
+.mentat-composer-input:empty::before { content:attr(data-placeholder); color:var(--text-faint); pointer-events:none; }
+.mentat-composer-wrapper > button { flex-shrink:0; height:auto; padding:5px 10px; font-size:12px; }
+.mentat-composer-footer { display:flex; justify-content:space-between; gap:8px; padding:5px 2px 0; font-size:10px; color:var(--text-faint); }
+.mentat-chat-shell .mentat-doc-pill { display:inline-flex; align-items:center; gap:4px; padding:1px 5px; border-radius:3px; background:var(--background-secondary); color:var(--text-accent); font-size:12px; }
+.mentat-chat-shell .remove-pill { cursor:pointer; color:var(--text-muted); }
+.mentat-chat-shell .mentat-suggest-dropdown { position:absolute; bottom:100%; left:0; right:0; z-index:40; max-height:230px; overflow:auto; border:1px solid var(--background-modifier-border); background:var(--background-primary); border-radius:5px; box-shadow:var(--shadow-s); }
+.mentat-chat-shell .mentat-suggest-item { display:flex; align-items:center; gap:7px; padding:7px 9px; cursor:pointer; }
+.mentat-chat-shell .mentat-suggest-item.is-selected { background:var(--background-modifier-hover); }
+.mentat-chat-shell .mentat-suggest-item-icon svg { width:14px; height:14px; }
+.mentat-chat-shell .mentat-suggest-item-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mentat-chat-shell .mentat-suggest-item-desc { font-size:10px; color:var(--text-muted); }
+.mentat-chat-shell[data-appearance="terminal"] .mentat-card[data-kind="tool"] .mentat-card-title { font-family:var(--font-monospace); }
+.mentat-chat-shell[data-appearance="terminal"] .mentat-card { padding-block:7px 9px; }
+.mentat-chat-shell[data-preset="amber"] { --card-system:#ad862c; }
+.mentat-chat-shell[data-preset="dracula"] { --card-system:#a48ac9; }
+.mentat-chat-shell[data-preset="github-dark"] { --card-system:#8b9aaa; }
+@container mentat-chat (max-width: 380px) {
+  .mentat-card-scroll { padding:10px 8px; }
+  .mentat-card { padding-inline-start:10px; }
+  .mentat-chat-header, .mentat-chat-status { padding-inline:10px; }
+  .mentat-composer { padding-inline:8px; }
+}
+@media (prefers-reduced-motion: reduce) { .mentat-chat-shell * { scroll-behavior:auto !important; } }
+
+.mentat-card-list { min-width:0; }
+.mentat-load-earlier { display:block; margin:0 auto 12px; font-size:11px; }
+.mentat-load-earlier[hidden] { display:none; }
+
+.mentat-chat-shell .smart-scroll-new-message { bottom:110px; }
+
+/* Obsidian button/display rules can override the browser default for hidden. */
+.mentat-chat-shell [hidden] { display:none !important; }

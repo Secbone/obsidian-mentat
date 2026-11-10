@@ -1,3 +1,7 @@
+import { Observer } from './observability/observer';
+import { LogStore } from './observability/log-store';
+import { RunInspectorModal } from './ui/run-inspector-modal';
+import type { Command } from 'obsidian';
 import { RunHistoryModal } from './ui/run-history-modal';
 import { ChatManager } from './chat/chat-manager';
 import { RunController } from './runtime/run-controller';
@@ -17,6 +21,7 @@ import { ObsidianAdapter } from './utils/obsidian-adapter';
 import { DiagnosticsExporter } from './diagnostics/diagnostics-exporter';
 
 export default class MentatPlugin extends Plugin {
+  observer!: Observer;
   settings!: MentatSettings;
   aiRouter!: AIRouter;
   openCodeIntegration!: OpenCodeIntegration;
@@ -34,30 +39,45 @@ export default class MentatPlugin extends Plugin {
   private prevPreset: string = '';
 
   async onload() {
-    console.log('Loading Mentat plugin');
+    this.platform = new ObsidianAdapter(this);
+    this.observer = new Observer(new LogStore(this.app.vault.adapter, `${this.app.vault.configDir}/plugins/mentat/logs`), () => [
+      ...(this.settings?.aiProviders || []).map(p => p.apiKey || ''), this.settings?.browserlessApiKey || '', this.settings?.braveSearchApiKey || '',
+    ]);
+    const belongsToPlugin = (value: unknown) => value instanceof Error && /(?:plugin:mentat|plugins\/mentat\/|plugin:obsidian-mentat)/.test(value.stack || '');
+    this.registerDomEvent(window, 'error', event => {
+      if (belongsToPlugin(event.error)) this.observer.error('global:error', event.error, { component: 'host' });
+    });
+    this.registerDomEvent(window, 'unhandledrejection', event => {
+      if (belongsToPlugin(event.reason)) this.observer.error('global:unhandled_rejection', event.reason, { component: 'host' });
+    });
+    try { await this.observer.task('plugin:initialize', () => this.initializePlugin(), { component: 'plugin' }); }
+    catch (error) { await this.observer.store.drain(); throw error; }
+  }
+
+  private async initializePlugin(): Promise<void> {
 
     // Load settings
     await this.loadSettings();
 
     // Initialize platform adapter
-    this.platform = new ObsidianAdapter(this);
     const platform = this.platform;
 
     // Initialize AI Router
-    this.aiRouter = new AIRouter(this.settings);
+    this.aiRouter = new AIRouter(this.settings, this.observer);
 
     // Initialize Index Manager
-    this.indexManager = new IndexManager(platform, () => this.aiRouter.getProvider(TaskType.EMBEDDING));
-    await this.indexManager.initialize();
+    this.indexManager = new IndexManager(platform, () => this.aiRouter.getProvider(TaskType.EMBEDDING), this.observer);
+    await this.observer.task('index:initialize', () => this.indexManager.initialize(), { component: 'index' });
 
     // Initialize EventBus (before ChatOrchestrator, for agent event streaming)
-    this.eventBus = new EventBus();
+    this.eventBus = new EventBus((error, type) => this.observer.error('event:handler:failed', error, { component: 'events', attributes: { eventType: type } }));
 
     // Initialize Chat Orchestrator (may fail gracefully if no provider configured)
     this.chatOrchestrator = new ChatOrchestrator(platform, this.settings, this.aiRouter, this.indexManager, this.eventBus);
     try {
       await this.chatOrchestrator.initialize();
     } catch (error: unknown) {
+      this.observer.error('chat:initialize:failed', error, { component: 'chat' });
       console.warn('Mentat: ChatOrchestrator initialization failed (will retry after provider config):', 
         error instanceof Error ? error.message : String(error));
       new Notice('Mentat: 未检测到 AI 服务商配置。请在设置中配置 API Key。No AI provider configured — add one in Mentat settings.');
@@ -66,9 +86,12 @@ export default class MentatPlugin extends Plugin {
     this.chatManager = new ChatManager(this);
     await this.chatManager.getHistory();
     this.runController = new RunController(new RunStore(platform), this.eventBus, this.chatManager,
-      (prompt, context) => this.chatOrchestrator.sendMessage(prompt, { context, enableSkills: context.metadata?.enableSkills as boolean | undefined }));
+      (prompt, context) => this.chatOrchestrator.sendMessage(prompt, { context, enableSkills: context.metadata?.enableSkills as boolean | undefined }), this.observer);
     await this.runController.initialize();
-    if (this.runController.store.warnings.length) new Notice('部分运行记录损坏，自动执行已暂停；请导出诊断检查。');
+    if (this.runController.store.warnings.length) {
+      this.observer.event('storage:recovery:warning', { component: 'storage', level: 'warn', attributes: { warnings: this.runController.store.warnings } });
+      new Notice('部分运行记录损坏，自动执行已暂停；请打开运行检查器查看。');
+    }
 
     // Get AgentManager reference (for advanced usage)
     this.agentManager = this.chatOrchestrator.getAgentManager();
@@ -103,24 +126,37 @@ export default class MentatPlugin extends Plugin {
     // Register commands
     this.registerCommands();
 
-    console.log('Mentat plugin loaded successfully');
+    this.observer.event('plugin:ready', { component: 'plugin', attributes: { version: this.manifest.version } });
   }
 
   onunload(): void {
-    console.log('Unloading Mentat plugin');
-    void this.runController?.dispose().catch(error => console.error('[Mentat] Runtime shutdown failed', error));
+    this.observer?.event('plugin:unloading', { component: 'plugin' });
+    void (async () => {
+      try { await this.runController?.dispose(); }
+      catch (error) { this.observer?.error('plugin:shutdown:failed', error, { component: 'plugin' }); }
+      await this.observer?.store.drain();
+    })();
     try {
       this.chatOrchestrator?.dispose();
     } catch (error: unknown) {
+      this.observer?.error('plugin:dispose:failed', error, { component: 'plugin' });
       console.warn('Mentat: Error during dispose:', error instanceof Error ? error.message : String(error));
     }
     this.openCodeIntegration?.dispose();
   }
 
   private registerCommands(): void {
-    this.addCommand({ id: 'manage-runs', name: 'Open run history and recovery', callback: () => new RunHistoryModal(this).open() });
+    const add = (command: Command) => {
+      const callback = command.callback;
+      this.addCommand({ ...command, callback: callback ? () => {
+        void this.observer.task(`command:${command.id}`, async () => { await callback(); }, { component: 'ui' })
+          .catch(error => new Notice(`Mentat：${error instanceof Error ? error.message : String(error)}`));
+      } : undefined });
+    };
+    add({ id: 'inspect-runs', name: '打开运行检查器 / Open run inspector', callback: () => new RunInspectorModal(this).open() });
+    add({ id: 'manage-runs', name: 'Open run history and recovery', callback: () => new RunHistoryModal(this).open() });
     // Chat command
-    this.addCommand({
+    add({
       id: 'open-chat',
       name: 'Open AI Chat',
       callback: async () => {
@@ -133,7 +169,7 @@ export default class MentatPlugin extends Plugin {
     });
 
     // Index all documents command
-    this.addCommand({
+    add({
       id: 'index-vault',
       name: 'Index all documents for RAG',
       callback: async () => {
@@ -155,13 +191,13 @@ export default class MentatPlugin extends Plugin {
         } catch (error: unknown) {
           notice.hide();
           new Notice(`✗ Indexing failed: ${error instanceof Error ? error.message : String(error)}`);
-          console.error('Indexing error:', error);
+          this.observer.error('index:full:failed', error, { component: 'background' });
         }
       }
     });
 
     // Incremental index command
-    this.addCommand({
+    add({
       id: 'index-incremental',
       name: 'Update index (incremental)',
       callback: async () => {
@@ -185,13 +221,13 @@ export default class MentatPlugin extends Plugin {
         } catch (error: unknown) {
           notice.hide();
           new Notice(`✗ Update failed: ${error instanceof Error ? error.message : String(error)}`);
-          console.error('Incremental indexing error:', error);
+          this.observer.error('index:incremental:failed', error, { component: 'background' });
         }
       }
     });
 
     // Show index stats command
-    this.addCommand({
+    add({
       id: 'index-stats',
       name: 'Show index statistics',
       callback: () => {
@@ -207,7 +243,7 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
     });
 
     // Index current file command
-    this.addCommand({
+    add({
       id: 'index-current-file',
       name: 'Index current file',
       callback: async () => {
@@ -231,13 +267,13 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
         } catch (error: unknown) {
           notice.hide();
           new Notice(`✗ Failed to index: ${error instanceof Error ? error.message : String(error)}`);
-          console.error('File indexing error:', error);
+          this.observer.error('index:file:failed', error, { component: 'background' });
         }
       }
     });
 
     // Test AI providers command
-    this.addCommand({
+    add({
       id: 'test-providers',
       name: 'Test AI Providers',
       callback: async () => {
@@ -254,7 +290,7 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
     });
 
     // Reload skills command
-    this.addCommand({
+    add({
       id: 'reload-skills',
       name: 'Reload all skills',
       callback: async () => {
@@ -267,13 +303,13 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
         } catch (error: unknown) {
           notice.hide();
           new Notice(`✗ Failed to reload skills: ${error instanceof Error ? error.message : String(error)}`);
-          console.error('Skill reload error:', error);
+          this.observer.error('skills:reload:failed', error, { component: 'background' });
         }
       }
     });
 
     // View diagnostics command
-    this.addCommand({
+    add({
       id: 'view-diagnostics',
       name: 'Open Diagnostics and Debug Log',
       callback: async () => {

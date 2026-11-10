@@ -1,15 +1,9 @@
 import { DiagnosticsLogger } from '../agents/agent-types';
 import { Notice } from 'obsidian';
 
-export function redactDiagnostics(value: unknown, secrets: string[] = []): unknown {
-  if (Array.isArray(value)) return value.map(item => redactDiagnostics(item, secrets));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /api.?key|authorization|password|secret|^(access|refresh|auth)[_-]?token$|^token$/i.test(key) ? '[REDACTED]' : redactDiagnostics(item, secrets)]));
-  if (typeof value !== 'string') return value;
-  if (/^(?:\{|\[)/.test(value.trim())) { try { return JSON.stringify(redactDiagnostics(JSON.parse(value), secrets)); } catch { /* plain text */ } }
-  let text = value.replace(/Bearer\s+[A-Za-z0-9._~+/-]+/gi, 'Bearer [REDACTED]').replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED]').replace(/([?&](?:api_key|access_token|token|key)=)[^&\s]+/gi, '$1[REDACTED]');
-  for (const secret of secrets.filter(Boolean)) text = text.split(secret).join('[REDACTED]');
-  return text;
-}
+import { redactDiagnostics } from '../observability/redaction';
+export { redactDiagnostics } from '../observability/redaction';
+import type { Observer } from '../observability/observer';
 
 
 /**
@@ -22,11 +16,15 @@ export class VaultDiagnosticsLogger implements DiagnosticsLogger {
   private pending: Promise<void> = Promise.resolve();
   private warned = false;
 
-  constructor(vault: { adapter: { exists: (path: string) => Promise<boolean>; mkdir: (path: string) => Promise<void>; append: (path: string, data: string) => Promise<void> } } | null, private secrets: () => string[] = () => []) {
+  constructor(vault: { adapter: { exists: (path: string) => Promise<boolean>; mkdir: (path: string) => Promise<void>; append: (path: string, data: string) => Promise<void> } } | null, private secrets: () => string[] = () => [], private observer?: Observer) {
     this.vault = vault;
   }
 
   async logIncident(incident: Parameters<DiagnosticsLogger['logIncident']>[0]): Promise<void> {
+    if (this.observer) {
+      this.observer.event('diagnostic:incident', { component: 'skills', sessionId: incident.sessionId, runId: incident.runId, level: incident.success ? 'info' : 'error', attributes: incident });
+      return;
+    }
     const safe = redactDiagnostics({ timestamp: Date.now(), time: new Date().toISOString(), ...incident }, this.secrets());
     const write = this.pending.catch(() => undefined).then(async () => {
     try {

@@ -442,9 +442,9 @@ ${folderGuidelines}
 
     new Setting(containerEl)
       .setName('Chat UI Theme')
-      .setDesc('Switch between different chat interface styles.')
+      .setDesc('两种外观共用对齐的卡片时间线和相同状态逻辑。')
       .addDropdown(dropdown => dropdown
-        .addOptions({ bubble: '经典气泡 (Bubble)', terminal: '终端式 (Terminal)' })
+        .addOptions({ bubble: '卡片 · 舒适', terminal: '卡片 · 紧凑' })
         .setValue(this.plugin.settings.chatTheme || 'bubble')
         .onChange(async (value) => {
           this.plugin.settings.chatTheme = value;

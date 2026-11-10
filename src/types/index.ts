@@ -37,6 +37,7 @@ export interface SkillCallMessage {
 
 // AI Provider interfaces
 export interface GenerateOptions {
+  onProgress?: (message: string) => void;
   onResponse?: (response: GenerateResponse) => void;
   maxTokens?: number;
   temperature?: number;
@@ -52,7 +53,9 @@ export interface GenerateResponse {
   content: string;
   toolCalls?: ToolCall[];
   finishReason?: 'stop' | 'tool_calls' | 'length';
-  diagnostics?: { outputLimit?: number; partialContent?: string; pendingToolCalls?: number; reasoningTokens?: number };
+  providerState?: { providerId: string; reasoningContent: string };
+  diagnostics?: { outputLimit?: number; partialContent?: string; pendingToolCalls?: number; reasoningTokens?: number;
+    requestId?: string; elapsedMs?: number; firstProgressMs?: number; outputCharacters?: number; reasoningCharacters?: number; reasoningMode?: string; legacyCompatibility?: boolean };
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -101,6 +104,7 @@ export interface AIProvider {
   supportsSkills?(): boolean;
 
   getMaxOutputTokens?(): number;
+  getRequestMetadata?(): Record<string, unknown>;
 
   // Context window
   getContextWindow(): number;

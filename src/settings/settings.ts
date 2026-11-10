@@ -130,6 +130,7 @@ export interface AIProviderConfig {
   // Advanced options
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: 'default' | 'low' | 'high' | 'max' | 'none';
 
   // Context window (auto-detected from model if omitted)
   contextWindow?: number;
@@ -181,6 +182,7 @@ export const DEFAULT_SETTINGS: MentatSettings = {
       'obsidian:read_note',
       'obsidian:query_notes',
       'obsidian:edit_note',
+      'obsidian:write_note',
       'obsidian:web_search',
       'obsidian:ask_user',
       'obsidian:list_notes',

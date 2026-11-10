@@ -66,13 +66,18 @@ export class Compactor {
    * Used for budget checking before compaction.
    */
   static estimateTokens(messages: ChatMessage[]): number {
-    let totalChars = 0;
+    let tokens = 0;
+    const estimate = (text: string) => {
+      let unicode = 0;
+      for (let index = 0; index < text.length; index++) if (text.charCodeAt(index) > 127) unicode++;
+      return unicode + (text.length - unicode) / 4;
+    };
     for (const m of messages) {
-      totalChars += (typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length) + 10;
-      if (m.tool_calls) {
-        totalChars += JSON.stringify(m.tool_calls).length;
-      }
+      tokens += estimate(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)) + 4;
+      if (m.tool_calls) tokens += estimate(JSON.stringify(m.tool_calls));
+      const state = m.metadata?.providerState as { reasoningContent?: string } | undefined;
+      if (state?.reasoningContent) tokens += estimate(state.reasoningContent);
     }
-    return Math.ceil(totalChars / 4);
+    return Math.ceil(tokens);
   }
 }

@@ -175,44 +175,48 @@ describe('Chat reliability regressions', () => {
     expect(second).toHaveBeenCalledOnce();
   });
 
-  it('isolates parent UI lifecycle from child and stale executions', () => {
+  it('ignores child and stale UI events and leaves completion to the runtime', async () => {
+    vi.useFakeTimers();
     const view = Object.create(ChatView.prototype) as any;
-    view.streamState = {};
-    view.activeContext = { sessionId: 's', runId: 'parent' };
-    view.finalizeStream = vi.fn();
-    view.handleStreamEvent({ type: 'agent:end', messages: [], agentId: 'child', sessionId: 's', runId: 'child' });
-    view.handleStreamEvent({ type: 'agent:end', messages: [], agentId: 'default-chat-agent', sessionId: 's', runId: 'old' });
-    expect(view.finalizeStream).not.toHaveBeenCalled();
-    view.handleStreamEvent({ type: 'agent:end', messages: [], agentId: 'default-chat-agent', sessionId: 's', runId: 'parent' });
-    expect(view.finalizeStream).toHaveBeenCalledOnce();
+    view.chatManager = {getSessionInfo:() => ({sessionId:'s'})};
+    view.plugin = {runController:{list:() => [{id:'parent'}]}};
+    view.render = vi.fn();
+    view.handleRuntimeEvent({type:'agent:end',messages:[],agentId:'child',sessionId:'s',runId:'child'});
+    view.handleRuntimeEvent({type:'agent:end',messages:[],agentId:'default-chat-agent',sessionId:'s',runId:'old'});
+    await vi.runAllTimersAsync(); expect(view.render).not.toHaveBeenCalled();
+    view.handleRuntimeEvent({type:'agent:end',messages:[],agentId:'default-chat-agent',sessionId:'s',runId:'parent'});
+    await vi.runAllTimersAsync(); expect(view.render).toHaveBeenCalledOnce();
   });
 
-  it('runs the UI send path twice with durable history and finalizes the streaming bubbles', async () => {
+  it('runs the card UI send path twice with durable history and runtime completion', async () => {
     const { agent, bus } = setup();
     const platform = new MemoryPlatformAdapter();
     const manager = new ChatManager({ platform, loadData: async () => ({}), saveData: async () => {} } as any);
     const view = Object.create(ChatView.prototype) as any;
     let prompt = 'first';
     Object.assign(view, {
-      chatManager: manager, eventBus: bus, isStreaming: false,
-      inputHandler: { getRawTextContent: () => prompt, getContextPillPaths: () => [], clearInput: vi.fn(), focusInput: vi.fn() },
+      chatManager: manager, eventBus: bus, history:[],themeRegistry:{dispose:vi.fn()},
+      inputHandler: { getRawTextContent: () => prompt, getContextPillPaths: () => [], clearInput: vi.fn(), focusInput: vi.fn(),dispose:vi.fn() },
       renderDocumentList: vi.fn(),
       plugin: { settings: { skillsEnabled: true, maxTurns: 20 } },
-      theme: { renderUserMessage: vi.fn(), createStreamingBubble: () => ({}), updateInputState: vi.fn(), updateStreamingUI: vi.fn(), finalizeStreaming: vi.fn(() => document.createElement('div')) },
+      theme: { render:vi.fn(), updateInputState:vi.fn() },
       chatOrchestrator: { sendMessage: (_q: string, options: any) => agent.execute(_q, options.context), reportFailure: vi.fn() },
     });
     const runtime = new RunController(new RunStore(platform), bus, manager, async (_q, context) => { await agent.execute(_q, context); });
     await runtime.initialize();
     view.plugin.runController = runtime;
     view.runtimeUnsubscribe = bus.on('*', (event: AgentEvent) => view.handleRuntimeEvent(event));
-    view.renderRunControls = vi.fn();
     await view.handleSend();
     await runtime.wait(runtime.list()[0].id);
     prompt = 'second';
     await view.handleSend();
     await runtime.wait(runtime.list()[0].id);
-    expect(view.theme.finalizeStreaming).toHaveBeenCalledTimes(2);
-    expect(view.isStreaming).toBe(false);
+    view.render();
+    const state = view.theme.render.mock.calls.at(-1)[0];
+    expect(state.cards.filter((c:any) => c.kind === 'reply').map((c:any) => c.text)).toEqual(['answer','answer']);
+    expect(state.busy).toBe(false);
+    expect(state.inputMode).toBe('send');
+    await view.onClose();
     expect((await manager.getHistory()).map(m => m.content)).toEqual(['first', 'answer', 'second', 'answer']);
     expect(view.chatOrchestrator.reportFailure).not.toHaveBeenCalled();
   });

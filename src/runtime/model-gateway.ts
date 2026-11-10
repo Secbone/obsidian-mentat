@@ -1,3 +1,4 @@
+import { errorDetails } from '../utils/execution';
 import type { AIProvider, ChatMessage, GenerateOptions, GenerateResponse } from '../types';
 import type { RunRuntime } from './types';
 import { Compactor } from '../agents/compactor';
@@ -29,47 +30,72 @@ export function validateToolPairs(messages: ChatMessage[]): void {
 }
 export class ModelGateway {
   constructor(private provider: AIProvider) {}
+  private progress(onChunk: (text: string) => void, options: GenerateOptions, runtime: RunRuntime | undefined, requestId: string, start: number) {
+    let firstProgressMs: number | undefined;
+    const mark = () => {
+      if (firstProgressMs !== undefined) return;
+      firstProgressMs = performance.now() - start;
+      runtime?.observe?.('model:first_progress', { requestId, elapsedMs: firstProgressMs });
+    };
+    const timer = runtime?.observe ? setInterval(() => runtime.observe?.('model:progress', { requestId, elapsedMs: performance.now() - start,
+      phase: firstProgressMs === undefined ? 'waiting_for_response' : 'receiving' }), 10000) : undefined;
+    return {
+      chunk: (text: string) => { mark(); onChunk(text); },
+      options: { ...options, onProgress: (message: string) => { mark(); options.onProgress?.(message); } },
+      finish: () => { if (timer) clearInterval(timer); },
+    };
+  }
   async generateSimple(messages: ChatMessage[], onChunk: (text: string) => void, options: GenerateOptions, runtime?: RunRuntime): Promise<GenerateResponse> {
     if (this.provider.generateStreamWithSkills && this.provider.supportsSkills?.()) return this.generate(messages, onChunk, { ...options, skills: undefined }, runtime);
     const outputLimit = this.provider.getMaxOutputTokens?.() ?? 16384;
-    await runtime?.record('model:requested', { providerId: this.provider.id, outputLimit });
+    const requestId = `model-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const startedAt = performance.now();
+    await runtime?.record('model:requested', { requestId, providerId: this.provider.id, requestConfig: this.provider.getRequestMetadata?.(), outputLimit });
+    const progress = this.progress(onChunk, options, runtime, requestId, startedAt);
     let content = '', response: GenerateResponse | undefined;
     try {
-      await this.provider.generateStream(messages.map(m => `[${m.role}]: ${m.content}`).join('\n\n'), chunk => { content += chunk; onChunk(chunk); }, { ...options, maxTokens: outputLimit, onResponse: result => { response = result; } });
+      await this.provider.generateStream(messages.map(m => `[${m.role}]: ${m.content}`).join('\n\n'), chunk => { content += chunk; progress.chunk(chunk); }, { ...progress.options, maxTokens: outputLimit, onResponse: result => { response = result; } });
       const result = response || { content };
-      result.diagnostics = { ...result.diagnostics, outputLimit };
+      result.diagnostics = { ...result.diagnostics, outputLimit, requestId, elapsedMs: performance.now() - startedAt };
       await runtime?.modelResult(result);
       return result;
     } catch (error) {
       if (error instanceof ModelResponseError) {
-        error.response.diagnostics = { ...error.response.diagnostics, outputLimit };
+        error.response.diagnostics = { ...error.response.diagnostics, outputLimit, requestId, elapsedMs: performance.now() - startedAt };
         await runtime?.modelResult(error.response);
+      } else {
+        await runtime?.record('model:failed', { requestId, elapsedMs: performance.now() - startedAt, error: errorDetails(error) });
       }
       throw error;
-    }
+    } finally { progress.finish(); }
   }
 
   async generate(messages: ChatMessage[], onChunk: (text: string) => void, options: GenerateOptions, runtime?: RunRuntime): Promise<GenerateResponse> {
-    messages = messages.filter(message => !message.metadata?.isSubagent);
+    messages = messages.filter(message => !message.metadata?.isSubagent && !message.metadata?.interrupted);
     validateToolPairs(messages);
     const configured = this.provider.getMaxOutputTokens?.() ?? 16384;
     const inputEstimate = Compactor.estimateTokens(messages) + Math.ceil((options.systemPrompt?.length || 0) / 2);
     const remaining = this.provider.getContextWindow() - inputEstimate - 256;
     const outputLimit = Math.floor(Math.min(options.maxTokens ?? configured, configured, remaining));
     if (!Number.isFinite(outputLimit) || outputLimit < 1) throw new Error('上下文没有足够输出空间，请压缩后继续。');
-    await runtime?.record('model:requested', { providerId: this.provider.id, inputEstimate, outputLimit });
+    const requestId = `model-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const startedAt = performance.now();
+    await runtime?.record('model:requested', { requestId, providerId: this.provider.id, requestConfig: this.provider.getRequestMetadata?.(), inputEstimate, outputLimit });
+    const progress = this.progress(onChunk, options, runtime, requestId, startedAt);
     try {
-      const result = await this.provider.generateStreamWithSkills!(messages, onChunk, undefined, { ...options, maxTokens: outputLimit });
-      result.diagnostics = { ...result.diagnostics, outputLimit };
+      const result = await this.provider.generateStreamWithSkills!(messages, progress.chunk, undefined, { ...progress.options, maxTokens: outputLimit });
+      result.diagnostics = { ...result.diagnostics, outputLimit, requestId, elapsedMs: performance.now() - startedAt };
       await runtime?.modelResult(result);
       if (result.finishReason === 'length') throw new ModelResponseError('模型输出被长度限制截断，当前进度已保存；请按单个产物拆分后继续。', result);
       return result;
     } catch (error) {
       if (error instanceof ModelResponseError && !error.response.diagnostics?.outputLimit) {
-        error.response.diagnostics = { ...error.response.diagnostics, outputLimit };
+        error.response.diagnostics = { ...error.response.diagnostics, outputLimit, requestId, elapsedMs: performance.now() - startedAt };
         await runtime?.modelResult(error.response);
+      } else if (!(error instanceof ModelResponseError)) {
+        await runtime?.record('model:failed', { requestId, elapsedMs: performance.now() - startedAt, error: errorDetails(error) });
       }
       throw error;
-    }
+    } finally { progress.finish(); }
   }
 }

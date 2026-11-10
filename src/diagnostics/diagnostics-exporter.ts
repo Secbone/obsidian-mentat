@@ -1,3 +1,4 @@
+import { renderObservationHealth } from '../observability/run-projection';
 import { projectRunIncidents, renderRunFacts } from './run-diagnostics';
 import { Notice, TFile } from 'obsidian';
 import MentatPlugin from '../main';
@@ -54,7 +55,8 @@ export class DiagnosticsExporter {
         : '全部内置及 MCP 技能已激活';
       
       const directCallSkills = settings.skillInvocationConfig?.directCallSkills || [];
-      const directCallCount = directCallSkills.length;
+      const definitions = plugin.chatOrchestrator?.getSkillInvocationContext()?.getToolDefinitions(plugin.chatOrchestrator.getSkillRegistry(), providerType === 'anthropic' ? 'anthropic' : 'openai');
+      const directCallCount = definitions ? definitions.filter(tool => tool.name !== 'spec' && tool.name !== 'invoke').length : directCallSkills.length;
 
       // 1. Resolve and parse diagnostic logs (.mentat/diagnostics.jsonl)
       const logWarnings: string[] = [...(plugin.runController?.store.warnings || [])];
@@ -79,7 +81,7 @@ export class DiagnosticsExporter {
       let markdownContent = `# 🛠️ AI 会话诊断与分析报告\n\n`;
       
       markdownContent += `> [!NOTE]\n`;
-      markdownContent += `> 此诊断报告由 Mentat 一键自动生成。您可将此文件直接投喂给更大、更高级的模型（如 Claude 3.5 Sonnet / GPT-4o），帮助其精准诊断、反思和优化当前智能体的运行逻辑及工具调用参数。\n\n`;
+      markdownContent += `> 先查看日志完整性、运行排障摘要和失败记录，再按运行、请求与操作 ID 核对后续证据。当前环境配置与历史请求实际配置可能不同；未记录的信息不作根因推断。\n\n`;
 
       // 📌 Metadata section
       markdownContent += `## 📌 元数据与环境信息\n\n`;
@@ -106,6 +108,7 @@ export class DiagnosticsExporter {
 
       markdownContent += `---\n\n`;
 
+      markdownContent += await renderObservationHealth(plugin.observer, sessionId);
       markdownContent += renderRunFacts(runs);
       // ⚠️ Diagnostics logs section
       markdownContent += `## ⚠️ 执行异常与交互结果 (故障排查)\n\n`;
@@ -358,6 +361,7 @@ export class DiagnosticsExporter {
 
       return fileFullPath;
     } catch (err: unknown) {
+      plugin.observer?.error('diagnostics:export:failed', err, { component: 'diagnostics' });
       console.error('[DiagnosticsExporter] Failed to export session:', err);
       new Notice(`❌ 导出诊断报告异常：${err instanceof Error ? err.message : String(err)}`);
       return null;
@@ -573,6 +577,7 @@ export class DiagnosticsExporter {
 
       const lines = content.trim().split('\n').reverse().slice(0, 50); // Get latest 50 incidents
       let markdownContent = `# Mentat Diagnostics & Debug Log\n\n`;
+      markdownContent += await renderObservationHealth(plugin.observer);
       markdownContent += renderRunFacts(runs.slice(0, 20));
       if (plugin.runController?.store.warnings.length) markdownContent += `> [!WARNING]\n> ${plugin.runController.store.warnings.join('；')}\n\n`;
       if (legacyLines.length) markdownContent += '> 旧版日志缺少完整操作标识，可能包含多层重复记录；新版运行按操作归并。\n\n';
@@ -644,6 +649,7 @@ export class DiagnosticsExporter {
         new Notice('Log compiled. Please open "Mentat Debug Log.md" in your vault root.');
       }
     } catch (err: unknown) {
+      plugin.observer?.error('diagnostics:global_export:failed', err, { component: 'diagnostics' });
       new Notice(`Failed to load diagnostics: ${err instanceof Error ? err.message : String(err)}`);
     }
   }

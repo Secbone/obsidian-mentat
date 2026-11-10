@@ -13,6 +13,11 @@ export class ProviderEditModal extends Modal {
   private onSave: () => void;
   private fieldContainers: Map<string, HTMLElement>;
 
+  private defaultMaxTokens(): number {
+    try { return new URL(this.tempConfig.baseURL || '').hostname === 'api.deepseek.com' ? 65536 : 16384; }
+    catch { return 16384; }
+  }
+
   constructor(
     app: App,
     plugin: MentatPlugin,
@@ -195,13 +200,19 @@ export class ProviderEditModal extends Modal {
           this.tempConfig.temperature = value;
         }));
 
+    if (this.tempConfig.type === 'openai' && this.tempConfig.baseURL?.includes('api.deepseek.com')) {
+      new Setting(contentEl).setName('DeepSeek 推理强度').setDesc('低强度可减少思考等待；旧历史会保留为执行资料，恢复时不降低所选推理强度。')
+        .addDropdown(dropdown => dropdown.addOption('default', '服务商默认').addOption('low', '低（更快）').addOption('high', '高').addOption('max', '最高').addOption('none', '关闭思考')
+          .setValue(this.tempConfig.reasoningEffort || 'default').onChange(value => { this.tempConfig.reasoningEffort = value as AIProviderConfig['reasoningEffort']; }));
+    }
+
     // Max Tokens
     new Setting(contentEl)
       .setName('最大Tokens')
       .setDesc('单次响应的最大Token数')
       .addText(text => text
-        .setPlaceholder('16384')
-        .setValue(String(this.tempConfig.maxTokens || 16384))
+        .setPlaceholder(String(this.defaultMaxTokens()))
+        .setValue(String(this.tempConfig.maxTokens ?? this.defaultMaxTokens()))
         .onChange(value => {
           if (value === '') {
             this.tempConfig.maxTokens = undefined;
@@ -416,7 +427,7 @@ export class ProviderEditModal extends Modal {
       this.tempConfig.temperature = 0.7;
     }
     if (this.tempConfig.maxTokens === undefined) {
-      this.tempConfig.maxTokens = 16384;
+      this.tempConfig.maxTokens = this.defaultMaxTokens();
     }
     if (this.tempConfig.enabled === undefined) {
       this.tempConfig.enabled = true;

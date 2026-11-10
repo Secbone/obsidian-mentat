@@ -1,3 +1,4 @@
+import { RunInspectorModal } from './run-inspector-modal';
 import { Modal, Notice } from 'obsidian';
 import type MentatPlugin from '../main';
 import { CHAT_VIEW_TYPE, ChatView } from './chat-view';
@@ -12,6 +13,7 @@ export class RunHistoryModal extends Modal {
     for (const record of records) {
       const row = this.contentEl.createDiv();
       row.createEl('p', { text: `${new Date(record.createdAt).toLocaleString()} · ${record.status} · ${record.prompt.slice(0, 100)}` });
+      row.createEl('button', { text: '查看日志' }).addEventListener('click', () => new RunInspectorModal(this.plugin, record.id).open());
       row.createEl('button', { text: '打开记录' }).addEventListener('click', () => {
         void (async () => {
           await this.plugin.runController.open(record.id);

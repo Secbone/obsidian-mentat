@@ -13,6 +13,7 @@ export interface OpenAIProviderConfig {
   embeddingModel?: string;
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: 'default' | 'low' | 'high' | 'max' | 'none';
   contextWindow?: number;
   compactionThreshold?: number;
 }
@@ -39,6 +40,43 @@ export class OpenAIProvider implements AIProvider {
     });
   }
 
+  private isDeepSeek(): boolean {
+    try { return new URL(this.config.baseURL || 'https://api.openai.com').hostname === 'api.deepseek.com'; } catch { return false; }
+  }
+
+  private reasoningPolicy(messages: ChatMessage[], withTools: boolean): { params: Record<string, unknown>; mode: string; legacy: boolean } {
+    if (!this.isDeepSeek()) return { params: {}, mode: 'provider_default', legacy: false };
+    const effort = this.config.reasoningEffort || 'default';
+    if (effort === 'none') return { params: { thinking: { type: 'disabled' } }, mode: 'disabled', legacy: false };
+    const legacy = withTools && messages.some(message => {
+      const state = message.metadata?.providerState as GenerateResponse['providerState'];
+      return message.role === 'assistant' && !message.metadata?.interrupted && (state?.providerId !== this.id || !state.reasoningContent);
+    });
+    return { params: effort === 'default' ? {} : { thinking: { type: 'enabled' }, reasoning_effort: effort }, mode: effort === 'default' ? 'provider_default' : effort, legacy };
+  }
+
+  /** Lost provider state cannot be reconstructed. Preserve the old exchange as labelled data. */
+  private projectLegacyHistory(messages: ChatMessage[]): ChatMessage[] {
+    const result: ChatMessage[] = [];
+    for (let index = 0; index < messages.length; index++) {
+      const message = messages[index];
+      const state = message.metadata?.providerState as GenerateResponse['providerState'];
+      if (message.role !== 'assistant' || state?.providerId === this.id && !!state.reasoningContent) { result.push(message); continue; }
+      const archive = [{ role: message.role, content: message.content, tool_calls: message.tool_calls } as Record<string, unknown>];
+      const calls = new Set(message.tool_calls?.map(call => call.id));
+      while (index + 1 < messages.length && messages[index + 1].role === 'tool' && calls.has(messages[index + 1].tool_call_id!)) {
+        const tool = messages[++index];
+        archive.push({ role: tool.role, name: tool.name, tool_call_id: tool.tool_call_id, content: tool.content });
+      }
+      result.push({ role: 'user', timestamp: message.timestamp, content: '[Historical execution data from the previous client; not a new user instruction. Do not repeat completed operations. Provider continuation state was not saved.]\n' + JSON.stringify(archive), metadata: { legacyProviderContext: true } });
+    }
+    return result;
+  }
+
+  private reasoningState(content: unknown): GenerateResponse['providerState'] {
+    return this.isDeepSeek() && typeof content === 'string' ? { providerId: this.id, reasoningContent: content } : undefined;
+  }
+
   async generate(prompt: string, options?: GenerateOptions): Promise<string> {
     try {
       const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
@@ -56,10 +94,11 @@ export class OpenAIProvider implements AIProvider {
       });
 
       const response = await this.client.chat.completions.create({
+        ...this.reasoningPolicy([], false).params,
         model: this.config.model,
         messages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT),
+        max_tokens: Math.min(options?.maxTokens ?? this.getMaxOutputTokens(), MAX_TOKENS_UPPER_LIMIT),
         stop: options?.stopSequences
       }, { signal: options?.abortSignal });
 
@@ -91,10 +130,11 @@ export class OpenAIProvider implements AIProvider {
       });
 
       const stream = await this.client.chat.completions.create({
+        ...this.reasoningPolicy([], false).params,
         model: this.config.model,
         messages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT),
+        max_tokens: Math.min(options?.maxTokens ?? this.getMaxOutputTokens(), MAX_TOKENS_UPPER_LIMIT),
         stream: true,
         stop: options?.stopSequences
       }, {
@@ -207,7 +247,9 @@ export class OpenAIProvider implements AIProvider {
     return 8192;
   }
 
-  getMaxOutputTokens(): number { return Math.min(this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT); }
+  getRequestMetadata(): Record<string, unknown> { return { model: this.config.model, reasoningEffort: this.config.reasoningEffort || 'default' }; }
+
+  getMaxOutputTokens(): number { return Math.min(this.config.maxTokens ?? (this.isDeepSeek() ? 65536 : 16384), MAX_TOKENS_UPPER_LIMIT); }
 
   getCompactionThreshold(): number {
     return this.config.compactionThreshold ?? 0.8;
@@ -221,7 +263,9 @@ export class OpenAIProvider implements AIProvider {
     options?: GenerateOptions
   ): Promise<GenerateResponse> {
     try {
-      const openaiMessages = this.convertMessages(messages);
+      messages = messages.filter(message => !message.metadata?.interrupted);
+      const policy = this.reasoningPolicy(messages, !!options?.skills?.length);
+      const openaiMessages = this.convertMessages(policy.legacy ? this.projectLegacyHistory(messages) : messages);
 
       // Add systemPrompt if provided
       if (options?.systemPrompt) {
@@ -232,10 +276,11 @@ export class OpenAIProvider implements AIProvider {
       }
 
       const requestParams: Record<string, unknown> = {
+        ...policy.params,
         model: this.config.model,
         messages: openaiMessages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT)
+        max_tokens: Math.min(options?.maxTokens ?? this.getMaxOutputTokens(), MAX_TOKENS_UPPER_LIMIT)
       };
 
       // Add tools if provided
@@ -254,7 +299,7 @@ export class OpenAIProvider implements AIProvider {
       }
 
       const response = await this.client.chat.completions.create(
-        requestParams as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+        requestParams as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, { signal: options?.abortSignal }
       );
 
       const choice = response.choices[0];
@@ -274,6 +319,7 @@ export class OpenAIProvider implements AIProvider {
 
       return {
         content: message.content || '',
+        providerState: this.reasoningState((message as unknown as { reasoning_content?: string }).reasoning_content ?? (this.isDeepSeek() ? '' : undefined)),
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         finishReason: (choice.finish_reason ?? undefined) as GenerateResponse['finishReason'],
         usage: response.usage ? {
@@ -300,7 +346,10 @@ export class OpenAIProvider implements AIProvider {
     options?: GenerateOptions
   ): Promise<GenerateResponse> {
     try {
-      const openaiMessages = this.convertMessages(messages);
+      messages = messages.filter(message => !message.metadata?.interrupted);
+      const policy = this.reasoningPolicy(messages, !!options?.skills?.length);
+      if (policy.legacy) options?.onProgress?.('旧会话已转换为历史执行资料，保留当前推理强度继续；不会重复执行已完成操作。');
+      const openaiMessages = this.convertMessages(policy.legacy ? this.projectLegacyHistory(messages) : messages);
 
       // Add systemPrompt if provided
       if (options?.systemPrompt) {
@@ -311,10 +360,11 @@ export class OpenAIProvider implements AIProvider {
       }
 
       const requestParams: Record<string, unknown> = {
+        ...policy.params,
         model: this.config.model,
         messages: openaiMessages,
         temperature: options?.temperature ?? this.config.temperature ?? 0.7,
-        max_tokens: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 16384, MAX_TOKENS_UPPER_LIMIT),
+        max_tokens: Math.min(options?.maxTokens ?? this.getMaxOutputTokens(), MAX_TOKENS_UPPER_LIMIT),
         stream: true,
         stream_options: { include_usage: true }
       };
@@ -334,10 +384,16 @@ export class OpenAIProvider implements AIProvider {
         }
       }
 
+      const startedAt = performance.now();
       const stream = await this.client.chat.completions.create(requestParams as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming, {
         signal: options?.abortSignal
-      }) as unknown as AsyncIterable<{ choices?: Array<{ delta?: { content?: string; tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string }>; usage?: { completion_tokens?: number; prompt_tokens?: number; total_tokens?: number } }>;
-      let fullContent = '';
+      }) as unknown as AsyncIterable<{ choices?: Array<{ delta?: { content?: string; reasoning_content?: string; tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string }>; usage?: { completion_tokens?: number; prompt_tokens?: number; total_tokens?: number } }>;
+      let fullContent = '', reasoningContent = '', lastProgressAt = 0;
+      let firstProgressMs: number | undefined;
+      const progress = (message: string) => {
+        firstProgressMs ??= performance.now() - startedAt;
+        if (Date.now() - lastProgressAt >= 1000) { options?.onProgress?.(message); lastProgressAt = Date.now(); }
+      };
       const toolCalls: ToolCall[] = [];
       const toolCallsInProgress: Map<number, { id: string; name: string; arguments: string }> = new Map();
       let finishReason: string | undefined;
@@ -351,8 +407,10 @@ export class OpenAIProvider implements AIProvider {
 
         const delta = chunk.choices?.[0]?.delta;
 
+        if (delta?.reasoning_content) { reasoningContent += delta.reasoning_content; progress(`模型正在思考（${Math.floor((performance.now() - startedAt) / 1000)} 秒）…`); }
         // Handle content
         if (delta?.content) {
+          firstProgressMs ??= performance.now() - startedAt;
           fullContent += delta.content;
           onChunk(delta.content);
         }
@@ -374,7 +432,7 @@ export class OpenAIProvider implements AIProvider {
 
             if (tc.id) inProgress.id = tc.id;
             if (tc.function?.name) inProgress.name = tc.function.name.replace(/__/g, ':');
-            if (tc.function?.arguments) inProgress.arguments += tc.function.arguments;
+            if (tc.function?.arguments) { inProgress.arguments += tc.function.arguments; progress(`正在生成工具参数（${Math.ceil(inProgress.arguments.length / 1024)} KB）…`); }
           }
         }
 
@@ -389,7 +447,7 @@ export class OpenAIProvider implements AIProvider {
         throw new ModelResponseError(finishReason === 'length' ? '模型输出被长度限制截断，未执行不完整的工具调用。' : '模型响应不完整或为空，未执行工具调用。', {
           content: fullContent, finishReason: (finishReason ?? undefined) as GenerateResponse['finishReason'],
           diagnostics: { partialContent: fullContent.slice(0, 2000), pendingToolCalls: toolCallsInProgress.size,
-            reasoningTokens: finalUsage?.completion_tokens_details?.reasoning_tokens },
+            reasoningTokens: finalUsage?.completion_tokens_details?.reasoning_tokens, reasoningMode: policy.mode, legacyCompatibility: policy.legacy, reasoningCharacters: reasoningContent.length, firstProgressMs },
           usage: finalUsage ? { promptTokens: finalUsage.prompt_tokens ?? 0, completionTokens: finalUsage.completion_tokens ?? 0, totalTokens: finalUsage.total_tokens ?? 0 } : undefined
         });
       }
@@ -410,9 +468,10 @@ export class OpenAIProvider implements AIProvider {
 
       return {
         content: fullContent,
+        providerState: this.reasoningState(reasoningContent),
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         finishReason: (finishReason ?? undefined) as GenerateResponse['finishReason'],
-        diagnostics: { reasoningTokens: finalUsage?.completion_tokens_details?.reasoning_tokens },
+        diagnostics: { reasoningTokens: finalUsage?.completion_tokens_details?.reasoning_tokens, reasoningMode: policy.mode, legacyCompatibility: policy.legacy, reasoningCharacters: reasoningContent.length, firstProgressMs, outputCharacters: fullContent.length + [...toolCallsInProgress.values()].reduce((sum, call) => sum + call.arguments.length, 0) },
         usage: finalUsage ? {
           promptTokens: finalUsage.prompt_tokens ?? 0,
           completionTokens: finalUsage.completion_tokens ?? 0,
@@ -452,6 +511,8 @@ export class OpenAIProvider implements AIProvider {
     const result: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
     for (const msg of filtered) {
+      const state = msg.metadata?.providerState as GenerateResponse['providerState'];
+      const providerFields = this.isDeepSeek() && state?.providerId === this.id ? { reasoning_content: state.reasoningContent } : {};
       if (msg.role === 'assistant' && msg.tool_calls) {
         // Register all declared tool_call IDs
         for (const tc of msg.tool_calls) {
@@ -464,6 +525,7 @@ export class OpenAIProvider implements AIProvider {
         if (validToolCalls.length > 0) {
           result.push({
             role: 'assistant' as const,
+            ...providerFields,
             content: msg.content || null,
             tool_calls: validToolCalls.map(tc => ({
               id: tc.id,
@@ -478,6 +540,7 @@ export class OpenAIProvider implements AIProvider {
           // All tool_calls are orphans - send as plain assistant message
           result.push({
             role: 'assistant' as const,
+            ...providerFields,
             content: msg.content || ''
           });
         }
@@ -499,6 +562,7 @@ export class OpenAIProvider implements AIProvider {
       } else {
         result.push({
           role: msg.role as 'user' | 'assistant',
+          ...(msg.role === 'assistant' ? providerFields : {}),
           content: msg.content
         });
       }

@@ -1,9 +1,11 @@
-import type { AgentContext } from '../agents/agent-types';
+import type { Observer } from '../observability/observer';
+import { projectRunEvent } from '../observability/run-projection';
+import type { AgentContext, AgentEvent } from '../agents/agent-types';
 import type { ChatMessage } from '../types';
 import type { ChatManager } from '../chat/chat-manager';
 import { EventBus } from '../extensions/event-bus';
 import { RunStore } from './run-store';
-import { InteractionRequest, RunBlocked, RunRecord, RunRuntime, RunSuspended } from './types';
+import { InteractionRequest, RunBlocked, RunRecord, RunRuntime, RunSuspended, RunLiveState } from './types';
 import { errorDetails, isAbortError } from '../utils/execution';
 
 type Execute = (prompt: string, context: AgentContext) => Promise<void>;
@@ -11,7 +13,36 @@ export class RunController {
   private records = new Map<string, RunRecord>();
   private active = new Map<string, { controller: AbortController; context: AgentContext; promise: Promise<void> }>();
   private disposed = false;
-  constructor(readonly store: RunStore, private bus: EventBus, private chat: ChatManager, private execute: Execute) {}
+  private live = new Map<string, RunLiveState>();
+  private unsubscribe: () => void;
+  constructor(readonly store: RunStore, private bus: EventBus, private chat: ChatManager, private execute: Execute, private observer?: Observer) {
+    this.unsubscribe = bus.on('*', event => this.captureProgress(event));
+  }
+  private captureProgress(event: AgentEvent): void {
+    const record = event.runId ? this.records.get(event.runId) : undefined;
+    if (!record || event.sessionId !== record.sessionId || event.agentId !== record.agentId || record.status !== 'running') return;
+    if (!['message:start','message:update','message:end','system:status','context:compact:start','context:compact:end'].includes(event.type)) return;
+    const live = this.live.get(record.id) || {};
+    if (event.type === 'message:start' && event.role === 'assistant') {
+      live.message = { index: (this.getContext(record.id)?.transcript || record.messages).length, content: '', startedAt: Date.now(), complete: false };
+    } else if (event.type === 'message:update') {
+      live.message ||= { index: (this.getContext(record.id)?.transcript || record.messages).length, content: '', startedAt: Date.now(), complete: false };
+      live.message.content = event.accumulatedText ?? live.message.content + event.delta;
+      live.phase = '正在生成回复';
+    } else if (event.type === 'message:end' && live.message) {
+      live.message.content = event.content; live.message.complete = true;
+    } else if (event.type === 'system:status') live.phase = event.message;
+    else if (event.type === 'context:compact:start') live.phase = '正在压缩上下文';
+    else if (event.type === 'context:compact:end') live.phase = '等待模型响应';
+    this.live.set(record.id, live);
+  }
+  getLiveState(id: string): RunLiveState | undefined { return this.live.get(id); }
+  getDisplayMessages(id: string): ChatMessage[] {
+    const record = this.records.get(id);
+    if (!record) return [];
+    const transcript = this.getContext(id)?.transcript;
+    return transcript && transcript.length >= record.baseMessageCount + 1 ? transcript : record.messages;
+  }
 
   async initialize(): Promise<void> {
     for (const record of await this.store.list()) {
@@ -22,7 +53,7 @@ export class RunController {
         record.childPartials = {};
         for (const op of Object.values(record.operations)) if (op.status === 'running') op.status = op.category === 'read' ? 'planned' : 'unknown';
         record.error = '上次运行被中断；请检查未确认操作，再从检查点继续。';
-        await this.store.save(record);
+        await this.event(record, 'run:interrupted', { message: record.error, reason: 'process_restart' });
       }
       this.records.set(record.id, record);
     }
@@ -38,8 +69,18 @@ export class RunController {
   private async event(record: RunRecord, type: string, details?: Record<string, unknown>, operationId?: string): Promise<void> {
     const sequence = record.events.length + 1;
     record.updatedAt = Date.now();
-    record.events.push({ id: `${record.id}:${sequence}`, sequence, timestamp: record.updatedAt, type, operationId, details });
-    await this.store.save(record);
+    const event = { id: `${record.id}:${sequence}`, sequence, timestamp: record.updatedAt, type, operationId, details };
+    record.events.push(event);
+    const attempt = Math.max(1, record.events.filter(e => e.type === 'run:started' || e.type === 'run:resumed').length);
+    try { await this.store.save(record); }
+    catch (error) {
+      this.observer?.error('storage:checkpoint:failed', error, { component: 'storage', runId: record.id, sessionId: record.sessionId });
+      throw error;
+    }
+    const observed = projectRunEvent(record, event, attempt);
+    this.observer?.event(type, observed);
+    if (type === 'model:requested' && !operationId) this.live.set(record.id, { ...this.live.get(record.id), message: undefined, phase: '等待模型响应', phaseStartedAt: event.timestamp });
+    this.notify(record);
   }
   private runtime(record: RunRecord, scope = ''): RunRuntime {
     const key = (id: string) => scope + id;
@@ -59,6 +100,11 @@ export class RunController {
         if (scope) { record.childPartials ||= {}; record.childPartials[scope] = text; }
         else record.partial = text;
         await this.store.save(record);
+      },
+      observe: (type, details) => {
+        this.observer?.event(type, { component: type.split(':')[0], runId: record.id, sessionId: record.sessionId,
+          attemptId: `${record.id}:attempt-${Math.max(1, record.events.filter(e => e.type === 'run:started' || e.type === 'run:resumed').length)}`,
+          requestId: typeof details?.requestId === 'string' ? details.requestId : undefined, attributes: details });
       },
       record: (type, details, operationId) => this.event(record, type, details, operationId ? key(operationId) : undefined),
       getOperation: id => { const op = record.operations[key(id)]; return op ? { ...op, id } : undefined; },
@@ -161,7 +207,7 @@ export class RunController {
   async cancel(id: string, reason = '已停止生成'): Promise<void> {
     const record = this.records.get(id); if (!record) return;
     const active = this.active.get(id);
-    if (active) { active.controller.abort(new DOMException(reason, 'AbortError')); await active.promise; return; }
+    if (active) { this.live.set(id, { ...this.live.get(id), cancelling: true }); this.notify(record); active.controller.abort(new DOMException(reason, 'AbortError')); await active.promise; return; }
     if (['completed','cancelled'].includes(record.status)) return;
     record.status = 'cancelled'; record.error = reason;
     for (const request of Object.values(record.interactions)) request.outcome ||= { kind: 'cancelled' };
@@ -182,11 +228,12 @@ export class RunController {
     const controller = new AbortController();
     const context: AgentContext = { messages: resume ? [...record.messages] : record.messages.slice(0,record.baseMessageCount), sessionId: record.sessionId, runId: record.id,
       abortSignal: controller.signal, pendingSteerMessages: [], runtime: this.runtime(record),
-      metadata: { maxTurns: record.maxTurns, resume, providerId: record.providerId, enableSkills: record.enableSkills },
+      metadata: { recoverFromTruncation: resume && [...record.events].reverse().find(event => event.type === 'model:result')?.details?.finishReason === 'length', maxTurns: record.maxTurns, resume, providerId: record.providerId, enableSkills: record.enableSkills },
       onCheckpoint: async messages => {
         record.messages = [...messages]; record.partial = undefined;
         await this.store.save(record);
         await this.chat.replaceMessages(messages);
+        this.notify(record);
       } };
     const promise = Promise.resolve().then(async () => {
       try {
@@ -201,18 +248,25 @@ export class RunController {
         await this.event(record, `run:${record.status}`, errorDetails(error));
       } finally {
         this.active.delete(record.id);
+        this.live.delete(record.id);
         this.notify(record);
       }
-    }).catch(error => { console.error('[RunController] Persistence/execution failed:', error); record.status = 'interrupted'; record.error = String(error); this.active.delete(record.id); this.notify(record); });
+    }).catch(error => { this.observer?.error('runtime:boundary:failed', error, { component: 'runtime', runId: record.id, sessionId: record.sessionId }); console.error('[RunController] Persistence/execution failed:', error); record.status = 'interrupted'; record.error = String(error); this.active.delete(record.id); this.notify(record); });
     this.active.set(record.id, { controller, context, promise });
     await promise;
   }
-  steer(id: string, text: string): void { this.active.get(id)?.context.pendingSteerMessages?.push(text); }
+  steer(id: string, text: string): boolean {
+    const active = this.active.get(id);
+    if (!active || this.records.get(id)?.status !== 'running' || active.controller.signal.aborted) return false;
+    active.context.pendingSteerMessages?.push(text); return true;
+  }
   async wait(id: string): Promise<void> { await this.active.get(id)?.promise; }
   async dispose(): Promise<void> {
     this.disposed = true;
     for (const item of this.active.values()) item.controller.abort(new DOMException('插件卸载，执行已中断', 'AbortError'));
     await Promise.all([...this.active.values()].map(a => a.promise));
     await this.store.flush();
+    this.unsubscribe();
+    this.live.clear();
   }
 }

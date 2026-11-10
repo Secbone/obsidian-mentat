@@ -23,11 +23,15 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+const errorIds = new WeakMap<Error, string>();
+let errorSequence = 0;
+
 export function errorDetails(error: unknown): Record<string, unknown> {
   if (!(error instanceof Error)) return { message: String(error) };
+  if (!errorIds.has(error)) errorIds.set(error, `error-${Date.now()}-${++errorSequence}`);
   const extra = error as Error & { code?: string; status?: number };
   return {
-    name: error.name, message: error.message, code: extra.code, status: extra.status,
+    errorId: errorIds.get(error), name: error.name, message: error.message, code: extra.code, status: extra.status,
     stack: error.stack,
     cause: error.cause === undefined ? undefined : String(error.cause),
   };

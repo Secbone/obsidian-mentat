@@ -116,7 +116,7 @@ export class ChatOrchestrator {
 
     this.diagnosticsLogger = new VaultDiagnosticsLogger(platform.getVault(), () => [
       ...this.settings.aiProviders.map(p => p.apiKey || ''), this.settings.browserlessApiKey || '', this.settings.braveSearchApiKey || '',
-    ]);
+    ], this.getPlugin()?.observer);
     this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext, this.eventBus, this.diagnosticsLogger);
   }
 
@@ -268,7 +268,7 @@ export class ChatOrchestrator {
         context
       );
     } catch (error) {
-      console.error('[ChatOrchestrator] sendMessage failed:', error);
+      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] sendMessage failed:' } });
       throw error;
     }
   }
@@ -337,7 +337,7 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
 
       console.log(`[ChatOrchestrator] Loaded ${allSkills.length} skills from skills directory (${executableSkills.length} executable, ${docSkills.length} documentation)`);
     } catch (error) {
-      console.error('[ChatOrchestrator] Failed to load skills:', error);
+      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Failed to load skills:' } });
     }
   }
 
@@ -404,7 +404,7 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
         [TEMPLATE_VARS.VAULT_MAP]: "(Refer to the Vault Session Context in the message history)"
       });
     } catch (error) {
-      console.error('[ChatOrchestrator] Error building system prompt, using inline fallback:', error);
+      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error building system prompt, using inline fallback:' } });
 
       const userPreferences = await this.getUserPreferences();
       // Inline fallback
@@ -455,7 +455,7 @@ OBSIDIAN SYNTAX CHEAT SHEET:
       }
       return '*(None defined. Click "Open Vault Knowledge Map" in Settings to outline your vault structure.)*';
     } catch (error) {
-      console.error('[ChatOrchestrator] Error reading vault-map.md:', error);
+      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error reading vault-map.md:' } });
       return '*(None defined. Click "Open Vault Knowledge Map" in Settings to outline your vault structure.)*';
     }
   }
@@ -569,7 +569,7 @@ OBSIDIAN SYNTAX CHEAT SHEET:
         console.log('[ChatOrchestrator] Generated rich semantic vault-map.md successfully');
       }
     } catch (error) {
-      console.error('[ChatOrchestrator] Error initializing vault-map.md:', error);
+      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error initializing vault-map.md:' } });
     }
   }
 
@@ -875,7 +875,7 @@ Write your custom style instructions and preferences here. This file is dynamica
       await this.platform.write(preferencesPath, defaultTemplate);
       return defaultTemplate;
     } catch (e) {
-      console.error('[ChatOrchestrator] Error loading/initializing user prompt preferences:', e);
+      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', e, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error loading/initializing user prompt preferences:' } });
       // Absolute safety isolation: fall back to setting or 'None' rather than throwing/crashing
       return this.settings.userSystemPromptPreferences || 'None';
     }
@@ -969,13 +969,13 @@ OTHERWISE:
                 console.log(`[ChatOrchestrator] Successfully loaded custom agent: ${customConfig.id}`);
               }
             } catch (err) {
-              console.error(`[ChatOrchestrator] Failed to load custom agent config ${filePath}:`, err);
+              this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', err, { component: 'chat', attributes: { boundary: `[ChatOrchestrator] Failed to load custom agent config ${filePath}:` } });
             }
           }
         }
       }
     } catch (e) {
-      console.error('[ChatOrchestrator] Error loading custom user agents:', e);
+      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', e, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error loading custom user agents:' } });
     }
 
     // 4. Register delegate_task skill

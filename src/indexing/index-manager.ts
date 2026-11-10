@@ -1,3 +1,4 @@
+import type { Observer } from '../observability/observer';
 // Index Manager - Manages the lifecycle of document indexing
 
 import { ContentExtractor } from './content-extractor';
@@ -41,7 +42,8 @@ export class IndexManager {
 
   constructor(
     private platform: IPlatformAdapter,
-    private getEmbeddingProvider: () => Promise<AIProvider | null>
+    private getEmbeddingProvider: () => Promise<AIProvider | null>,
+    private observer?: Observer
   ) {
     this.contentExtractor = new ContentExtractor(platform);
     this.chunkProcessor = new ChunkProcessor();
@@ -132,7 +134,7 @@ export class IndexManager {
         const index = await this.indexFile(file);
         results.push(index);
       } catch (error) {
-        console.error(`Failed to index ${file.path}:`, error);
+        this.observer?.error('index:file:failed', error, { component: 'index', attributes: { path: file.path } });
       }
     }
 
@@ -256,7 +258,10 @@ export class IndexManager {
         this.indexedFiles = new Map(metaData.indexedFiles);
 
         // Load cached chunks asynchronously in the background so it doesn't block startup
-        void this.loadCachedChunksInBackground();
+        void this.loadCachedChunksInBackground().catch(error => {
+          if (this.observer) this.observer.error('index:background:failed', error, { component: 'index' });
+          else console.error('[IndexManager] Background loading failed', error);
+        });
       } else {
         // Data migration from data.json
         const data = await this.platform.loadPluginData();
@@ -310,7 +315,7 @@ export class IndexManager {
         }
       }
     } catch (error) {
-      console.error('Failed to load index metadata or migrate:', error);
+      this.observer?.error('index:load:failed', error, { component: 'index' });
     }
   }
 
@@ -334,7 +339,7 @@ export class IndexManager {
             fileChunksMap.set(filePath, chunks);
           }
         } catch (error) {
-          console.error(`Failed to load cached chunks for file ${filePath}:`, error);
+          this.observer?.error('index:cache:failed', error, { component: 'index', attributes: { path: filePath } });
         }
       }));
     }

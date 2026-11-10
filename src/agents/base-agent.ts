@@ -129,7 +129,7 @@ export class BaseAgent {
           if (context.runtime && Date.now() - partialSavedAt >= 1000) { await context.runtime.partial(partial); partialSavedAt = Date.now(); }
         }
         if (event.type === 'message:end') partial = '';
-        emit(event);
+        emit(event.type === 'message:update' ? { ...event, accumulatedText: partial } : event);
         result = await gen.next();
       }
       const response = result.value;
@@ -187,7 +187,7 @@ export class BaseAgent {
     context: AgentContext
   ): AsyncGenerator<AgentEvent, AgentResponse, unknown> {
     const startTime = Date.now();
-    const systemPrompt = this.buildSystemPrompt() + '\n\nFor large diagrams or structured artifacts: generate and validate one complete artifact per tool call, then read it back before creating the next. Do not emit multiple large files in one response. If an earlier model output was truncated, reduce the next step to a smaller complete artifact; never replay an unconfirmed write.';
+    const systemPrompt = this.buildSystemPrompt() + (context.metadata?.recoverFromTruncation ? '\nThe previous output exceeded the response limit. Do not repeat the large Excalidraw JSON. Reduce diagram complexity or use a compact Canvas for the next complete artifact. Completed writes are already recorded; do not recreate them.' : '') + '\n\nFor large diagrams or structured artifacts: generate and validate one complete artifact per tool call, then read it back before creating the next. Do not emit multiple large files in one response. If an earlier model output was truncated, reduce the next step to a smaller complete artifact; never replay an unconfirmed write.';
 
     yield { type: 'system:status', message: '初始化智能体...' };
 
@@ -216,11 +216,11 @@ export class BaseAgent {
 
       let responseContent = '';
       yield { type: 'message:start', role: 'assistant' };
-      const response = yield* this.bridgeStream(onChunk => new ModelGateway(this.provider).generateSimple(messages, onChunk, {
-        systemPrompt, temperature: this.config.temperature ?? 0.7, abortSignal: context.abortSignal
+      const response = yield* this.bridgeStream((onChunk, onProgress) => new ModelGateway(this.provider).generateSimple(messages, onChunk, {
+        systemPrompt, temperature: this.config.temperature ?? 0.7, abortSignal: context.abortSignal, onProgress
       }, context.runtime), context.abortSignal);
       responseContent = response.content;
-      messages.push({ role: 'assistant', content: responseContent, timestamp: Date.now(), metadata: { usage: response.usage, runId: context.runId } });
+      messages.push({ role: 'assistant', content: responseContent, timestamp: Date.now(), metadata: { providerState: response.providerState, usage: response.usage, runId: context.runId } });
       await this.checkpoint(context, [messages[messages.length - 1]]);
       yield { type: 'message:end', role: 'assistant', content: responseContent };
 
@@ -367,7 +367,7 @@ export class BaseAgent {
         content: result.content,
         timestamp: Date.now(),
         tool_calls: result.toolCalls,
-        metadata: { usage: result.usage, contextTokens: result.usage?.promptTokens, contextWindow: this.provider.getContextWindow(), runId: context.runId }
+        metadata: { providerState: result.providerState, usage: result.usage, contextTokens: result.usage?.promptTokens, contextWindow: this.provider.getContextWindow(), runId: context.runId }
       };
 
       await this.checkpoint(context, [assistantMessage]);
@@ -451,13 +451,13 @@ export class BaseAgent {
   ): AsyncGenerator<AgentEvent, GenerateResponse, unknown> {
     if (!this.provider.generateStreamWithSkills) throw new Error('当前 AI 服务商不支持工具调用');
     const result = yield* this.bridgeStream(
-      onChunk => new ModelGateway(this.provider).generate(messages, onChunk, options, options.runtime as import('../runtime/types').RunRuntime | undefined), options.abortSignal
+      (onChunk, onProgress) => new ModelGateway(this.provider).generate(messages, onChunk, { ...options, onProgress }, options.runtime as import('../runtime/types').RunRuntime | undefined), options.abortSignal
     );
     if (!result) throw new Error('模型响应为空，请重试当前请求。');
     return result;
   }
 
-  private async *bridgeStream<T>(start: (onChunk: (chunk: string) => void) => Promise<T>, signal?: AbortSignal): AsyncGenerator<AgentEvent, T, unknown> {
+  private async *bridgeStream<T>(start: (onChunk: (chunk: string) => void, onProgress: (message: string) => void) => Promise<T>, signal?: AbortSignal): AsyncGenerator<AgentEvent, T, unknown> {
     throwIfAborted(signal);
     const queue: AgentEvent[] = [];
     let wake: (() => void) | undefined;
@@ -474,7 +474,7 @@ export class BaseAgent {
     // Always observe the provider promise, including its late rejection after cancellation.
     Promise.resolve().then(() => {
       throwIfAborted(signal);
-      return start(chunk => { if (!completed) { queue.push({ type: 'message:update', delta: chunk }); notify(); } });
+      return start(chunk => { if (!completed) { queue.push({ type: 'message:update', delta: chunk }); notify(); } }, message => { if (!completed) { queue.push({ type: 'system:status', message }); notify(); } });
     }).then(result => { value = result; completed = true; notify(); }, error => { failure = error; completed = true; notify(); });
     try {
       while (!completed || queue.length) {

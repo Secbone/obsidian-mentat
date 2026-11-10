@@ -1,4 +1,4 @@
-import { sanitizeHTMLToDom, setIcon, TFile } from 'obsidian';
+import { sanitizeHTMLToDom, setIcon, TFile, Notice } from 'obsidian';
 import { InputAreaElements } from '../themes/types';
 
 interface SuggestItem {
@@ -14,9 +14,9 @@ export interface InputHandlerCallbacks {
   getSendWithCmdEnter: () => boolean;
   getVaultMarkdownFiles: () => TFile[];
   updateInputInfoBar: () => void;
-  saveSessionDraft: (html: string) => void;
+  saveSessionDraft: (html: string) => void | Promise<void>;
   loadSessionDraft: () => Promise<string | null>;
-  clearSessionDraft: () => void;
+  clearSessionDraft: () => void | Promise<void>;
 }
 
 export class InputHandler {
@@ -32,6 +32,7 @@ export class InputHandler {
   private suggestQuery: string = '';
   private suggestTriggerNode: Node | null = null;
   private suggestTriggerRange: Range | null = null;
+  private listenerController?: AbortController;
   private draftSaveTimeout: number | null = null;
 
   constructor(
@@ -47,13 +48,15 @@ export class InputHandler {
   }
 
   setupListeners(): void {
+    this.listenerController?.abort();
+    this.listenerController = new AbortController();
     this.sendButton.addEventListener('click', () => {
       if (this.callbacks.getIsStreaming()) {
         this.callbacks.onSteer();
       } else {
         this.callbacks.onSend();
       }
-    });
+    }, { signal: this.listenerController.signal });
 
     this.inputArea.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
@@ -65,9 +68,10 @@ export class InputHandler {
           this.saveDraftDebounced();
         }
       }
-    });
+    }, { signal: this.listenerController.signal });
 
     this.inputArea.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return;
       if (this.activeSuggestType && this.suggestDropdown && this.suggestFilteredItems.length > 0) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
@@ -117,7 +121,7 @@ export class InputHandler {
           }
         }
       }
-    });
+    }, { signal: this.listenerController.signal });
 
     this.inputArea.addEventListener('input', () => {
       this.callbacks.updateInputInfoBar();
@@ -158,7 +162,7 @@ export class InputHandler {
       }
 
       this.closeSuggest();
-    });
+    }, { signal: this.listenerController.signal });
   }
 
   getRawTextContent(): string {
@@ -179,9 +183,10 @@ export class InputHandler {
   }
 
   clearInput(): void {
+    if (this.draftSaveTimeout) { window.clearTimeout(this.draftSaveTimeout); this.draftSaveTimeout = null; }
     this.inputArea.empty(); this.inputArea.appendChild(sanitizeHTMLToDom(''));
     this.callbacks.updateInputInfoBar();
-    this.callbacks.clearSessionDraft();
+    void Promise.resolve(this.callbacks.clearSessionDraft()).catch(() => new Notice('草稿清理失败，请检查存储状态。'));
   }
 
   focusInput(): void {
@@ -195,7 +200,8 @@ export class InputHandler {
 
     this.draftSaveTimeout = window.setTimeout(() => {
       const htmlContent = this.inputArea.innerHTML;
-      this.callbacks.saveSessionDraft(htmlContent);
+      this.draftSaveTimeout = null;
+      void Promise.resolve(this.callbacks.saveSessionDraft(htmlContent)).catch(() => new Notice('草稿保存失败，请检查存储状态。'));
     }, 300);
   }
 
@@ -214,6 +220,14 @@ export class InputHandler {
       }
 
       this.callbacks.updateInputInfoBar();
+    }
+  }
+
+  dispose(): void {
+    this.listenerController?.abort(); this.closeSuggest();
+    if (this.draftSaveTimeout) {
+      window.clearTimeout(this.draftSaveTimeout); this.draftSaveTimeout = null;
+      void Promise.resolve(this.callbacks.saveSessionDraft(this.inputArea.innerHTML)).catch(() => new Notice('草稿保存失败，请检查存储状态。'));
     }
   }
 

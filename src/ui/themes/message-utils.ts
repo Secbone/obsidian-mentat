@@ -33,34 +33,3 @@ export function getToolShortName(displayName: string): string {
   const shortName = displayName.split(':').pop() || displayName;
   return displayName === 'spec' || displayName.startsWith('spec:') ? `查看工具说明 · ${shortName}` : shortName;
 }
-
-export function truncateText(text: string, threshold: number = 500): {
-  display: string;
-  isTruncated: boolean;
-  fullText: string;
-} {
-  if (text.length <= threshold) {
-    return { display: text, isTruncated: false, fullText: text };
-  }
-  return {
-    display: text.slice(0, threshold) + '...',
-    isTruncated: true,
-    fullText: text,
-  };
-}
-
-export function valueToString(value: unknown): string {
-  return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-}
-
-// Braille dot spinner shared by both themes
-export const BRAILLE_DOTS = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-export function getSpinnerChar(): string {
-  const idx = Math.floor((Date.now() / 80) % BRAILLE_DOTS.length);
-  return BRAILLE_DOTS[idx];
-}
-
-export function getSpinnerPrefix(): string {
-  return getSpinnerChar();
-}

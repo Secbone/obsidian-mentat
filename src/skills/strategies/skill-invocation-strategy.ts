@@ -232,6 +232,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
       'obsidian:read_note',
       'obsidian:query_notes',
       'obsidian:edit_note',
+      'obsidian:write_note',
       'obsidian:web_search',
       'obsidian:ask_user',
       'obsidian:list_notes',

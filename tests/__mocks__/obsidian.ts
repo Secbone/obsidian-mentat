@@ -122,7 +122,7 @@ function patchNodeCreateMethods(): void {
     o?: DomElementInfo | string,
     callback?: (el: HTMLDivElement) => void,
   ): HTMLDivElement {
-    const el = createObsidianElement('div', o);
+    const el = createObsidianElement('div', typeof o === 'string' ? {cls:o} : o);
     this.appendChild(el);
     if (callback) callback(el);
     return el;
@@ -132,7 +132,7 @@ function patchNodeCreateMethods(): void {
     o?: DomElementInfo | string,
     callback?: (el: HTMLSpanElement) => void,
   ): HTMLSpanElement {
-    const el = createObsidianElement('span', o);
+    const el = createObsidianElement('span', typeof o === 'string' ? {cls:o} : o);
     this.appendChild(el);
     if (callback) callback(el);
     return el;

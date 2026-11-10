@@ -57,6 +57,7 @@ export interface RunRuntime {
   readonly scope?: string;
   child(id: string): { runtime: RunRuntime; messages: ChatMessage[]; checkpoint: (messages: ChatMessage[]) => Promise<void> };
   partial(text: string): Promise<void>;
+  observe?(type: string, details?: Record<string, unknown>): void;
   record(type: string, details?: Record<string, unknown>, operationId?: string): Promise<void>;
   getOperation(id: string): OperationRecord | undefined;
   setOperation(operation: OperationRecord): Promise<void>;
@@ -68,4 +69,12 @@ export class RunSuspended extends Error {
 }
 export class RunBlocked extends Error {
   constructor(message: string) { super(message); this.name = 'RunBlocked'; }
+}
+
+/** Ephemeral presentation data; execution and recovery still use RunRecord. */
+export interface RunLiveState {
+  phase?: string;
+  phaseStartedAt?: number;
+  message?: { index: number; content: string; startedAt: number; complete: boolean };
+  cancelling?: boolean;
 }

@@ -1,3 +1,4 @@
+import type { Observer } from '../observability/observer';
 // AI Router - Intelligent routing of tasks to appropriate AI providers
 
 import { AIProvider } from '../types';
@@ -11,7 +12,7 @@ export class AIRouter {
   private providers: Map<string, AIProvider> = new Map();
   private settings: MentatSettings;
 
-  constructor(settings: MentatSettings) {
+  constructor(settings: MentatSettings, private observer?: Observer) {
     this.settings = settings;
     this.initializeProviders();
   }
@@ -29,7 +30,7 @@ export class AIRouter {
           case 'openai':
           case 'anthropic':
             if (!config.apiKey) {
-              console.warn(`Skipping provider "${config.name}" (${config.id}): API key not configured`);
+              this.observer?.event('provider:skipped', { component: 'provider', level: 'warn', attributes: { providerId: config.id, reason: 'missing_api_key' } });
               continue;
             }
             break;
@@ -45,6 +46,7 @@ export class AIRouter {
               embeddingModel: config.embeddingModel,
               temperature: config.temperature,
               maxTokens: config.maxTokens,
+              reasoningEffort: config.reasoningEffort,
               contextWindow: config.contextWindow,
               compactionThreshold: config.compactionThreshold,
             });
@@ -82,7 +84,7 @@ export class AIRouter {
 
         this.providers.set(config.id, provider);
       } catch (error) {
-        console.error(`Failed to initialize provider ${config.id}:`, error);
+        this.observer?.error('provider:initialize:failed', error, { component: 'provider', attributes: { providerId: config.id } });
       }
     }
   }
@@ -161,7 +163,7 @@ export class AIRouter {
         const available = await provider.isAvailable();
         results.set(id, available);
       } catch (error) {
-        console.error(`Provider ${id} test failed:`, error);
+        this.observer?.error('provider:test:failed', error, { component: 'provider', attributes: { providerId: id } });
         results.set(id, false);
       }
     }
