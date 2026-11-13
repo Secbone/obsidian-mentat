@@ -50,6 +50,7 @@ export interface RunRecord {
   events: RunEvent[];
   error?: string;
   partial?: string;
+  instructions?: Array<{ id: string; text: string; status: 'queued' | 'consumed' }>;
 }
 export interface RunRuntime {
   readonly runId: string;
@@ -63,6 +64,9 @@ export interface RunRuntime {
   setOperation(operation: OperationRecord): Promise<void>;
   interact(request: InteractionRequest): Promise<NonNullable<InteractionRequest['outcome']>>;
   modelResult(result: GenerateResponse): Promise<void>;
+  takeInstructions(): Promise<Array<{ id: string; text: string }>>;
+  ackInstructions(ids: string[]): Promise<void>;
+  trackOperation?(id: string, completion: Promise<unknown>): void;
 }
 export class RunSuspended extends Error {
   constructor(public interaction: InteractionRequest) { super('等待用户操作'); this.name = 'RunSuspended'; }

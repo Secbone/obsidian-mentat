@@ -2,7 +2,7 @@
 // Loads all skills from the skills/ directory according to Agent Skills specification
 
 import { z } from 'zod';
-import { App } from 'obsidian';
+import { App, parseYaml } from 'obsidian';
 import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDefinition, SkillResult } from '../skill-types';
 
 // Import all skill implementations (compile-time imports for TypeScript)
@@ -34,6 +34,19 @@ interface SkillMetadata {
   };
   content: string; // Markdown body
 }
+
+const skillManifestSchema = z.object({
+  name: z.string().trim().min(1),
+  description: z.string().trim().min(1),
+  metadata: z.object({
+    version: z.string().optional(),
+    author: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    executable: z.boolean().optional(),
+    implementation: z.string().optional(),
+    requiresConfirmation: z.boolean().optional(),
+  }).passthrough().nullish().transform(value => value ?? undefined),
+}).passthrough();
 
 /**
  * Skill Loader
@@ -174,7 +187,8 @@ export class SkillLoader {
       const content = await adapter.read(fullPath);
 
       // Parse frontmatter
-      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+      const frontmatterMatch = /^\uFEFF?---[ \t]*\r?\n/.test(content)
+        ? content.match(/^\uFEFF?---[ \t]*\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)([\s\S]*)$/m) : null;
 
       if (!frontmatterMatch) {
         console.error(`[SkillLoader] No frontmatter found in ${skillMdPath}`);
@@ -184,13 +198,12 @@ export class SkillLoader {
       const frontmatterText = frontmatterMatch[1];
       const bodyContent = frontmatterMatch[2];
 
-      // Simple YAML parsing for frontmatter
-      const frontmatter = this.parseFrontmatter(frontmatterText);
+      const frontmatter = skillManifestSchema.parse(parseYaml(frontmatterText));
 
       return {
-        name: frontmatter.name as string,
-        description: frontmatter.description as string,
-        metadata: frontmatter.metadata as Record<string, unknown>,
+        name: frontmatter.name,
+        description: frontmatter.description,
+        metadata: frontmatter.metadata,
         content: bodyContent.trim()
       };
     } catch (error) {
@@ -291,7 +304,7 @@ export class SkillLoader {
         metadata: {
           version: (metadata.metadata?.version as string) || '1.0.0',
           tags: (metadata.metadata?.tags as string[]) || ['custom'],
-          requiresConfirmation: (metadata.metadata?.requiresConfirmation as boolean) || false,
+          requiresConfirmation: metadata.metadata?.requiresConfirmation ?? true,
           documentation: metadata.content
         }
       };
@@ -317,80 +330,4 @@ export class SkillLoader {
     };
   }
 
-  /**
-   * Simple YAML frontmatter parser
-   */
-  private parseFrontmatter(frontmatterText: string): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
-    const lines = frontmatterText.split('\n');
-    let currentKey: string | null = null;
-    let currentArray: unknown[] | null = null;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      // Detect indentation
-      const leadingSpaces = line.match(/^(\s*)/)?.[1]?.length || 0;
-
-      // Array item
-      if (trimmed.startsWith('- ')) {
-        const value = trimmed.substring(2).trim();
-        if (currentArray) {
-          currentArray.push(value);
-        }
-        continue;
-      }
-
-      // Key-value pair
-      const colonIndex = trimmed.indexOf(':');
-      if (colonIndex > 0) {
-        const key = trimmed.substring(0, colonIndex).trim();
-        const value = trimmed.substring(colonIndex + 1).trim();
-
-        if (leadingSpaces === 0) {
-          // Top-level key
-          currentKey = key;
-
-          if (value === '') {
-            // Start of nested structure
-            currentArray = [];
-          } else {
-            // Simple value
-            result[key] = value;
-            currentArray = null;
-          }
-        } else {
-          // Nested key (inside metadata, etc.)
-          if (currentKey && !currentArray) {
-            if (!result[currentKey] || typeof result[currentKey] !== 'object') {
-              result[currentKey] = {};
-            }
-            const nested = result[currentKey] as Record<string, unknown>;
-
-            if (value === '') {
-              // Start of array
-              currentArray = [];
-              nested[key] = currentArray;
-            } else if (value.startsWith('[') && value.endsWith(']')) {
-              // Inline array
-              const items = value.slice(1, -1).split(',').map(s => s.trim());
-              nested[key] = items;
-              currentArray = null;
-            } else if (value === 'true') {
-              nested[key] = true;
-            } else if (value === 'false') {
-              nested[key] = false;
-            } else {
-              nested[key] = value;
-            }
-          }
-        }
-      }
-    }
-
-    return result;
-  }
 }
-
-

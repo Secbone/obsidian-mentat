@@ -72,6 +72,7 @@ export class SkillExecutor {
   ): Promise<SkillResult> {
     const startTime = Date.now();
     const callId = options.operationId || this.generateCallId();
+    options = { ...options, operationId: callId };
 
     // Create skill call record
     const skillCall: SkillCall = {
@@ -202,7 +203,6 @@ export class SkillExecutor {
       );
 
       result.outcome ||= result.success ? 'success' : 'failure';
-      await options.runtime?.setOperation({ id: callId, name: fullName, category, status: 'finished', result });
       // Update call record
       skillCall.result = result;
       skillCall.status = result.success ? 'success' : 'error';
@@ -340,6 +340,11 @@ export class SkillExecutor {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const run = async () => {
       throwIfAborted(controller.signal);
+      if (options.runtime && options.operationId) {
+        const current = options.runtime.getOperation(options.operationId);
+        if (current?.status === 'finished' && current.result) return current.result;
+        if (current?.status === 'unknown' || current?.status === 'running') throw new RunBlocked('操作结果尚未确认，不能重复执行');
+      }
       if (options.fingerprint && options.fingerprint !== await this.approvalFingerprint(skill.namespace + ':' + skill.name, input as Record<string, unknown>)) throw new RunBlocked('授权后文件已变化，请重新核对并授权');
       if (options.runtime && options.operationId && skill.metadata?.executionCategory !== 'interaction') {
         const operation = options.runtime.getOperation(options.operationId)!;
@@ -350,11 +355,11 @@ export class SkillExecutor {
       return skill.execute(input, { abortSignal: controller.signal, runtime: options.runtime, operationId: options.operationId });
     };
     const serial = !['read', 'interaction', 'orchestration'].includes(skill.metadata?.executionCategory || 'external');
-    const operation = serial ? this.writeBarrier.tail.then(run) : run();
-    // Keep the write barrier until the actual operation settles, even after timeout.
-    if (serial) this.writeBarrier.tail = operation.then(() => undefined, () => undefined);
-    void operation.then(async result => {
-      if (controller.signal.aborted && options.runtime && options.operationId) {
+    const execution = serial ? this.writeBarrier.tail.then(run) : run();
+    const operation = execution.then(async result => {
+      clearTimeout(timer);
+      result.outcome ||= result.success ? 'success' : 'failure';
+      if (options.runtime && options.operationId) {
         const operation = options.runtime.getOperation(options.operationId);
         if (operation) await options.runtime.setOperation({ ...operation, status: 'finished', result });
       }
@@ -364,7 +369,12 @@ export class SkillExecutor {
         originalArgs: '', errorMessage: '工具在停止等待后返回，已记录实际结果。', strategy: 'late-result',
         success: result.success, details: { result },
       });
-    }).catch(error => { if (controller.signal.aborted) console.error('[SkillExecutor] Late operation result:', error); });
+      return result;
+    });
+    // Release only after both the real effect and its result checkpoint settle.
+    if (serial) this.writeBarrier.tail = operation.then(() => undefined, () => undefined);
+    options.runtime?.trackOperation?.(options.operationId!, operation);
+    void operation.catch(error => { if (controller.signal.aborted) console.error('[SkillExecutor] Late operation result:', error); });
     try {
       return await abortable(operation, controller.signal);
     } finally {

@@ -19,9 +19,11 @@ import { ExtensionManager, EventBus } from './extensions';
 import { TaskType } from './types';
 import { ObsidianAdapter } from './utils/obsidian-adapter';
 import { DiagnosticsExporter } from './diagnostics/diagnostics-exporter';
+import { initializeDraftStore, type DraftStore } from './storage/draft-store';
 
 export default class MentatPlugin extends Plugin {
   observer!: Observer;
+  draftStore!: DraftStore;
   settings!: MentatSettings;
   aiRouter!: AIRouter;
   openCodeIntegration!: OpenCodeIntegration;
@@ -58,6 +60,13 @@ export default class MentatPlugin extends Plugin {
 
     // Load settings
     await this.loadSettings();
+    const drafts = await initializeDraftStore(this.platform, `${this.app.vault.configDir}/plugins/mentat/drafts.json`,
+      (this.settings as unknown as Record<string, unknown>).drafts, error => {
+        this.observer.error('storage:drafts:initialize:failed', error, { component: 'storage' });
+        new Notice('草稿存储不可用：已保留旧草稿，当前编辑仅保存在内存；重启后可能丢失。AI 与设置仍可正常使用。');
+      });
+    this.draftStore = drafts.store;
+    if (drafts.migrated) delete (this.settings as unknown as Record<string, unknown>).drafts;
 
     // Initialize platform adapter
     const platform = this.platform;
@@ -112,7 +121,7 @@ export default class MentatPlugin extends Plugin {
     // Register chat view
     this.registerView(
       CHAT_VIEW_TYPE,
-      (leaf) => new ChatView(leaf, this)
+      (leaf) => new ChatView(leaf, this, this.draftStore)
     );
 
     // Add settings tab
@@ -134,6 +143,7 @@ export default class MentatPlugin extends Plugin {
     void (async () => {
       try { await this.runController?.dispose(); }
       catch (error) { this.observer?.error('plugin:shutdown:failed', error, { component: 'plugin' }); }
+      await this.draftStore?.flush();
       await this.observer?.store.drain();
     })();
     try {

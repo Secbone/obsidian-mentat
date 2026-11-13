@@ -13,5 +13,6 @@ export const runSchema = z.object({
   interactions: z.record(z.object({ id: z.string(), operationId: z.string(), kind: z.enum(['question','approval']), question: z.string(),
     outcome: z.object({ kind: z.enum(['answered','approved','rejected','cancelled','expired']), answer: z.string().optional() }).optional() }).passthrough()),
   events: z.array(z.object({ id: z.string(), sequence: z.number().int().min(1), timestamp: z.number().finite(), type: z.string() }).passthrough()),
-  children: z.record(z.array(message)).optional()
+  children: z.record(z.array(message)).optional(),
+  instructions: z.array(z.object({ id: z.string().min(1), text: z.string(), status: z.enum(['queued','consumed']) })).optional()
 }).passthrough();

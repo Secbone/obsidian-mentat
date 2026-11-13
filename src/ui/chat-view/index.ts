@@ -20,6 +20,7 @@ import { errorMessage } from '../../utils/execution';
 import { ChatPresenter, projectRunControls } from '../chat-cards/presenter';
 import type { CardAction, ChatCard, ChatViewState } from '../chat-cards/types';
 import { RunInspectorModal } from '../run-inspector-modal';
+import type { DraftStore } from '../../storage/draft-store';
 
 export const CHAT_VIEW_TYPE = 'mentat-chat';
 
@@ -42,7 +43,7 @@ export class ChatView extends ItemView {
   private notice?: ChatCard;
   private presenter = new ChatPresenter();
 
-  constructor(leaf: WorkspaceLeaf, plugin: MentatPlugin) {
+  constructor(leaf: WorkspaceLeaf, plugin: MentatPlugin, private drafts: DraftStore = plugin.draftStore) {
     super(leaf); this.plugin = plugin;
     this.chatManager = plugin.chatManager || new ChatManager(plugin);
     this.messageRenderer = new MessageRenderer(); this.chatOrchestrator = plugin.chatOrchestrator;
@@ -140,29 +141,9 @@ export class ChatView extends ItemView {
       getSendWithCmdEnter: () => !!this.plugin.settings.sendWithCmdEnter,
       getVaultMarkdownFiles: () => this.app.vault.getMarkdownFiles(),
       updateInputInfoBar: () => this.updateInputInfoBar(),
-      saveSessionDraft: async (html: string) => {
-        if (!sessionId) return;
-        const pluginData = await this.plugin.loadData() || {};
-        if (!pluginData.drafts) pluginData.drafts = {};
-        pluginData.drafts[sessionId] = html;
-        await this.plugin.saveData(pluginData);
-      },
-      loadSessionDraft: async () => {
-        if (!sessionId) return null;
-        const pluginData = await this.plugin.loadData();
-        if (pluginData && pluginData.drafts && pluginData.drafts[sessionId]) {
-          return pluginData.drafts[sessionId] as string;
-        }
-        return null;
-      },
-      clearSessionDraft: async () => {
-        if (!sessionId) return;
-        const pluginData = await this.plugin.loadData();
-        if (pluginData && pluginData.drafts && pluginData.drafts[sessionId]) {
-          delete pluginData.drafts[sessionId];
-          await this.plugin.saveData(pluginData);
-        }
-      },
+      saveSessionDraft: async html => { if (sessionId) await this.drafts.save(sessionId,html); },
+      loadSessionDraft: () => sessionId ? this.drafts.load(sessionId) : Promise.resolve(null),
+      clearSessionDraft: async () => { if (sessionId) await this.drafts.clear(sessionId); },
     };
 
     this.inputHandler?.dispose();
@@ -243,13 +224,17 @@ export class ChatView extends ItemView {
 
 
   private async handleSteer(): Promise<void> {
-    if (!this.inputHandler) return;
+    if (!this.inputHandler || this.sending) return;
     const state = this.currentState(), text = this.inputHandler.getRawTextContent().trim();
     if (!text || state.inputMode !== 'steer' || !state.runId) return;
-    if (!this.plugin.runController.steer(state.runId,text)) { this.showError(new Error('当前任务已结束，指令未发送；草稿已保留。')); return; }
-    this.inputHandler.clearInput();
-    this.notice = {id:'ui-notice',kind:'system',title:'补充指令已排队',text:'将在下一个执行边界处理；已开始的操作不会被改写。',timestamp:Date.now()};
-    this.render();
+    const handler = this.inputHandler;
+    this.sending = true; this.updateInputInfoBar();
+    try {
+      if (!await this.plugin.runController.steer(state.runId,text)) throw new Error('当前任务已结束，指令未发送；草稿已保留。');
+      if (this.inputHandler === handler && handler.getRawTextContent().trim() === text) handler.clearInput();
+      this.notice = {id:'ui-notice',kind:'system',title:'补充指令已排队',text:'将在下一个执行边界处理；已开始的操作不会被改写。',timestamp:Date.now()};
+    } catch (error) { this.showError(error); }
+    finally { this.sending = false; this.render(); }
   }
   private async handleSend(): Promise<void> {
     if (!this.inputHandler || this.sending) return;

@@ -3,7 +3,7 @@ import { throwIfAborted } from '../../../src/utils/execution';
 // Core logic for batch operations on Obsidian documents
 
 import { z } from 'zod';
-import { TFile } from 'obsidian';
+import { TFile, parseYaml, stringifyYaml } from 'obsidian';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 /**
@@ -92,7 +92,9 @@ export async function execute(
     );
 
     return {
-      success: true,
+      success: result.errors.length === 0,
+      outcome: result.errors.length ? 'failure' : 'success',
+      error: result.errors.length ? `${result.errors.length} file(s) failed; ${result.filesModified.length} changed. See per-file results before retrying.` : undefined,
       data: {
         ...result,
         operation: input.operation,
@@ -131,7 +133,10 @@ async function getFilteredFiles(
     // Filter by folders
     if (filter.folders && filter.folders.length > 0) {
       files = files.filter(file => {
-        return filter.folders!.some(folder => file.path.startsWith(folder));
+        return filter.folders!.some(folder => {
+          const directory = folder.replace(/\/+$/, '');
+          return !directory || file.path.startsWith(`${directory}/`);
+        });
       });
     }
 
@@ -139,8 +144,8 @@ async function getFilteredFiles(
     if (filter.tags && filter.tags.length > 0) {
       files = files.filter(file => {
         const cache = context.metadataCache.getFileCache(file);
-        const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
-        const frontmatterTags = cache?.frontmatter?.tags || [];
+        const fileTags = cache?.tags?.map(t => t.tag.replace('#', '')) || [];
+        const frontmatterTags = readTags(cache?.frontmatter?.tags);
         const allTags = [...fileTags, ...frontmatterTags].map(t =>
           typeof t === 'string' ? t : String(t)
         );
@@ -242,7 +247,7 @@ async function addTags(
   const { frontmatter, content: bodyContent } = parseFrontmatter(content);
 
   // Get existing tags
-  const existingTags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [];
+  const existingTags = readTags(frontmatter.tags);
 
   // Add new tags (avoid duplicates)
   const newTags = [...new Set([...existingTags, ...tags])];
@@ -274,7 +279,7 @@ async function removeTags(
   const { frontmatter, content: bodyContent } = parseFrontmatter(content);
 
   // Get existing tags
-  const existingTags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [];
+  const existingTags = readTags(frontmatter.tags);
 
   // Remove specified tags
   const newTags = existingTags.filter(tag => !tags.includes(tag));
@@ -344,82 +349,29 @@ async function appendContent(
  * Helper: Parse frontmatter from content
  */
 function parseFrontmatter(content: string): {
-  frontmatter: Record<string, any>;
+  frontmatter: Record<string, unknown>;
   content: string;
 } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-
-  if (!match) {
-    return { frontmatter: {}, content };
+  if (!/^\uFEFF?---[ \t]*\r?\n/.test(content)) return { frontmatter: {}, content };
+  const match = content.match(/^\uFEFF?---[ \t]*\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)([\s\S]*)$/m);
+  if (!match) throw new Error('Unterminated YAML frontmatter; file was not modified');
+  const parsed: unknown = parseYaml(match[1]);
+  if (parsed !== null && parsed !== undefined && (typeof parsed !== 'object' || Array.isArray(parsed))) {
+    throw new Error('Frontmatter must be a YAML mapping; file was not modified');
   }
-
-  const frontmatterText = match[1];
-  const bodyContent = match[2];
-
-  // Simple YAML parsing
-  const frontmatter: Record<string, any> = {};
-  const lines = frontmatterText.split('\n');
-  let currentKey: string | null = null;
-  let currentArray: any[] | null = null;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    // Array item
-    if (trimmed.startsWith('- ')) {
-      const value = trimmed.substring(2);
-      if (currentArray) {
-        currentArray.push(value);
-      }
-      continue;
-    }
-
-    // Key-value pair
-    const colonIndex = trimmed.indexOf(':');
-    if (colonIndex > 0) {
-      currentKey = trimmed.substring(0, colonIndex).trim();
-      const value = trimmed.substring(colonIndex + 1).trim();
-
-      if (value === '') {
-        // Start of array
-        currentArray = [];
-        frontmatter[currentKey] = currentArray;
-      } else {
-        // Simple value
-        frontmatter[currentKey] = value;
-        currentArray = null;
-      }
-    }
-  }
-
-  return { frontmatter, content: bodyContent };
+  return { frontmatter: (parsed || {}) as Record<string, unknown>, content: match[2] };
 }
 
-/**
- * Helper: Build content with frontmatter
- */
-function buildContent(frontmatter: Record<string, any>, bodyContent: string): string {
-  if (Object.keys(frontmatter).length === 0) {
-    return bodyContent;
-  }
+function readTags(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  if (typeof value === 'string') return value.split(/[\s,]+/).filter(Boolean);
+  if (Array.isArray(value) && value.every(tag => typeof tag === 'string')) return value;
+  throw new Error('Frontmatter tags must be a string or an array of strings');
+}
 
-  const lines = ['---'];
-
-  for (const [key, value] of Object.entries(frontmatter)) {
-    if (Array.isArray(value)) {
-      lines.push(`${key}:`);
-      value.forEach(item => lines.push(`  - ${item}`));
-    } else if (typeof value === 'object' && value !== null) {
-      lines.push(`${key}:`);
-      Object.entries(value).forEach(([k, v]) => lines.push(`  ${k}: ${v}`));
-    } else {
-      lines.push(`${key}: ${value}`);
-    }
-  }
-
-  lines.push('---');
-  return lines.join('\n') + '\n' + bodyContent;
+function buildContent(frontmatter: Record<string, unknown>, bodyContent: string): string {
+  if (Object.keys(frontmatter).length === 0) return bodyContent;
+  return `---\n${stringifyYaml(frontmatter).trimEnd()}\n---\n${bodyContent}`;
 }
 
 /**

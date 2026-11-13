@@ -1,3 +1,6 @@
+// Use the installed YAML parser for Obsidian's YAML API in offline tests.
+export { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+
 // Minimal mock for Obsidian API classes used in tests
 
 // Polyfill Obsidian DOM extensions on HTMLElement/Element/Node prototypes

@@ -1,3 +1,6 @@
+// Use the installed YAML parser for Obsidian's YAML API in offline tests.
+export { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+
 import { vi } from 'vitest';
 
 // Mock implementation of Obsidian API for testing

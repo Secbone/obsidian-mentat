@@ -78,6 +78,11 @@ export function projectChat(input: { sessionId: string; history: ChatMessage[]; 
     else if (!live && latest.partial && !messages.at(-1)?.metadata?.interrupted) messageCard({role:'assistant',content:latest.partial,timestamp:latest.updatedAt},messages.length,true,latest.updatedAt);
   }
   for (const record of records) {
+    for (const instruction of record.instructions || []) {
+      if (instruction.status !== 'queued' || messages.some(message => message.metadata?.instructionId === instruction.id)) continue;
+      cards.push({ id:`${record.id}:instruction:${instruction.id}`,kind:'user',title:'补充指令 · 尚未处理',
+        timestamp:record.updatedAt,runId:record.id,text:instruction.text,status:record.status === 'cancelled' ? 'cancelled':'pending' });
+    }
     const requests = record.events.filter(e => e.type === 'model:requested');
     for (const [i,event] of requests.entries()) {
       const requestId = event.details?.requestId;

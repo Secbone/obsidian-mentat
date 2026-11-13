@@ -14,6 +14,8 @@ export class RunController {
   private active = new Map<string, { controller: AbortController; context: AgentContext; promise: Promise<void> }>();
   private disposed = false;
   private live = new Map<string, RunLiveState>();
+  private inFlight = new Map<string, Map<string, Set<Promise<unknown>>>>();
+  private pendingIngress = new Map<string, Set<string>>();
   private unsubscribe: () => void;
   constructor(readonly store: RunStore, private bus: EventBus, private chat: ChatManager, private execute: Execute, private observer?: Observer) {
     this.unsubscribe = bus.on('*', event => this.captureProgress(event));
@@ -108,6 +110,26 @@ export class RunController {
       },
       record: (type, details, operationId) => this.event(record, type, details, operationId ? key(operationId) : undefined),
       getOperation: id => { const op = record.operations[key(id)]; return op ? { ...op, id } : undefined; },
+      trackOperation: (id, completion) => {
+        const operations = this.inFlight.get(record.id) || new Map<string, Set<Promise<unknown>>>();
+        const pending = operations.get(key(id)) || new Set<Promise<unknown>>();
+        pending.add(completion); operations.set(key(id), pending); this.inFlight.set(record.id, operations);
+        const settled = () => {
+          pending.delete(completion);
+          if (!pending.size) operations.delete(key(id));
+          if (!operations.size) this.inFlight.delete(record.id);
+        };
+        void completion.then(settled, settled);
+      },
+      takeInstructions: async () => scope ? [] : (record.instructions || []).filter(i => i.status === 'queued' && !this.pendingIngress.get(record.id)?.has(i.id)).map(({id, text}) => ({id, text})),
+      ackInstructions: async ids => {
+        if (scope) return;
+        const selected = new Set(ids);
+        const consumed = (record.instructions || []).filter(i => selected.has(i.id) && i.status === 'queued' && !this.pendingIngress.get(record.id)?.has(i.id));
+        for (const instruction of consumed) instruction.status = 'consumed';
+        try { await this.event(record, 'instructions:consumed', { instructionIds: consumed.map(i => i.id) }); }
+        catch (error) { for (const instruction of consumed) instruction.status = 'queued'; throw error; }
+      },
       setOperation: async operation => {
         record.operations[key(operation.id)] = { ...operation, id: key(operation.id) };
         await this.event(record, `operation:${operation.status}`, { name: operation.name, category: operation.category, outcome: operation.result?.outcome, error: operation.result?.error }, key(operation.id));
@@ -185,6 +207,7 @@ export class RunController {
     if (this.store.warnings.length) throw new Error('请先恢复损坏的运行记录，再继续执行');
     const record = this.records.get(id), request = record?.interactions[interactionId];
     if (!record || !request || request.outcome || !['waiting_for_user','waiting_for_approval','interrupted'].includes(record.status)) throw new Error('交互已结束或响应重复');
+    this.assertCurrent(record);
     if (Object.values(record.operations).some(op => op.status === 'unknown')) throw new Error('存在结果未知的操作，请先核对');
     if (request.kind === 'approval' && !['approved','rejected','cancelled','expired'].includes(outcome.kind)) throw new Error('审批响应不合法');
     if (request.kind === 'question' && !['answered','cancelled','expired'].includes(outcome.kind)) throw new Error('问答响应不合法');
@@ -198,6 +221,8 @@ export class RunController {
   async reconcile(id: string, operationId: string, result: import('../skills/skill-types').SkillResult | null): Promise<void> {
     const record = this.records.get(id), operation = record?.operations[operationId];
     if (!record || !operation || operation.status !== 'unknown' || this.active.has(id)) throw new Error('没有可核对的操作');
+    this.assertCurrent(record);
+    if (this.inFlight.get(id)?.has(operationId)) throw new Error('操作仍在实际执行或保存结果，请等待结束后再核对，避免重复执行');
     operation.status = result ? 'finished' : 'planned';
     operation.result = result || undefined;
     if (!result) for (const [key, interaction] of Object.entries(record.interactions)) if (interaction.operationId === operationId) delete record.interactions[key];
@@ -209,12 +234,16 @@ export class RunController {
     const active = this.active.get(id);
     if (active) { this.live.set(id, { ...this.live.get(id), cancelling: true }); this.notify(record); active.controller.abort(new DOMException(reason, 'AbortError')); await active.promise; return; }
     if (['completed','cancelled'].includes(record.status)) return;
+    this.assertCurrent(record);
     record.status = 'cancelled'; record.error = reason;
     for (const request of Object.values(record.interactions)) request.outcome ||= { kind: 'cancelled' };
     this.closePendingCalls(record, reason);
     await this.event(record, 'run:cancelled', { reason });
     await this.chat.replaceMessages(record.messages);
     this.notify(record);
+  }
+  private assertCurrent(record: RunRecord): void {
+    if (record.sessionId !== this.chat.getSessionInfo().sessionId || this.list(record.sessionId)[0]?.id !== record.id) throw new Error('此操作不属于当前会话最新运行，请先打开对应会话');
   }
   private closePendingCalls(record: RunRecord, reason: string): void {
     const done = new Set(record.messages.filter(m => m.role === 'tool').map(m => m.tool_call_id));
@@ -238,8 +267,9 @@ export class RunController {
     const promise = Promise.resolve().then(async () => {
       try {
         await this.execute(record.prompt, context);
-        record.status = context.metadata?.completionStatus === 'max_turns_exceeded' ? 'interrupted' : 'completed';
-        record.error = record.status === 'interrupted' ? '本次执行达到轮次上限，可从检查点继续。' : undefined;
+        const queuedInstructions = record.instructions?.some(i => i.status === 'queued');
+        record.status = context.metadata?.completionStatus === 'max_turns_exceeded' || queuedInstructions ? 'interrupted' : 'completed';
+        record.error = queuedInstructions ? '补充指令已保存但尚未处理，请从检查点继续。' : record.status === 'interrupted' ? '本次执行达到轮次上限，可从检查点继续。' : undefined;
         await this.event(record, `run:${record.status}`, record.error ? { message: record.error } : undefined);
       } catch (error) {
         if (error instanceof RunSuspended) return;
@@ -255,10 +285,31 @@ export class RunController {
     this.active.set(record.id, { controller, context, promise });
     await promise;
   }
-  steer(id: string, text: string): boolean {
+  async steer(id: string, text: string): Promise<boolean> {
     const active = this.active.get(id);
-    if (!active || this.records.get(id)?.status !== 'running' || active.controller.signal.aborted) return false;
-    active.context.pendingSteerMessages?.push(text); return true;
+    const record = this.records.get(id);
+    if (!active || !record || record.status !== 'running' || active.controller.signal.aborted || !text.trim()) return false;
+    this.assertCurrent(record);
+    const instruction = { id: `instruction-${Date.now()}-${Math.random().toString(36).slice(2)}`, text, status: 'queued' as const };
+    const pending = this.pendingIngress.get(id) || new Set<string>();
+    pending.add(instruction.id); this.pendingIngress.set(id, pending);
+    record.instructions ||= []; record.instructions.push(instruction);
+    try { await this.event(record, 'instruction:queued', { instructionId: instruction.id }); }
+    catch (error) {
+      record.instructions = record.instructions.filter(i => i !== instruction);
+      // Another checkpoint may have captured the pending receipt before its write failed.
+      try { await this.store.save(record); }
+      catch (rollbackError) {
+        this.observer?.error('storage:instruction_rollback:failed', rollbackError, { component: 'storage', runId: id, sessionId: record.sessionId });
+        throw new Error('补充指令接收失败，撤回记录也未能保存；请先检查存储后重试。', { cause: rollbackError });
+      }
+      throw error;
+    }
+    finally {
+      pending.delete(instruction.id);
+      if (!pending.size) this.pendingIngress.delete(id);
+    }
+    return true;
   }
   async wait(id: string): Promise<void> { await this.active.get(id)?.promise; }
   async dispose(): Promise<void> {

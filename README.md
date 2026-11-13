@@ -63,6 +63,7 @@ src/
 
 | Doc | What it covers |
 |-----|----------------|
+| [`docs/MODULAR_REFACTOR_PLAN.md`](docs/MODULAR_REFACTOR_PLAN.md) | Replaceable modules, recovery contracts, staged migration and implementation status |
 | [`src/ui/themes/README.md`](src/ui/themes/README.md) | Theme system architecture, creating new themes |
 | [`src/ui/README.md`](src/ui/README.md) | UI system overview, CSS conventions, icon sizing |
 | [`src/agents/README.md`](src/agents/README.md) | Agent system, events, streaming, tool execution |

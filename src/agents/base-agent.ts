@@ -169,6 +169,30 @@ export class BaseAgent {
     await context.onCheckpoint?.([...context.transcript!]);
   }
 
+  private async *consumeInstructions(context: AgentContext, messages: ChatMessage[]): AsyncGenerator<AgentEvent, void> {
+    const queued = await context.runtime?.takeInstructions?.() || [];
+    const committed = new Set(context.transcript?.map(message => message.metadata?.instructionId).filter(Boolean));
+    for (const instruction of queued) {
+      // A crash after the transcript checkpoint but before acknowledgement must not inject twice.
+      if (!committed.has(instruction.id)) {
+        const intervention: ChatMessage = { role: 'user', content: `[HUMAN DYNAMIC INTERVENTION]: ${instruction.text}`,
+          timestamp: Date.now(), metadata: { instructionId: instruction.id } };
+        messages.push(intervention);
+        await this.checkpoint(context, [intervention]);
+        yield { type: 'system:steer', message: instruction.text };
+      }
+      await context.runtime?.ackInstructions([instruction.id]);
+    }
+    // Compatibility for callers that have not adopted a durable runtime.
+    while (context.pendingSteerMessages?.length) {
+      const text = context.pendingSteerMessages.shift()!;
+      const intervention: ChatMessage = { role: 'user', content: `[HUMAN DYNAMIC INTERVENTION]: ${text}`, timestamp: Date.now() };
+      messages.push(intervention);
+      await this.checkpoint(context, [intervention]);
+      yield { type: 'system:steer', message: text };
+    }
+  }
+
   private async recordIncident(context: AgentContext, kind: string, error: unknown, toolName = 'model', originalArgs = ''): Promise<void> {
     if (context.runtime) { await context.runtime.record('incident', { kind, toolName, error: errorDetails(error), providerId: this.provider.id }); return; }
     await this.diagnosticsLogger?.logIncident({
@@ -213,6 +237,7 @@ export class BaseAgent {
         ...context.messages.filter(message => !message.metadata?.isSubagent),
         ...(!context.metadata?.resume ? [userMessage] : [])
       ];
+      yield* this.consumeInstructions(context, messages);
 
       let responseContent = '';
       yield { type: 'message:start', role: 'assistant' };
@@ -280,25 +305,7 @@ export class BaseAgent {
 
       state.turnCount++;
 
-      // 运行时动态插嘴检测与上下文拼接 (Dynamic Steering)
-      if (context.pendingSteerMessages && context.pendingSteerMessages.length > 0) {
-        const steerTexts = [...context.pendingSteerMessages];
-        context.pendingSteerMessages = []; // 清空
-
-        for (const steerText of steerTexts) {
-          // 产生一个人类引导的事件，推送给前端 UI 记录
-          yield { type: 'system:steer', message: steerText };
-
-          // 强行将这一步的人类干预追加到大模型当前轮 of context messages 中！
-          const intervention: ChatMessage = {
-            role: 'user',
-            content: `[HUMAN DYNAMIC INTERVENTION]: ${steerText}`,
-            timestamp: Date.now()
-          };
-          state.messages.push(intervention);
-          await this.checkpoint(context, [intervention]);
-        }
-      }
+      yield* this.consumeInstructions(context, state.messages);
 
       // 自动上下文压缩检查
       if (this.compactor && (state.turnCount === 1 || state.turnCount % 3 === 0)) {

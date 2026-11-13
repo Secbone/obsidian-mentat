@@ -13,6 +13,7 @@ import { ChatManager } from '../../src/chat/chat-manager';
 import { EventBus } from '../../src/extensions/event-bus';
 import { MemoryPlatformAdapter } from '../utils/memory-platform-adapter';
 import type { AgentContext } from '../../src/agents/agent-types';
+import { FileDraftStore } from '../../src/storage/draft-store';
 
 beforeAll(()=>{HTMLElement.prototype.scrollTo=vi.fn();});
 const cleanups:Array<()=>Promise<void>>=[];
@@ -21,6 +22,8 @@ async function fixture(execute:(prompt:string,context:AgentContext)=>Promise<voi
   const platform=new MemoryPlatformAdapter(),bus=new EventBus(),app=new App();
   const plugin:any={platform,eventBus:bus,app,manifest:{id:'mentat'},settings:{aiProviders:[],chatTheme:'terminal',skillsEnabled:true,maxTurns:20},
     loadData:async()=>({}),saveData:async()=>{},indexManager:{getStats:()=>({totalChunks:1})},chatOrchestrator:{}};
+  plugin.draftStore=new FileDraftStore(platform,'.obsidian/plugins/mentat/drafts.json');
+  await plugin.draftStore.migrateLegacy({});
   const manager=new ChatManager(plugin);plugin.chatManager=manager; await manager.getHistory();
   const runtime=new RunController(new RunStore(platform),bus,manager,execute);plugin.runController=runtime;await runtime.initialize();
   cleanups.push(()=>runtime.dispose());
@@ -30,6 +33,50 @@ async function fixture(execute:(prompt:string,context:AgentContext)=>Promise<voi
 }
 
 describe('Card view with plugin-owned runtime',()=>{
+  it('retains a failed steering submission and suppresses duplicate clicks while persistence is pending',async()=>{
+    let finish!:()=>void;
+    const gate=new Promise<void>(resolve=>{finish=resolve;});
+    const s=await fixture(async()=>gate),id=await s.start(),view=await s.open();
+    let reject!: (error:Error)=>void;
+    const steer=vi.spyOn(s.runtime,'steer').mockImplementationOnce(()=>new Promise<boolean>((_resolve,rejectPromise)=>{reject=rejectPromise;}));
+    const input=view.containerEl.querySelector('.mentat-composer-input')!;input.textContent='keep steering draft';
+    const button=view.containerEl.querySelector('.mentat-composer-wrapper > button') as HTMLButtonElement;
+    button.click();button.click();expect(steer).toHaveBeenCalledOnce();expect(button.disabled).toBe(true);
+    reject(new Error('steering disk full'));
+    await vi.waitFor(()=>expect(view.containerEl.textContent).toContain('steering disk full'));
+    expect(input.textContent).toBe('keep steering draft');expect(button.disabled).toBe(false);
+    finish();await s.runtime.wait(id);
+  });
+  it('keeps edits made while a successful steering submission is being persisted',async()=>{
+    let finish!:()=>void;
+    const gate=new Promise<void>(resolve=>{finish=resolve;});
+    const s=await fixture(async()=>gate),id=await s.start(),view=await s.open();
+    let accept!:(value:boolean)=>void;
+    vi.spyOn(s.runtime,'steer').mockImplementationOnce(()=>new Promise<boolean>(resolve=>{accept=resolve;}));
+    const input=view.containerEl.querySelector('.mentat-composer-input')!;input.textContent='first instruction';
+    (view.containerEl.querySelector('.mentat-composer-wrapper > button') as HTMLButtonElement).click();
+    input.textContent='next draft';accept(true);
+    await vi.waitFor(()=>expect(view.containerEl.textContent).toContain('补充指令已排队'));
+    expect(input.textContent).toBe('next draft');
+    finish();await s.runtime.wait(id);
+  });
+  it('clears the saved steering draft only after a successful durable acknowledgement',async()=>{
+    let finish!:()=>void;
+    const gate=new Promise<void>(resolve=>{finish=resolve;});
+    const s=await fixture(async()=>gate),id=await s.start(),view=await s.open();
+    let accept!:(value:boolean)=>void;
+    vi.spyOn(s.runtime,'steer').mockImplementationOnce(()=>new Promise<boolean>(resolve=>{accept=resolve;}));
+    const session=s.manager.getSessionInfo().sessionId;
+    await s.plugin.draftStore.save(session,'persist before sending');
+    const input=view.containerEl.querySelector('.mentat-composer-input')!;input.textContent='persist before sending';
+    (view.containerEl.querySelector('.mentat-composer-wrapper > button') as HTMLButtonElement).click();
+    expect(input.textContent).toBe('persist before sending');
+    expect(await s.plugin.draftStore.load(session)).toBe('persist before sending');
+    accept(true);
+    await vi.waitFor(async()=>expect(await s.plugin.draftStore.load(session)).toBeNull());
+    expect(input.textContent).toBe('');
+    finish();await s.runtime.wait(id);
+  });
   it('reattaches to the complete live prefix without replay and finalizes the same reply card',async()=>{
     let finish!:()=>void;
     const gate=new Promise<void>(resolve=>{finish=resolve;});
