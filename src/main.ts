@@ -1,8 +1,14 @@
 import { Observer } from './observability/observer';
 import { LogStore } from './observability/log-store';
-import { RunInspectorModal } from './ui/run-inspector-modal';
+import type { ObservationQuery } from './contracts/observation-query';
+import { IndexedObservationQuery } from './observability/observation-query';
+import { LegacyObservationReader } from './observability/legacy-reader';
+import { createObsidianSkillHost } from './adapters/obsidian/skill-host';
+import { createEngineFactory } from './agents/engine-factory';
+import { VaultDiagnosticsLogger } from './diagnostics/vault-diagnostics-logger';
+import { RunInspectorModal, type RunInspectorHost } from './ui/run-inspector-modal';
 import type { Command } from 'obsidian';
-import { RunHistoryModal } from './ui/run-history-modal';
+import { RunHistoryModal, type RunHistoryHost } from './ui/run-history-modal';
 import { ChatManager } from './chat/chat-manager';
 import { RunController } from './runtime/run-controller';
 import { RunStore } from './runtime/run-store';
@@ -33,6 +39,9 @@ function replaceSettings(target: MentatSettings, source: MentatSettings): void {
 
 export default class MentatPlugin extends Plugin {
   observer!: Observer;
+  observationQuery!: ObservationQuery;
+  runInspectorHost!: RunInspectorHost;
+  runHistoryHost!: RunHistoryHost;
   draftStore!: DraftStore;
   settings!: MentatSettings;
   aiRouter!: AIRouter;
@@ -97,14 +106,16 @@ export default class MentatPlugin extends Plugin {
 
     // Initialize Chat Orchestrator (may fail gracefully if no provider configured)
     this.chatOrchestrator = new ChatOrchestrator(platform, this.settings, this.aiRouter, this.indexManager, this.eventBus,
-      { canReconfigure: () => !this.runController?.hasUnsettledWork(), copyExtensionSkillsTo: registry => this.extensionManager?.copySkillsTo(registry) });
+      { canReconfigure: () => !this.runController?.hasUnsettledWork(), copyExtensionSkillsTo: registry => this.extensionManager?.copySkillsTo(registry),
+        skillContext: createObsidianSkillHost(this.app, platform, this.indexManager), engineFactory: createEngineFactory(), observer: this.observer, notice: message => { new Notice(message); },
+        diagnostics: new VaultDiagnosticsLogger(this.app.vault, () => this.settings.aiProviders.map(provider => provider.apiKey || ''), this.observer) });
     try {
       await this.chatOrchestrator.initialize();
     } catch (error: unknown) {
       this.observer.error('chat:initialize:failed', error, { component: 'chat' });
       console.warn('Mentat: ChatOrchestrator initialization failed (will retry after provider config):', 
         error instanceof Error ? error.message : String(error));
-      new Notice('Mentat: 未检测到 AI 服务商配置。请在设置中配置 API Key。No AI provider configured — add one in Mentat settings.');
+      new Notice('Mentat：聊天服务初始化失败，请打开运行检查器查看具体错误。');
     }
 
     this.chatManager = new ChatManager(this);
@@ -113,6 +124,17 @@ export default class MentatPlugin extends Plugin {
       (prompt, context) => this.chatOrchestrator.sendMessage(prompt, { context, enableSkills: context.metadata?.enableSkills as boolean | undefined }), this.observer);
     await this.runController.initialize();
     this.runAccess = createRunAccess(this.runController);
+    this.observationQuery = new IndexedObservationQuery(this.runAccess, this.observer, new LegacyObservationReader(this.app.vault.adapter));
+    this.runInspectorHost = { app: this.app, runs: this.runAccess, observations: this.observationQuery,
+      writeLog: async text => {
+        const folder = this.settings.diagnosticsFolder || 'Mentat/Diagnostics';
+        let current = '';
+        for (const part of folder.split('/')) { current += (current ? '/' : '') + part; if (!await platform.exists(current)) await platform.mkdir(current); }
+        const note = await this.app.vault.create(`${folder}/Run_Log_${Date.now()}.md`, text);
+        await this.app.workspace.getLeaf(false).openFile(note);
+      }, reportError: error => this.observer.error('inspector:failed', error, { component: 'ui' }) };
+    this.runHistoryHost = { app: this.app, runs: this.runAccess, inspect: id => new RunInspectorModal(this.runInspectorHost, id).open(),
+      activateChat: () => this.activateChatView(), refreshChat: async () => { await (this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0]?.view as ChatView | undefined)?.refreshRuntime(); } };
     if (this.runController.store.warnings.length) {
       this.observer.event('storage:recovery:warning', { component: 'storage', level: 'warn', attributes: { warnings: this.runController.store.warnings } });
       new Notice('部分运行记录损坏，自动执行已暂停；请打开运行检查器查看。');
@@ -156,6 +178,7 @@ export default class MentatPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.observationQuery?.dispose();
     this.observer?.event('plugin:unloading', { component: 'plugin' });
     void (async () => {
       try { await this.runController?.dispose(); }
@@ -182,8 +205,8 @@ export default class MentatPlugin extends Plugin {
           .catch(error => new Notice(`Mentat：${error instanceof Error ? error.message : String(error)}`));
       } : undefined });
     };
-    add({ id: 'inspect-runs', name: '打开运行检查器 / Open run inspector', callback: () => new RunInspectorModal(this).open() });
-    add({ id: 'manage-runs', name: 'Open run history and recovery', callback: () => new RunHistoryModal(this).open() });
+    add({ id: 'inspect-runs', name: '打开运行检查器 / Open run inspector', callback: () => new RunInspectorModal(this.runInspectorHost).open() });
+    add({ id: 'manage-runs', name: 'Open run history and recovery', callback: () => new RunHistoryModal(this.runHistoryHost).open() });
     // Chat command
     add({
       id: 'open-chat',

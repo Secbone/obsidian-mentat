@@ -1,19 +1,19 @@
 // AgentManager - Manages agent instances and execution
 
-import { BaseAgent } from './base-agent';
+import type { AgentEngine } from '../contracts/agent-engine';
 import { AgentContext, AgentResponse } from './agent-types';
 
 /**
  * AgentManager - Manages multiple agent instances
  */
 export class AgentManager {
-  private agents: Map<string, BaseAgent> = new Map();
-  private currentAgent: BaseAgent | null = null;
+  private agents: Map<string, AgentEngine> = new Map();
+  private currentAgent: AgentEngine | null = null;
   private activeExecutions = 0;
 
   hasActiveExecutions(): boolean { return this.activeExecutions > 0; }
 
-  replaceAgents(agents: BaseAgent[]): void {
+  replaceAgents(agents: AgentEngine[]): void {
     if (this.hasActiveExecutions()) throw new Error('Agents are still executing');
     const replacement = new Map(agents.map(agent => [agent.getId(), agent]));
     if (replacement.size !== agents.length) throw new Error('Duplicate agent ID');
@@ -25,7 +25,7 @@ export class AgentManager {
   /**
    * Register an agent
    */
-  registerAgent(agent: BaseAgent): void {
+  registerAgent(agent: AgentEngine): void {
     this.agents.set(agent.getId(), agent);
   }
 
@@ -42,14 +42,14 @@ export class AgentManager {
   /**
    * Get an agent by ID
    */
-  getAgent(agentId: string): BaseAgent | undefined {
+  getAgent(agentId: string): AgentEngine | undefined {
     return this.agents.get(agentId);
   }
 
   /**
    * List all registered agents
    */
-  listAgents(): BaseAgent[] {
+  listAgents(): AgentEngine[] {
     return Array.from(this.agents.values());
   }
 
@@ -69,7 +69,7 @@ export class AgentManager {
    * Get the current active agent
    * @deprecated Use stateless execute(agentId, prompt, context) instead.
    */
-  getCurrentAgent(): BaseAgent | null {
+  getCurrentAgent(): AgentEngine | null {
     return this.currentAgent;
   }
 

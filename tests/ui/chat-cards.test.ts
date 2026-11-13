@@ -85,6 +85,24 @@ describe('Stable card UI',() => {
     input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true})); expect(onSend).toHaveBeenCalledOnce();
     handler.dispose(); send.click(); expect(onSend).toHaveBeenCalledOnce();
   });
+  it('bounds a growing conversation while following and while holding an older reading position',()=>{
+    const root=document.body.createDiv(),theme=new CardTheme('terminal',{} as any,new MessageRenderer());
+    theme.mount(root,{onSend:()=>{},onCancel:()=>{},onClear:()=>{},onAddDocument:()=>{},onSettings:()=>{},onInspect:()=>{},onExportDiagnostics:()=>{},onCardAction:async()=>{}});
+    const cards=Array.from({length:2000},(_,i)=>card({id:`bounded-${i}`}));
+    theme.render(state(cards.slice(0,200)));theme.render(state(cards.slice(0,500)));
+    expect(root.querySelectorAll('article')).toHaveLength(150);
+    const oldestVisible=root.querySelector('article');
+    theme.getMessagesContainer().dispatchEvent(new WheelEvent('wheel',{deltaY:-40}));
+    theme.render(state(cards));
+    expect(root.querySelectorAll('article')).toHaveLength(300);expect(root.querySelector('article')).toBe(oldestVisible);
+    for (let i=0;i<4;i++) (root.querySelector('.mentat-load-earlier') as HTMLButtonElement).click();
+    expect(root.querySelectorAll('article').length).toBeLessThanOrEqual(250);
+    const latest=Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find(button=>button.textContent==='回到最新记录')!;
+    expect(latest.hidden).toBe(false);latest.click();
+    expect(root.querySelectorAll('article')).toHaveLength(150);
+    expect(root.querySelector('article')?.getAttribute('data-card-id')).toBe('bounded-1850');
+    theme.unmount();
+  });
   it('keeps following layout-driven scroll changes but pauses for explicit user scrolling',()=>{
     const root=document.body.createDiv(),scroll=root.createDiv();
     Object.defineProperties(scroll,{scrollHeight:{value:2000},clientHeight:{value:300}});

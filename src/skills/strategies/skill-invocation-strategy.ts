@@ -9,11 +9,7 @@ import { PromptLoader } from '../../prompts/prompt-loader';
 import { PROMPT_PATHS, FALLBACK_PROMPTS, TEMPLATE_VARS } from '../../prompts/prompt-templates';
 import { IPlatformAdapter } from '../../types/platform';
 
-type MentatPluginRef = {
-  settings?: {
-    skillConfigurations?: Record<string, unknown>;
-  };
-};
+type SkillConfigurations = Record<string,{enabled?:boolean;directCall?:boolean}>;
 
 /**
  * Skill invocation mode
@@ -82,7 +78,7 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
   private promptLoader: PromptLoader | null = null;
   private platform?: IPlatformAdapter;
 
-  constructor(platform?: IPlatformAdapter) {
+  constructor(platform?: IPlatformAdapter, private configurations:SkillConfigurations = {}) {
     this.platform = platform;
     if (platform) {
       this.promptLoader = new PromptLoader(platform, FALLBACK_PROMPTS);
@@ -96,10 +92,7 @@ export class ProgressiveDisclosureStrategy implements SkillInvocationStrategy {
     content += registry.getDocumentationContent();
 
     // Filter enabled skills
-    const app = this.platform ? this.platform.getApp() : undefined;
-    const plugin = (app as Record<string, unknown> | undefined)?.plugins as { plugins?: Record<string, MentatPluginRef> } | undefined;
-    const mentatPlugin = plugin?.plugins?.['mentat'];
-    const configurations = mentatPlugin?.settings?.skillConfigurations || {};
+    const configurations = this.configurations;
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
       return (configurations[fullName] as { enabled?: boolean } | undefined)?.enabled !== false;
@@ -220,7 +213,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
   private listGenerator = new SkillListGenerator();
   private platform?: IPlatformAdapter;
 
-  constructor(platform?: IPlatformAdapter) {
+  constructor(platform?: IPlatformAdapter, private configurations:SkillConfigurations = {}) {
     this.platform = platform;
   }
 
@@ -239,9 +232,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
       'obsidian:web_fetch'
     ];
     
-    const app = this.platform ? this.platform.getApp() : undefined;
-    const plugin = app ? (app as unknown as { plugins: { plugins: Record<string, { settings: { skillConfigurations?: Record<string, { enabled?: boolean }> } }> } }).plugins?.plugins?.['mentat'] : null;
-    const configurations: Record<string, unknown> = plugin?.settings?.skillConfigurations || {};
+    const configurations = this.configurations;
     
     // Base defaults
     for (const name of defaultCore) {
@@ -270,10 +261,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     content += registry.getDocumentationContent();
 
     // Filter enabled skills
-    const app = this.platform ? this.platform.getApp() : undefined;
-    const plugin = (app as Record<string, unknown> | undefined)?.plugins as { plugins?: Record<string, MentatPluginRef> } | undefined;
-    const mentatPlugin = plugin?.plugins?.['mentat'];
-    const configurations = mentatPlugin?.settings?.skillConfigurations || {};
+    const configurations = this.configurations;
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
       return (configurations[fullName] as { enabled?: boolean } | undefined)?.enabled !== false;
@@ -322,10 +310,7 @@ export class HybridSkillInvocationStrategy implements SkillInvocationStrategy {
     const tools: ToolDefinition[] = [];
 
     // Filter enabled skills
-    const app = this.platform ? this.platform.getApp() : undefined;
-    const plugin = (app as Record<string, unknown> | undefined)?.plugins as { plugins?: Record<string, MentatPluginRef> } | undefined;
-    const mentatPlugin = plugin?.plugins?.['mentat'];
-    const configurations = mentatPlugin?.settings?.skillConfigurations || {};
+    const configurations = this.configurations;
     const enabledSkills = registry.getAll().filter(s => {
       const fullName = registry.getFullName(s.namespace, s.name);
       return (configurations[fullName] as { enabled?: boolean } | undefined)?.enabled !== false;
@@ -374,7 +359,7 @@ export class SkillInvocationContext {
   private mode: SkillInvocationMode;
   private platform?: IPlatformAdapter;
 
-  constructor(mode: SkillInvocationMode = 'progressive', platform?: IPlatformAdapter) {
+  constructor(mode: SkillInvocationMode = 'progressive', platform?: IPlatformAdapter, private configurations:SkillConfigurations = {}) {
     this.mode = mode;
     this.platform = platform;
     this.strategy = this.createStrategy(mode);
@@ -385,11 +370,11 @@ export class SkillInvocationContext {
       case 'native':
         return new NativeFunctionCallingStrategy();
       case 'progressive':
-        return new ProgressiveDisclosureStrategy(this.platform);
+        return new ProgressiveDisclosureStrategy(this.platform,this.configurations);
       case 'auto':
-        return new HybridSkillInvocationStrategy(this.platform);
+        return new HybridSkillInvocationStrategy(this.platform,this.configurations);
       default:
-        return new HybridSkillInvocationStrategy(this.platform);
+        return new HybridSkillInvocationStrategy(this.platform,this.configurations);
     }
   }
 

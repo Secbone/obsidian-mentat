@@ -17,6 +17,8 @@ import { EventBus } from '../../extensions/event-bus';
 import { DiagnosticsLogger } from '../../agents/agent-types';
 import { RunRuntime, RunBlocked, RunSuspended } from '../../runtime/types';
 import { fingerprint } from '../../runtime/fingerprint';
+import type { ToolHandler, ToolInvocation, ToolOutcome, MutationPlan } from '../../contracts/tools';
+import { toToolOutcome, fromToolOutcome, normalizeSkillResult } from '../results';
 import { abortable, throwIfAborted, errorDetails, isAbortError } from '../../utils/execution';
 
 /**
@@ -26,6 +28,7 @@ export interface ExecutionOptions {
   runtime?: RunRuntime;
   operationId?: string;
   fingerprint?: string;
+  mutationPlan?: MutationPlan;
   dryRun?: boolean;           // If true, validate but don't execute
   timeout?: number;            // Execution timeout in ms
   skipConfirmation?: boolean;  // Skip user confirmation even if required
@@ -44,7 +47,7 @@ export interface SkillStats {
 /**
  * SkillExecutor handles validation and execution of skills
  */
-export class SkillExecutor {
+export class SkillExecutor implements ToolHandler {
   private executionHistory: SkillCall[] = [];
   private maxHistorySize = 100;
   private static writeBarriers = new WeakMap<object, { tail: Promise<void> }>();
@@ -56,7 +59,7 @@ export class SkillExecutor {
     private eventBus?: EventBus,
     private diagnosticsLogger?: DiagnosticsLogger,
   ) {
-    const key = context.vault || context;
+    const key = context.files || context;
     this.writeBarrier = SkillExecutor.writeBarriers.get(key) || { tail: Promise.resolve() };
     SkillExecutor.writeBarriers.set(key, this.writeBarrier);
   }
@@ -72,6 +75,7 @@ export class SkillExecutor {
   ): Promise<SkillResult> {
     const startTime = Date.now();
     const callId = options.operationId || this.generateCallId();
+    options = {...options,operationId:callId};
     options = { ...options, operationId: callId };
 
     // Create skill call record
@@ -127,7 +131,7 @@ export class SkillExecutor {
 
       const category = skill.metadata?.executionCategory || 'external';
       const previous = options.runtime?.getOperation(callId);
-      if (previous?.status === 'finished' && previous.result) return previous.result;
+      if (previous?.status === 'finished' && previous.result) return normalizeSkillResult(previous.result);
       if (previous?.status === 'unknown' || previous?.status === 'running') throw new RunBlocked('操作结果尚未确认，不能重复执行');
       await options.runtime?.setOperation({ id: callId, name: fullName, category, status: 'planned' });
 
@@ -137,7 +141,7 @@ export class SkillExecutor {
       // Check permissions (skills declare required permissions, user settings can restrict)
       const declaredPermissions = skill.metadata?.permissions;
       if (declaredPermissions && declaredPermissions.length > 0) {
-        const skillConfig = (this.context.settings ?? this.context.plugin?.settings)?.skillConfigurations?.[fullName];
+        const skillConfig = this.context.settings?.skillConfigurations?.[fullName];
         const allowedPermissions = skillConfig?.allowedPermissions as string[] | undefined;
         if (allowedPermissions) {
           // User has explicitly allowed only certain permissions
@@ -156,8 +160,20 @@ export class SkillExecutor {
         }
       }
 
+      const configured = this.context.settings?.skillConfigurations?.[fullName];
+      if(configured?.enabled===false){
+        const result:SkillResult={success:false,outcome:'denied',error:'Skill is disabled in committed settings'};
+        await options.runtime?.setOperation({id:callId,name:fullName,category,status:'finished',result});
+        skillCall.result=result;skillCall.status='error';return result;
+      }
+      if(['obsidian:write_note','obsidian:edit_note','obsidian:batch_operation','obsidian:move_note'].includes(fullName)&&!skill.prepare)throw new Error('Mutation handlers must provide a prepared host plan');
+      if(skill.prepare){
+        try{options.mutationPlan=await skill.prepare(validatedInput,{...options});}
+        catch(error){if(error instanceof RunBlocked||error instanceof RunSuspended||isAbortError(error))throw error;throw new Error(`Validation failed preparing mutation: ${error instanceof Error?error.message:String(error)}`);}
+      }
+
       // Check if confirmation is required (settings override takes precedence)
-      const skillConfig = (this.context.settings ?? this.context.plugin?.settings)?.skillConfigurations?.[fullName];
+      const skillConfig = this.context.settings?.skillConfigurations?.[fullName];
       const requiresConfirmation = skillConfig?.requireConfirmation !== undefined
         ? skillConfig.requireConfirmation
         : !!skill.metadata?.requiresConfirmation;
@@ -166,15 +182,15 @@ export class SkillExecutor {
         const fullName = typeof namespace === 'string' && namespace.includes(':')
           ? namespace
           : this.registry.getFullName(namespace as SkillNamespace, name);
+        options.fingerprint = options.mutationPlan?.id || await this.approvalFingerprint(fullName, validatedInput);
         if (options.runtime) {
-          options.fingerprint = await this.approvalFingerprint(fullName, validatedInput);
           const response = await options.runtime.interact({ id: `${callId}:approval`, operationId: callId, kind: 'approval',
-            question: `允许执行 ${fullName}？`, context: JSON.stringify(validatedInput, null, 2), fingerprint: options.fingerprint });
+            question: `允许执行 ${fullName}？`, context: JSON.stringify({input:validatedInput,...(options.mutationPlan?{plan:{id:options.mutationPlan.id,summary:options.mutationPlan.summary,targets:options.mutationPlan.changes.map(change=>change.kind==='move'?{from:change.path,to:change.to}:change.path),warnings:options.mutationPlan.warnings}}:{})}, null, 2), fingerprint: options.fingerprint });
           if (response.kind !== 'approved') return { success: false, outcome: response.kind === 'expired' ? 'expired' : response.kind === 'rejected' ? 'denied' : 'cancelled', error: '操作未获授权' };
         } else {
           const taskId = `${fullName}:${callId}`;
           const response = this.waitForConfirm(taskId, 300000, options.abortSignal);
-          this.eventBus?.emit({ type: 'confirm:request', taskId, skillName: fullName, params: validatedInput,
+          this.eventBus?.emit({ type: 'confirm:request', taskId, skillName: fullName, params: {input:validatedInput,plan:options.mutationPlan},
             message: `智能体申请执行操作: 【${skill.description}】。是否批准？`, sessionId: options.sessionId, runId: options.runId, agentId: options.agentId });
           const outcome = await response;
           if (outcome !== 'approved') return { success: false, outcome: outcome === 'expired' ? 'expired' : 'denied', error: outcome === 'expired' ? 'Approval expired' : 'Operation rejected by user' };
@@ -202,7 +218,7 @@ export class SkillExecutor {
         options
       );
 
-      result.outcome ||= result.success ? 'success' : 'failure';
+      Object.assign(result,normalizeSkillResult(result));
       // Update call record
       skillCall.result = result;
       skillCall.status = result.success ? 'success' : 'error';
@@ -281,14 +297,14 @@ export class SkillExecutor {
     const normalizedName = toolCall.name.replace(/__/g, ':');
     const { namespace, name } = this.registry.parseName(normalizedName);
 
-    // Route to appropriate executor
-    if (namespace.startsWith('mcp:')) {
-      // MCP skill - will be handled by MCP client
-      return this.executeMCPSkill(normalizedName, parameters, options);
-    } else {
-      // Built-in skill
-      return this.execute(namespace, name, parameters, { ...options, operationId: options.operationId || toolCall.id });
-    }
+    return fromToolOutcome(await this.invoke({toolId:`${namespace}:${name}`,input:parameters,operationId:options.operationId||toolCall.id,signal:options.abortSignal},options));
+  }
+
+  async invoke(call:ToolInvocation,options:ExecutionOptions={}):Promise<ToolOutcome>{
+    let resolved:{namespace:string;name:string};
+    try{resolved=this.registry.parseName(call.toolId);}catch(error){return {outcome:'failure',code:'input_error',error:error instanceof Error?error.message:String(error)};}
+    const {namespace,name}=resolved;
+    return toToolOutcome(await this.execute(namespace,name,call.input,{...options,operationId:call.operationId||options.operationId,abortSignal:call.signal||options.abortSignal}));
   }
 
   /**
@@ -345,23 +361,24 @@ export class SkillExecutor {
         if (current?.status === 'finished' && current.result) return current.result;
         if (current?.status === 'unknown' || current?.status === 'running') throw new RunBlocked('操作结果尚未确认，不能重复执行');
       }
-      if (options.fingerprint && options.fingerprint !== await this.approvalFingerprint(skill.namespace + ':' + skill.name, input as Record<string, unknown>)) throw new RunBlocked('授权后文件已变化，请重新核对并授权');
+      if(options.mutationPlan){if(!this.context.mutations)throw new Error('Missing host mutation service');await this.context.mutations.assertCurrent(options.mutationPlan,options);}
+      else if (options.fingerprint && options.fingerprint !== await this.approvalFingerprint(skill.namespace + ':' + skill.name, input as Record<string, unknown>)) throw new RunBlocked('授权后文件已变化，请重新核对并授权');
       if (options.runtime && options.operationId && skill.metadata?.executionCategory !== 'interaction') {
         const operation = options.runtime.getOperation(options.operationId)!;
         await options.runtime.setOperation({ ...operation, status: 'running' });
       }
       throwIfAborted(controller.signal);
       if (timeoutMs > 0) timer = setTimeout(() => controller.abort(new Error('Skill execution timeout; 操作结果尚未确认，请先核对实际结果。')), timeoutMs);
-      return skill.execute(input, { abortSignal: controller.signal, runtime: options.runtime, operationId: options.operationId });
+      return skill.execute(input, { abortSignal: controller.signal, runtime: options.runtime, operationId: options.operationId, mutationPlan:options.mutationPlan });
     };
     const serial = !['read', 'interaction', 'orchestration'].includes(skill.metadata?.executionCategory || 'external');
     const execution = serial ? this.writeBarrier.tail.then(run) : run();
     const operation = execution.then(async result => {
       clearTimeout(timer);
-      result.outcome ||= result.success ? 'success' : 'failure';
+      result=normalizeSkillResult(result);
       if (options.runtime && options.operationId) {
         const operation = options.runtime.getOperation(options.operationId);
-        if (operation) await options.runtime.setOperation({ ...operation, status: 'finished', result });
+        if (operation) await options.runtime.setOperation({ ...operation, status: result.outcome==='unknown'?'unknown':'finished', result });
       }
       if (controller.signal.aborted && !options.runtime) await this.diagnosticsLogger?.logIncident({
         agentId: options.agentId || 'skill-executor', agentName: 'Skill Executor',
@@ -381,21 +398,6 @@ export class SkillExecutor {
       clearTimeout(timer);
       options.abortSignal?.removeEventListener('abort', onAbort);
     }
-  }
-
-  /**
-   * Execute MCP skill (placeholder - will be implemented by MCP client)
-   */
-  private async executeMCPSkill(
-    _fullName: string,
-    _parameters: Record<string, unknown>,
-    _options: ExecutionOptions
-  ): Promise<SkillResult> {
-    // This will be implemented when MCP client is integrated
-    return {
-      success: false,
-      error: 'MCP skill execution not yet implemented'
-    };
   }
 
   /**
@@ -519,10 +521,11 @@ export class SkillExecutor {
       else if (value && typeof value === 'object') Object.entries(value).forEach(([k,v]) => visit(v,k));
     };
     visit(input);
+    if(paths.size && !this.context.files)throw new Error('Missing host file reader; cannot bind approval to target versions');
     const files: Record<string, string | null> = {};
     for (const path of paths) {
-      const file = this.context.vault?.getAbstractFileByPath(path);
-      files[path] = file && 'extension' in file ? await this.context.vault.read(file as import('obsidian').TFile) : null;
+      const file = this.context.files?.getAbstractFileByPath(path);
+      files[path] = file && 'extension' in file ? await this.context.files.read(file) : null;
     }
     return fingerprint({ name, input, files });
   }

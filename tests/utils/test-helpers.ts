@@ -1,22 +1,7 @@
 import { SkillContext } from '@/skills/skill-types';
-import { Plugin } from 'obsidian';
 
-export function createMockSkillContext(overrides?: Partial<SkillContext>): SkillContext {
-  const defaultSettings = {
-    browserlessApiKey: '',
-    ...(overrides?.plugin as any)?.settings
-  };
-
-  return {
-    plugin: {
-      settings: defaultSettings,
-      app: {} as any,
-      manifest: {} as any,
-      loadData: async () => ({}),
-      saveData: async () => {},
-      ...(overrides?.plugin || {})
-    } as Plugin
-  } as SkillContext;
+export function createMockSkillContext(overrides?: Partial<SkillContext> & {plugin?:any}): SkillContext {
+  return {files:{} as any,metadataCache:{} as any,...overrides,settings:{browserlessApiKey:'',...overrides?.plugin?.settings,...overrides?.settings}} as SkillContext;
 }
 
 export function createMockResponse(status: number, text: string, headers: Record<string, string> = {}) {

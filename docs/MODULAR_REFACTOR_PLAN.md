@@ -1,6 +1,6 @@
 # 可替换模块重构方案
 
-日期：2026-11-13。基线：`b1c43cb`。状态：A 已提交并 push（`9e0df2d`），B1 的接口与依赖组装已实施并完成离线验证；后续目标契约和阶段验收不代表已经实现。两批均未部署至用户 vault。
+日期：2026-11-13。基线：`b1c43cb`。状态：A（`9e0df2d`）、B1（`86bc669`）已提交并 push；B2/C/D/E/F 已实施，已完成自动化、真实供应商、隔离文件系统及本地 Obsidian 部署验证。详细证据与保证边界见 [部署验收记录](MODULAR_DEPLOYMENT_20261113.md)。下文 A/B1 记录保留当时状态，不能作为当前未完成清单。
 
 ## 1. 目标与选择
 
@@ -221,6 +221,17 @@ B1 是批次 B 的可交付子集；没有宣称整个核心已经去除宿主�
 - 新增共享 RunAccess consumer 契约（真实 runtime 与独立内存实现），可注入模型工厂、候选失败/提交顺序/回滚、重载图、扩展声明、已提交策略快照及无 controller 的 ChatView 回归。
 - 验证：43 个测试文件、347 项离线测试通过（相对 A 新增 43 项）；构建/类型检查、lint、diff 检查通过。未启动真实模型/MCP进程，也未部署或执行真实 vault 写入及 GUI 验证。
 - 下一步：B2 收缩 ChatOrchestrator/SkillContext 的宿主穿透及旧弹窗直接依赖；C 再统一运行仓库提交、历史投影和持久上下文。不会以当前快照接口冒充引擎/存储替换已经完成。
+
+### B2 / C / D / E / F 实际实施记录
+
+- B2：portable conversation DTO；ChatOrchestrator 注入宿主小端口；SkillContext 不再暴露 Plugin/App/可写 Vault；历史与检查器注入查询宿主。
+- C：RunRepository 乐观 revision、外部变更检测、临时文件回读/备份/安全替换；Controller 提交成功后发布；指令正文与消费标记同一 checkpoint。新运行 delta-v1 基线引用，旧完整快照兼容读取；会话正文由运行账本投影。ContextBuilder 可替换，摘要与来源绑定持久化。
+- D：write/edit/batch/move 统一持久 MutationPlan、冻结目标、计划审批、版本预检和写后验证；部分失败保留证据。ToolCatalog/Handler/Outcome 分离；MCP 保留 JSON Schema，使用保守审批和 unknown 结果，不自动重放不确定副作用。
+- E：ChatModel 与 Embedder 分离；provider 私有状态 opaque/版本化；AgentEngine 工厂、原生及独立测试引擎共享宿主审批/取消/恢复约束。ContextBuilder 同时适用于原生与替代引擎；生产默认仍为 native。
+- F：ObservationQuery 增量索引、分页/按需详情，检查器与报告共享查询统计；时间线窗口和历史分页限制 DOM 数量。2K/20K/100K 基准及其边界见验收记录。
+- 实机额外发现并修复：Obsidian Modal 自带 selection 属性覆盖检查器同名方法；改名 observationFilter 并在回归测试模拟宿主属性。
+- 验收：419 项离线、4 项联网集成通过，build/typecheck/lint 通过；真实 DeepSeek high/65536 工具续接通过；隔离真实文件目录内审批、写入、批量 YAML、移动引用和重启恢复通过。本地用户会话只读验证，不重放历史工具。
+- 保证边界：不是跨设备事务或任意 JS 沙箱；本地 MCP 仅做参数 envelope 校验，完整 schema 语义仍需远端验证。首次全局索引/搜索和完整导出仍有线性成本，尚无数据库或全量虚拟列表。
 
 ## 11. 契约验证与回滚
 

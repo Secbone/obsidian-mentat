@@ -1,15 +1,21 @@
 import { RunSuspended, RunBlocked } from '../runtime/types';
-import { ModelGateway, recentMessageUnit } from '../runtime/model-gateway';
+import { ModelGateway, validateToolPairs } from '../runtime/model-gateway';
 // BaseAgent - Base class for all agents with skill support
 
 import { safeParseJson, normalizeJsonArguments } from '../utils/json-healer';
-import { AIProvider, ChatMessage, ToolCall, GenerateResponse } from '../types';
+import type { AIProvider } from '../types';
+import type { ChatMessage, ToolCall } from '../contracts/conversation';
+import type { GenerateResponse } from '../contracts/model';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { SkillExecutor } from '../skills/core/skill-executor';
 import { SkillInvocationContext } from '../skills/strategies/skill-invocation-strategy';
 import { SkillCall, isExecutableSkill, SkillResult, SkillNamespace } from '../skills/skill-types';
 import { AgentConfig, AgentContext, AgentResponse, AgentEvent, DiagnosticsLogger } from './agent-types';
 import { Compactor } from './compactor';
+import { fingerprint } from '../runtime/fingerprint';
+import type { ContextSnapshot } from '../runtime/types';
+import type { ContextBuilder } from '../contracts/context-builder';
+import { SummaryContextBuilder } from '../context/summary-context-builder';
 import { EventBus } from '../extensions/event-bus';
 import { formatDiffAsText, DiffLine } from '../utils/diff';
 import { throwIfAborted, isAbortError, errorDetails } from '../utils/execution';
@@ -52,7 +58,8 @@ export interface AgentDependencies {
   skillExecutor: SkillExecutor;
   skillInvocationContext: SkillInvocationContext;
   diagnosticsLogger?: DiagnosticsLogger;
-  compactor?: Compactor;
+  compactor?: Pick<Compactor,'compact'>;
+  contextBuilder?: ContextBuilder;
   eventBus?: EventBus;
 }
 
@@ -81,7 +88,8 @@ export class BaseAgent {
   protected skillExecutor: SkillExecutor;
   protected skillInvocationContext: SkillInvocationContext;
   protected diagnosticsLogger?: DiagnosticsLogger;
-  protected compactor: Compactor;
+  protected compactor: Pick<Compactor,'compact'>;
+  protected contextBuilder:ContextBuilder;
   protected eventBus?: EventBus;
 
   constructor(
@@ -96,6 +104,7 @@ export class BaseAgent {
     this.skillInvocationContext = dependencies.skillInvocationContext;
     this.diagnosticsLogger = dependencies.diagnosticsLogger;
     this.compactor = dependencies.compactor ?? new Compactor(provider);
+    this.contextBuilder=dependencies.contextBuilder ?? new SummaryContextBuilder(this.compactor);
     this.eventBus = dependencies.eventBus;
   }
 
@@ -169,6 +178,16 @@ export class BaseAgent {
     await context.onCheckpoint?.([...context.transcript!]);
   }
 
+  private async restoredContext(context:AgentContext):Promise<ContextSnapshot|undefined> {
+    const snapshot=context.runtime?.getContextSnapshot?.();
+    if(!snapshot || snapshot.version!==1 || snapshot.strategyId!==this.contextBuilder.id || snapshot.providerId!==this.provider.id) return;
+    const messages=context.transcript || context.messages;
+    if(snapshot.sourceMessageCount>messages.length || await fingerprint(messages.slice(0,snapshot.sourceMessageCount))!==snapshot.sourceDigest) return;
+    const binding=await fingerprint({providerId:this.provider.id,request:this.provider.getRequestMetadata?.(),window:this.provider.getContextWindow()});
+    if(snapshot.providerBinding && snapshot.providerBinding!==binding) return;
+    return snapshot;
+  }
+
   private async *consumeInstructions(context: AgentContext, messages: ChatMessage[]): AsyncGenerator<AgentEvent, void> {
     const queued = await context.runtime?.takeInstructions?.() || [];
     const committed = new Set(context.transcript?.map(message => message.metadata?.instructionId).filter(Boolean));
@@ -233,11 +252,13 @@ export class BaseAgent {
         throw new DOMException('The user aborted a request.', 'AbortError');
       }
 
-      const messages: ChatMessage[] = [
+      let messages: ChatMessage[] = [
         ...context.messages.filter(message => !message.metadata?.isSubagent),
         ...(!context.metadata?.resume ? [userMessage] : [])
       ];
       yield* this.consumeInstructions(context, messages);
+      const restored=await this.restoredContext(context);
+      if(restored) messages=[...structuredClone(restored.messages),...(context.transcript || context.messages).slice(restored.sourceMessageCount).filter(message=>!message.metadata?.isSubagent)];
 
       let responseContent = '';
       yield { type: 'message:start', role: 'assistant' };
@@ -288,6 +309,8 @@ export class BaseAgent {
         this.provider.type === 'openai' ? 'openai' : 'anthropic'
       )
     };
+    let savedContext=await this.restoredContext(context);
+    if(savedContext) state.messages=[...structuredClone(savedContext.messages),...(context.transcript || context.messages).slice(savedContext.sourceMessageCount).filter(message=>!message.metadata?.isSubagent)];
 
     if (context.metadata?.resume) {
       const done = new Set(state.messages.filter(m => m.role === 'tool').map(m => m.tool_call_id));
@@ -312,24 +335,21 @@ export class BaseAgent {
         const totalTokens = Compactor.estimateTokens(state.messages);
         const budget = this.provider.getContextWindow();
         const threshold = this.provider.getCompactionThreshold();
-        if (totalTokens > budget * threshold) {
+        if (totalTokens > budget * threshold && (!savedContext || totalTokens > savedContext.estimatedTokens + budget * .1)) {
           yield { type: 'system:status', message: `正在压缩上下文 (${Math.round(totalTokens / 1000)}k tokens)...` };
           yield { type: 'context:compact:start' };
 
-          const summary = await this.compactor.compact(state.messages, { keepRecent: recentMessageUnit(state.messages, 6).length, abortSignal: context.abortSignal });
-          if (summary) {
-            const keepRecent = 6;
-            const recentMessages = recentMessageUnit(state.messages, keepRecent);
-            state.messages = [
-              {
-                role: 'user',
-                content: `--- Context Summary ---\n${summary}\n\n--- Continuing Conversation ---`,
-                timestamp: Date.now()
-              } as ChatMessage,
-              ...recentMessages
-            ];
-            yield { type: 'context:compact:end', summaryLength: summary.length };
+          const compacted=await this.contextBuilder.build({messages:structuredClone(state.messages),keepRecent:6,signal:context.abortSignal});
+          validateToolPairs(compacted.messages);
+          if (JSON.stringify(compacted.messages)!==JSON.stringify(state.messages)) {
+            state.messages=compacted.messages;
+            const transcript=context.transcript || context.messages;
+            savedContext={version:1,strategyId:this.contextBuilder.id,providerId:this.provider.id,
+              providerBinding:await fingerprint({providerId:this.provider.id,request:this.provider.getRequestMetadata?.(),window:budget}),
+              sourceMessageCount:transcript.length,sourceDigest:await fingerprint(transcript),messages:structuredClone(state.messages),estimatedTokens:Compactor.estimateTokens(state.messages)};
+            await context.runtime?.saveContextSnapshot?.(savedContext);
           }
+          yield { type: 'context:compact:end', summaryLength: compacted.summaryLength };
         }
       }
 

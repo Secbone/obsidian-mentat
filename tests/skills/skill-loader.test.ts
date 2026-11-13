@@ -15,7 +15,7 @@ async function load(manifest: string) {
     list: async () => ({ folders: [`${root}/example`], files: [] }),
     read: async (path: string) => files.get(path)!,
   } } } as unknown as App;
-  return new SkillLoader(app).loadAllSkills({ vault: app.vault } as SkillContext);
+  return new SkillLoader({getConfigDir:()=>'.obsidian',...app.vault.adapter}).loadAllSkills({ files:{} } as SkillContext);
 }
 const manifest = (metadata: string) => `---\nname: custom_example\ndescription: "Example: custom"\n${metadata}\n---\n# Instructions\n`;
 

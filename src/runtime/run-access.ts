@@ -21,7 +21,7 @@ export function createRunAccess(controller: RunController): RunAccess {
   const records = new WeakMap<RunRecord, { stamp: unknown[]; value: RunRecord }>();
   const messages = new Map<string, { source: ChatMessage[]; length: number; value: ChatMessage[] }>();
   const recordSnapshot = (record: RunRecord): RunRecord => {
-    const stamp = [record.updatedAt,record.status,record.error,record.messages,record.messages.length,record.partial,
+    const stamp = [record.revision,record.updatedAt,record.status,record.error,record.messages,record.messages.length,record.partial,
       record.events.length,record.events,record.operations,record.interactions,record.children,
       record.instructions,record.instructions?.map(instruction => instruction.status).join(','),
       ...Object.entries(record.childPartials || {}).flat()];
@@ -54,7 +54,7 @@ export function createRunAccess(controller: RunController): RunAccess {
       messages.set(id,{source,length:source.length,value});
       return value;
     },
-    getWarnings: () => [...controller.store.warnings],
+    getWarnings: () => controller.getWarnings(),
     hasUnsettledWork: () => controller.hasUnsettledWork(),
   };
 }

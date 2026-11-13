@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { ChatOrchestrator, type ChatOrchestratorOptions } from '../../src/chat/chat-orchestrator';
+import { createEngineFactory } from '../../src/agents/engine-factory';
 import { ExtensionManager, type ExtensionAPI } from '../../src/extensions/extension-manager';
 import { DEFAULT_SETTINGS } from '../../src/settings/settings';
 import { MemoryPlatformAdapter } from '../utils/memory-platform-adapter';
@@ -36,9 +37,14 @@ async function setup(options: ChatOrchestratorOptions = {}) {
   const oldProvider = provider('old'), router = routerFor(oldProvider);
   let allowed = true;
   const editableSettings = structuredClone(DEFAULT_SETTINGS);
-  const orchestrator = new ChatOrchestrator(platform, editableSettings, router, {} as any, undefined, {canReconfigure:()=>allowed,...options});
+  const dependencies = new WeakMap<object, any>();
+  const makeEngine = createEngineFactory();
+  const engineFactory: NonNullable<ChatOrchestratorOptions['engineFactory']> = (config, provider, deps, id) => {
+    const engine = makeEngine(config, provider, deps, id); dependencies.set(engine, deps); return engine;
+  };
+  const orchestrator = new ChatOrchestrator(platform, editableSettings, router, {} as any, undefined, {canReconfigure:()=>allowed,engineFactory,...options});
   await orchestrator.refreshProvider();
-  return {orchestrator,platform,router,oldProvider,editableSettings,setAllowed:(value:boolean)=>{allowed=value;},base};
+  return {orchestrator,dependencies,platform,router,oldProvider,editableSettings,setAllowed:(value:boolean)=>{allowed=value;},base};
 }
 const context = () => ({ messages:[],sessionId:'test',metadata:{enableSkills:false,sessionContextPayload:'context'} });
 
@@ -52,7 +58,7 @@ async function askAll(orchestrator: ChatOrchestrator, expected: string) {
 
 describe('Atomic chat dependency reconfiguration', () => {
   it('rebuilds every agent against one new provider/registry/executor and keeps the manager facade', async () => {
-    const {orchestrator,oldProvider} = await setup();
+    const {orchestrator,oldProvider,dependencies} = await setup();
     const manager = orchestrator.getAgentManager(), registry = orchestrator.getSkillRegistry();
     orchestrator.getSkillCache().set('old','stale detail');
     const replacement = provider('new');
@@ -64,8 +70,8 @@ describe('Atomic chat dependency reconfiguration', () => {
     expect(orchestrator.getSkillRegistry()).not.toBe(registry);
     expect(orchestrator.getSkillCache().get('old')).toBeNull();
     for (const agent of manager.listAgents()) {
-      expect((agent as any).skillRegistry).toBe(orchestrator.getSkillRegistry());
-      expect((agent as any).skillExecutor).toBe(orchestrator.getSkillExecutor());
+      expect(dependencies.get(agent).skillRegistry).toBe(orchestrator.getSkillRegistry());
+      expect(dependencies.get(agent).skillExecutor).toBe(orchestrator.getSkillExecutor());
     }
     await askAll(orchestrator,'new');
     expect(oldProvider.generateStream).not.toHaveBeenCalled();

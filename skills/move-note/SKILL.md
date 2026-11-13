@@ -1,6 +1,6 @@
 ---
 name: move_note
-description: Move or rename notes, updating all links automatically
+description: Move or rename notes using an approved plan with explicit resolved link updates
 metadata:
   version: "1.0.0"
   author: mentat
@@ -14,7 +14,7 @@ metadata:
 
 # move_note
 
-Move or rename notes to a new path. All wikilinks and markdown links pointing to the note are automatically updated. To delete a note, move it to the Trash folder.
+Move or rename notes using a durable plan. The plan lists the source, destination and resolved wikilink/Markdown reference changes with their original versions. Approval freezes that list; the host applies and reads back each change. Code examples remain unchanged. Unresolved links remain intact and produce warnings/partial results; `linksUpdated` is true only when the planned changes verify without warnings. To remove a note from its original location, move it to the Trash folder.
 
 ## When to use
 - Moving a note to a different folder

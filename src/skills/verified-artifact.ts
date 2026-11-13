@@ -1,9 +1,6 @@
-import { TFile } from 'obsidian';
 import type { SkillContext } from './skill-types';
 import { NoteLinter } from '../utils/note-linter';
-import { fingerprint } from '../runtime/fingerprint';
 import { RunBlocked } from '../runtime/types';
-import { throwIfAborted } from '../utils/execution';
 
 export function validateArtifact(path: string, content: string, previous: string | null): void {
   if (/\.canvas$/i.test(path)) {
@@ -34,37 +31,11 @@ export function validateArtifact(path: string, content: string, previous: string
   }
 }
 
-/** Stage and validate before mutation; success requires reading back the exact expected content. */
-export async function writeVerifiedArtifact(context: SkillContext, path: string, content: string, previous: string | null): Promise<TFile> {
-  if (!path || path.startsWith('/') || path.split('/').some(p => p === '..' || p === '.') || path.includes('\\')) throw new Error('文件路径必须位于当前 vault 内');
-  validateArtifact(path, content, previous);
-  const beforeHash = await fingerprint(previous), afterHash = await fingerprint(content);
-  if (context.runtime && context.operationId) {
-    const platform = context.plugin.platform;
-    if (!platform) throw new Error('无法暂存产物，禁止执行写入');
-    const folder = `${platform.getConfigDir()}/plugins/obsidian-mentat/artifacts`;
-    if (!await platform.exists(folder)) await platform.mkdir(folder);
-    const id = await fingerprint({ runId: context.runtime.runId, scope: context.runtime.scope, operationId: context.operationId });
-    const stagePath = `${folder}/${id}.json`;
-    await platform.write(stagePath, JSON.stringify({ path, beforeHash, afterHash, content }));
-    await context.runtime.record('artifact:prepared', { path, beforeHash, afterHash, stagePath }, context.operationId);
-  }
-  throwIfAborted(context.abortSignal);
-  const file = context.vault.getAbstractFileByPath(path);
-  const current = file instanceof TFile ? await context.vault.read(file) : null;
-  if (current !== previous) throw new RunBlocked('文件在准备写入期间发生变化，请核对后重新授权');
-  const folder = path.slice(0, path.lastIndexOf('/'));
-  if (path.includes('/')) {
-    let parent = '';
-    for (const part of folder.split('/')) {
-      parent += (parent ? '/' : '') + part;
-      if (!context.vault.getAbstractFileByPath(parent)) await context.vault.createFolder(parent);
-    }
-  }
-  throwIfAborted(context.abortSignal);
-  const written = file instanceof TFile ? (await context.vault.modify(file, content), file) : await context.vault.create(path, content);
-  const verified = await context.vault.read(written);
-  if (verified !== content) throw new RunBlocked('文件写入后的内容与预期不一致，结果待核对；已保留暂存产物');
-  await context.runtime?.record('artifact:verified', { path, afterHash, bytes: content.length }, context.operationId);
-  return written;
+/** Compatibility helper; all actual mutation and verification stays in the host service. */
+export async function writeVerifiedArtifact(context:SkillContext,path:string,content:string,previous:string|null){
+  if(!context.mutations)throw new Error('宿主未提供文件变更服务');
+  const plan=await context.mutations.prepare('compat:write_verified_artifact',{path,content},async()=>({changes:[await context.mutations!.writeChange(path,content,previous)],summary:`写入 ${path}`}),context);
+  const outcome=await context.mutations.apply(plan,context);
+  if(outcome.outcome!=='success')throw new RunBlocked(outcome.error);
+  const file=context.files.getAbstractFileByPath(path);if(!file||!('extension' in file))throw new RunBlocked('写入文件未能读取');return file;
 }

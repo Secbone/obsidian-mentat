@@ -63,7 +63,7 @@ export class ChatView extends ItemView {
     const callbacks: ThemeCallbacks = {
       onSend: () => { void this.handleSend(); }, onCancel: () => this.handleCancel(), onClear: () => { void this.handleClear(); },
       onAddDocument: () => this.showDocumentSelector(), onSettings: () => this.openSettings(),
-      onInspect: () => new RunInspectorModal(this.plugin,this.currentState().runId).open(),
+      onInspect: () => new RunInspectorModal(this.plugin.runInspectorHost,this.currentState().runId).open(),
       onExportDiagnostics: () => { void DiagnosticsExporter.exportSession(this.plugin,this.chatManager); },
       onCardAction: (card,action,answer) => this.handleCardAction(card,action,answer),
     };
@@ -290,7 +290,7 @@ export class ChatView extends ItemView {
     try {
       if (action === 'open' && card.path) { await this.app.workspace.openLinkText(card.path,'',true); return; }
       if (!card.runId) return;
-      if (action === 'inspect') { new RunInspectorModal(this.plugin,card.runId).open(); return; }
+      if (action === 'inspect') { new RunInspectorModal(this.plugin.runInspectorHost,card.runId).open(); return; }
       const record = controller.get(card.runId);
       if (!record || record.sessionId !== this.chatManager.getSessionInfo().sessionId || controller.list(record.sessionId)[0]?.id !== record.id) throw new Error('此操作不属于当前最新运行，请刷新后重试。');
       if (action === 'resume') await controller.resume(record.id);

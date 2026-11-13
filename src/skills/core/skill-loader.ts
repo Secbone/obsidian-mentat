@@ -2,7 +2,7 @@
 // Loads all skills from the skills/ directory according to Agent Skills specification
 
 import { z } from 'zod';
-import { App, parseYaml } from 'obsidian';
+import { parseYaml } from 'obsidian';
 import { SkillContext, AnySkillDefinition, SkillDefinition, DocumentationSkillDefinition, SkillResult } from '../skill-types';
 
 // Import all skill implementations (compile-time imports for TypeScript)
@@ -21,6 +21,8 @@ import * as MoveNoteImpl from '../../../skills/move-note/scripts';
 /**
  * Skill metadata from SKILL.md frontmatter
  */
+export interface SkillManifestIO { getConfigDir():string; exists(path:string):Promise<boolean>; read(path:string):Promise<string>; list(path:string):Promise<{files:string[];folders:string[]}> }
+
 interface SkillMetadata {
   name: string;
   description: string;
@@ -61,11 +63,11 @@ export class SkillLoader {
   private implementationMap: Map<string, unknown>;
 
   constructor(
-    private app: App,
+    private io: SkillManifestIO,
     pluginId: string = 'mentat'
   ) {
     // Construct path to skills directory in plugin folder
-    this.skillsBasePath = `${app.vault.configDir}/plugins/${pluginId}/skills`;
+    this.skillsBasePath = `${io.getConfigDir()}/plugins/${pluginId}/skills`;
 
     // Map skill names to their implementations (compile-time mapping)
     this.implementationMap = new Map<string, unknown>([
@@ -123,7 +125,7 @@ export class SkillLoader {
    * Scan skills directory for skill subdirectories
    */
   private async scanSkillDirectories(strict = false): Promise<string[]> {
-    const adapter = this.app.vault.adapter;
+    const adapter = this.io;
 
     try {
       const skillsPath = this.skillsBasePath;
@@ -180,7 +182,7 @@ export class SkillLoader {
    * Read and parse SKILL.md metadata
    */
   private async readSkillMetadata(skillMdPath: string): Promise<SkillMetadata | null> {
-    const adapter = this.app.vault.adapter;
+    const adapter = this.io;
 
     try {
       const fullPath = `${skillMdPath}`;
@@ -226,7 +228,7 @@ export class SkillLoader {
     context: SkillContext
   ): Promise<SkillDefinition | null> {
     // Get implementation from map (compile-time imports for built-in skills)
-    const impl = this.implementationMap.get(metadata.name) as { metadata?: SkillDefinition['metadata']; schema?: import('zod').ZodTypeAny; execute?: (input: unknown, context: SkillContext) => Promise<SkillResult>; createSkill?: (context: SkillContext) => { schema: import('zod').ZodTypeAny; execute: (input: unknown) => Promise<SkillResult> } } | undefined;
+    const impl = this.implementationMap.get(metadata.name) as { metadata?: SkillDefinition['metadata']; schema?: import('zod').ZodTypeAny; prepare?: (input:unknown,context:SkillContext)=>Promise<import('../../contracts/tools').MutationPlan>; execute?: (input: unknown, context: SkillContext) => Promise<SkillResult>; createSkill?: (context: SkillContext) => { schema: import('zod').ZodTypeAny; execute: (input: unknown) => Promise<SkillResult> } } | undefined;
 
     if (impl) {
       // Built-in skill: use compile-time import
@@ -236,8 +238,9 @@ export class SkillLoader {
         namespace: 'obsidian',
         description: metadata.description,
         schema: skillImpl?.schema || impl.schema!,
+        prepare: impl.prepare ? (input,options) => impl.prepare!(input,{...context,abortSignal:options?.abortSignal,runtime:options?.runtime,operationId:options?.operationId}) : undefined,
         execute: (input, options) => {
-          const runContext = { ...context, abortSignal: options?.abortSignal, runtime: options?.runtime, operationId: options?.operationId };
+          const runContext = { ...context, abortSignal: options?.abortSignal, runtime: options?.runtime, operationId: options?.operationId, mutationPlan:options?.mutationPlan };
           return impl.createSkill ? impl.createSkill(runContext).execute(input) : impl.execute!(input, runContext);
         },
         metadata: {
@@ -251,7 +254,7 @@ export class SkillLoader {
     }
 
     // Custom skill: try loading implementation.js
-    return this.loadCustomSkill(metadata, skillDirName, context);
+    return this.loadCustomSkill(metadata, skillDirName);
   }
 
   /**
@@ -259,12 +262,11 @@ export class SkillLoader {
    */
   private async loadCustomSkill(
     metadata: SkillMetadata,
-    skillDirName: string,
-    context: SkillContext
+    skillDirName: string
   ): Promise<SkillDefinition | null> {
     try {
       const implPath = `${this.skillsBasePath}/${skillDirName}/implementation.js`;
-      const adapter = context.vault.adapter;
+      const adapter = this.io;
       if (!(await adapter.exists(implPath))) {
         console.warn(`[SkillLoader] No implementation.js found for custom skill "${metadata.name}" at ${implPath}`);
         return null;

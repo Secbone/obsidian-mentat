@@ -1,8 +1,10 @@
+import { metadataTags } from '../../../src/skills/file-metadata';
 // Read Document Implementation
 // Core logic for reading Obsidian documents
 
 import { z } from 'zod';
-import { TFile } from 'obsidian';
+import type { SkillFile } from '../../../src/contracts/tools';
+import { isSkillFile } from '../../../src/skills/skill-types';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 /**
@@ -322,9 +324,9 @@ export async function execute(
     const startTime = Date.now();
 
     // Find the file
-    const file = context.vault.getAbstractFileByPath(input.path);
+    const file = context.files.getAbstractFileByPath(input.path);
 
-    if (!file || !(file instanceof TFile)) {
+    if (!file || !isSkillFile(file)) {
       return {
         success: false,
         error: `File not found: ${input.path}`
@@ -332,7 +334,7 @@ export async function execute(
     }
 
     // Read file content
-    const fullContent = await context.vault.read(file);
+    const fullContent = await context.files.read(file);
 
     // Build result
     const result: DocumentContent = {
@@ -413,7 +415,7 @@ export async function execute(
 
       // Extract tags
       const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
-      const frontmatterTags = cache?.frontmatter?.tags || [];
+      const frontmatterTags = metadataTags(cache?.frontmatter?.tags);
       const allTags = [...fileTags, ...frontmatterTags].map(t =>
         typeof t === 'string' ? t : String(t)
       );
@@ -427,7 +429,7 @@ export async function execute(
       // Extract backlinks
       let backlinks: string[] = [];
       if (input.includeBacklinks) {
-        const backlinkData = (context.metadataCache as any).getBacklinksForFile(file);
+        const backlinkData = context.metadataCache.getBacklinksForFile?.(file);
         if (backlinkData) {
           backlinks = Array.from(backlinkData.keys());
         }

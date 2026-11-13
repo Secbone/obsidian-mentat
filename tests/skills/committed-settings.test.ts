@@ -1,3 +1,4 @@
+import { adaptTestSkillContext } from '../utils/skill-context';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('obsidian',()=>({requestUrl:vi.fn()}));
 import { requestUrl } from 'obsidian';
@@ -59,11 +60,13 @@ describe('Skills use their committed graph configuration',()=>{
     expect(result.success).toBe(false);expect(requestUrl).not.toHaveBeenCalled();
   });
 
-  it('retains plugin settings compatibility for legacy contexts without a graph snapshot',async()=>{
+  it('requires an explicit adapter to import legacy host settings',async()=>{
     const s=context();delete s.context.settings;
     vi.mocked(requestUrl).mockResolvedValue({status:200,text:'content',headers:{},json:{web:{results:[]}},arrayBuffer:new ArrayBuffer(0)});
     s.source.braveSearchApiKey='legacy-key';
-    const search=searchSkill(s.context);await search.execute(search.schema.parse({query:'test'}));
+    const adapted=adaptTestSkillContext(s.context);
+    expect('plugin' in adapted).toBe(false);
+    const search=searchSkill(adapted);await search.execute(search.schema.parse({query:'test'}));
     expect(requestUrl).toHaveBeenCalledWith(expect.objectContaining({headers:expect.objectContaining({'X-Subscription-Token':'legacy-key'})}));
   });
 });

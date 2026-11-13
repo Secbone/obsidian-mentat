@@ -4,6 +4,7 @@ import { SkillInvocationConfig } from '../types';
 import { ContextOptions } from '../context/context-types';
 
 export interface MentatSettings {
+  agentEngine?: string;
   // AI Providers Configuration
   aiProviders: AIProviderConfig[];
   defaultProvider: string; // Provider ID for default tasks

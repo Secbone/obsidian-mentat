@@ -22,11 +22,8 @@ export enum TaskType {
 }
 
 // Skill/Tool Call types
-export interface ToolCall {
-  id: string;
-  name: string;
-  arguments: string | Record<string, unknown>;
-}
+export type { ToolCall, ChatMessage } from '../contracts/conversation';
+import type { ToolCall, ChatMessage } from '../contracts/conversation';
 
 export interface SkillCallMessage {
   role: 'tool' | 'function';
@@ -36,34 +33,8 @@ export interface SkillCallMessage {
 }
 
 // AI Provider interfaces
-export interface GenerateOptions {
-  onProgress?: (message: string) => void;
-  onResponse?: (response: GenerateResponse) => void;
-  maxTokens?: number;
-  temperature?: number;
-  systemPrompt?: string;
-  stopSequences?: string[];
-  // Skill support
-  skills?: unknown[]; // OpenAI functions or Anthropic tools
-  toolChoice?: 'auto' | 'none' | (string & NonNullable<unknown>);
-  abortSignal?: AbortSignal;
-}
-
-export interface GenerateResponse {
-  content: string;
-  toolCalls?: ToolCall[];
-  finishReason?: 'stop' | 'tool_calls' | 'length';
-  providerState?: { providerId: string; reasoningContent: string };
-  diagnostics?: { outputLimit?: number; partialContent?: string; pendingToolCalls?: number; reasoningTokens?: number;
-    requestId?: string; elapsedMs?: number; firstProgressMs?: number; outputCharacters?: number; reasoningCharacters?: number; reasoningMode?: string; legacyCompatibility?: boolean };
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-    cacheReadTokens?: number;
-    cacheCreationTokens?: number;
-  };
-}
+export type { GenerateOptions, GenerateResponse } from '../contracts/model';
+import type { GenerateOptions, GenerateResponse } from '../contracts/model';
 
 export interface AIProvider {
   id: string;
@@ -130,22 +101,6 @@ export interface LinkSuggestion {
 }
 
 // Chat system
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system' | 'tool' | 'function';
-  content: string;
-  timestamp: number;
-  sources?: TFile[];
-  name?: string; // For tool/function messages
-  tool_call_id?: string; // For tool response messages
-  tool_calls?: ToolCall[]; // For assistant messages with tool calls
-  metadata?: {
-    isSubagent?: boolean;
-    agentId?: string;
-    parentMessageId?: string;
-    [key: string]: unknown;
-  };
-}
-
 export interface ChatContext {
   messages: ChatMessage[];
   relevantNotes: TFile[];

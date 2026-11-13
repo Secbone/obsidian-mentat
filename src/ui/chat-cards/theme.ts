@@ -13,7 +13,10 @@ export class CardTheme implements ChatTheme {
   private messages!: HTMLElement;
   private cardContainer!: HTMLElement;
   private loadEarlier!: HTMLButtonElement;
+  private loadLatest!: HTMLButtonElement;
   private visibleStart?: number;
+  private visibleEnd?: number;
+  private browsingHistory = false;
   private firstCardId?: string;
   private status!: HTMLElement;
   private elapsed!: HTMLElement;
@@ -60,12 +63,21 @@ export class CardTheme implements ChatTheme {
     this.loadEarlier = this.messages.createEl('button',{cls:'mentat-load-earlier',text:'显示较早的记录'});
     this.loadEarlier.hidden = true;
     this.cardContainer = this.messages.createDiv('mentat-card-list');
+    this.loadLatest = this.messages.createEl('button',{cls:'mentat-load-earlier',text:'回到最新记录'});
+    this.loadLatest.hidden = true;
+    const latest = () => {
+      this.browsingHistory = false;this.visibleStart=undefined;this.visibleEnd=undefined;
+      this.scroller.forceScrollToBottom();if (this.state) this.render(this.state);
+    };
+    this.loadLatest.addEventListener('click',latest);
     this.loadEarlier.addEventListener('click',() => {
+      this.browsingHistory = true;this.scroller.pauseFollowing();
       this.visibleStart = Math.max(0,(this.visibleStart || 0)-100);
+      this.visibleEnd = Math.min(this.state?.cards.length || 0,this.visibleStart+250);
       if (this.state) this.render(this.state);
     });
     this.list = new CardList(this.app,this.cardContainer,this.renderer,callbacks.onCardAction,change => this.preserveLayout(change));
-    this.scroller.attach(this.messages,() => {});
+    this.scroller.attach(this.messages,latest);
     // Obsidian mounts a leaf before revealing it; its first layout may have zero height.
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(() => this.scroller.scrollToBottom());
@@ -82,12 +94,16 @@ export class CardTheme implements ChatTheme {
   }
   render(state: ChatViewState): void {
     this.state = state;
-    if (this.firstCardId !== state.cards[0]?.id) { this.visibleStart = undefined; this.firstCardId = state.cards[0]?.id; }
+    if (this.firstCardId !== state.cards[0]?.id) { this.visibleStart = undefined;this.visibleEnd=undefined;this.browsingHistory=false;this.firstCardId = state.cards[0]?.id; }
     this.visibleStart ??= Math.max(0,state.cards.length-150);
+    if (!this.browsingHistory && this.scroller.isFollowing()) this.visibleStart=Math.max(0,state.cards.length-150);
+    this.visibleEnd=this.browsingHistory ? Math.min(state.cards.length,this.visibleEnd ?? this.visibleStart+250):Math.min(state.cards.length,this.visibleStart+300);
+    const start=this.visibleStart,end=this.visibleEnd;
     this.preserveLayout(() => {
-      this.loadEarlier.hidden = !this.visibleStart;
-      this.loadEarlier.textContent = `显示较早的记录（剩余 ${this.visibleStart} 条）`;
-      this.list?.render(state.cards.slice(this.visibleStart));
+      this.loadEarlier.hidden = !start;
+      this.loadEarlier.textContent = `显示较早的记录（剩余 ${start} 条）`;
+      this.loadLatest.hidden = end >= state.cards.length;
+      this.list?.render(state.cards.slice(start,end));
     });
     this.root.dataset.runStatus = state.runStatus || 'idle';
     if (this.status.textContent !== state.label) this.status.textContent = state.label;

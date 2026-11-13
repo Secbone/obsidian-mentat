@@ -37,7 +37,7 @@ describe('DeepSeek thinking protocol and latency',()=>{
     expect(create.mock.calls[0][0].reasoning_effort).toBe('low');
     expect(create.mock.calls[1][0].thinking).toEqual({type:'enabled'});
     chat=new ChatManager(plugin);const saved=await chat.getHistory();
-    expect(saved.find(m=>m.tool_calls)?.metadata?.providerState).toEqual({providerId:'deepseek',reasoningContent:'opaque state'});
+    expect(saved.find(m=>m.tool_calls)?.metadata?.providerState).toMatchObject({adapterId:'deepseek:deepseek',codecVersion:1,payload:{reasoningContent:'opaque state'}});
     await agent.execute('next',{messages:saved,sessionId:'s'});
     expect(create.mock.calls[2][0].messages.find((m:any)=>m.tool_calls).reasoning_content).toBe('opaque state');
   });
@@ -91,7 +91,8 @@ describe('DeepSeek thinking protocol and latency',()=>{
   });
   it('counts persisted reasoning and Chinese text in context budgeting',()=>{
     const a:any={role:'assistant',content:'中文内容',timestamp:1};
-    expect(Compactor.estimateTokens([{...a,metadata:{providerState:{providerId:'deepseek',reasoningContent:'x'.repeat(400)}}}])-Compactor.estimateTokens([a])).toBe(100);
+    expect(Compactor.estimateTokens([{...a,metadata:{providerState:{providerId:'deepseek',reasoningContent:'x'.repeat(400)}}}])-Compactor.estimateTokens([a])).toBeGreaterThanOrEqual(100);
+    expect(Compactor.estimateTokens([{...a,metadata:{providerState:{adapterId:'fake',codecVersion:1,configFingerprint:'config',payload:{opaque:'ignored'},estimatedTokens:100}}}])-Compactor.estimateTokens([a])).toBe(100);
     expect(Compactor.estimateTokens([a])).toBeGreaterThan(Compactor.estimateTokens([{...a,content:'abcd'}]));
   });
   it('retains each failed continuation while avoiding duplicate layer-level incidents',()=>{

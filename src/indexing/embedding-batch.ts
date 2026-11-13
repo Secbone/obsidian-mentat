@@ -1,6 +1,8 @@
 // Embedding Batch - Optimizes embedding generation through batching
 
-import { AIProvider } from '../types';
+import type { AIProvider } from '../types';
+import type { Embedder } from '../contracts/model';
+import { asEmbedder } from '../providers/model-adapters';
 
 export interface BatchEmbeddingResult {
   embeddings: number[][];
@@ -10,7 +12,7 @@ export interface BatchEmbeddingResult {
 
 export class EmbeddingBatch {
   constructor(
-    private getEmbeddingProvider: () => Promise<AIProvider | null>,
+    private getEmbeddingProvider: () => Promise<AIProvider | Embedder | null>,
     private batchSize: number = 100 // Larger batch size for native batching
   ) {}
 
@@ -27,73 +29,14 @@ export class EmbeddingBatch {
       throw new Error('未配置向量模型，已跳过向量索引。');
     }
 
-    // If provider supports native batching (via generateEmbeddings method)
-    if (provider.generateEmbeddings && typeof provider.generateEmbeddings === 'function') {
-      return await this.generateBatchNative(texts, provider);
-    } else {
-      return await this.generateBatchSequential(texts, provider);
-    }
-  }
-
-  /**
-   * Use provider's native batch API
-   */
-  private async generateBatchNative(
-    texts: string[],
-    provider: AIProvider
-  ): Promise<BatchEmbeddingResult> {
+    const embedder = asEmbedder(provider);
     const embeddings: number[][] = [];
-    let totalTokens = 0;
-
-    // Process in batches (e.g., 100 at a time) to avoid payload limits
-    for (let i = 0; i < texts.length; i += this.batchSize) {
-      const batch = texts.slice(i, i + this.batchSize);
-
-      const result = await this.retryWithBackoff(async () => {
-        return await provider.generateEmbeddings!(batch);
-      });
-
-      embeddings.push(...result.embeddings);
-      totalTokens += result.tokens || 0;
+    let tokens = 0;
+    for (let start = 0; start < texts.length; start += this.batchSize) {
+      const result = await this.retryWithBackoff(() => embedder.embed(texts.slice(start, start + this.batchSize)));
+      embeddings.push(...result.embeddings); tokens += result.tokens || 0;
     }
-
-    return { embeddings, tokens: totalTokens };
-  }
-
-  /**
-   * Generate embeddings sequentially/concurrently with retry fallback
-   */
-  private async generateBatchSequential(
-    texts: string[],
-    provider: AIProvider
-  ): Promise<BatchEmbeddingResult> {
-    const embeddings: number[][] = [];
-    let totalTokens = 0;
-    const sequentialBatchSize = 10; // Keep concurrency moderate for individual requests
-
-    // Process in batches to avoid overwhelming the API
-    for (let i = 0; i < texts.length; i += sequentialBatchSize) {
-      const batch = texts.slice(i, i + sequentialBatchSize);
-
-      // Generate embeddings concurrently for current batch with individual retries
-      const batchResults = await Promise.all(
-        batch.map(text =>
-          this.retryWithBackoff(async () => {
-            return await provider.generateEmbedding(text);
-          })
-        )
-      );
-
-      embeddings.push(...batchResults.map(r => r.embedding));
-      totalTokens += batchResults.reduce((sum, r) => sum + (r.tokens || 0), 0);
-
-      // Add delay to avoid rate limiting (except for last batch)
-      if (i + sequentialBatchSize < texts.length) {
-        await this.delay(100);
-      }
-    }
-
-    return { embeddings, tokens: totalTokens };
+    return { embeddings, tokens };
   }
 
   /**

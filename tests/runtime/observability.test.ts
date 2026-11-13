@@ -143,7 +143,7 @@ describe('Unified observability', () => {
   it('emits a bounded heartbeat during a slow request and stops it on failure', async () => {
     vi.useFakeTimers();
     const observe = vi.fn(); let reject!: (error: Error) => void;
-    const provider = {id:'fake',getMaxOutputTokens:()=>1024,generateStream:()=>new Promise((_resolve,fail)=>{reject=fail;})} as any;
+    const provider = {id:'fake',getContextWindow:()=>32000,getCompactionThreshold:()=>.8,getMaxOutputTokens:()=>1024,generateStream:()=>new Promise((_resolve,fail)=>{reject=fail;})} as any;
     const result = new ModelGateway(provider).generateSimple([],()=>{},{},{record:async()=>{},observe} as any);
     const rejected = expect(result).rejects.toThrow('stop');
     await vi.advanceTimersByTimeAsync(30000);
@@ -155,7 +155,7 @@ describe('Unified observability', () => {
   });
   it('records simple-provider request timing and rejection details', async () => {
     const record = vi.fn(async () => {}), modelResult = vi.fn(async () => {});
-    const provider = { id: 'fake', getMaxOutputTokens: () => 1024, generateStream: async () => { throw new Error('connection failed'); } } as any;
+    const provider = { id: 'fake', getContextWindow:()=>32000,getCompactionThreshold:()=>.8,getMaxOutputTokens: () => 1024, generateStream: async () => { throw new Error('connection failed'); } } as any;
     await expect(new ModelGateway(provider).generateSimple([], () => {}, {}, { record, modelResult } as any)).rejects.toThrow('connection failed');
     expect(record.mock.calls.map(c => c[0])).toEqual(['model:requested','model:failed']);
     expect(record.mock.calls[0][1].requestId).toBe(record.mock.calls[1][1].requestId);

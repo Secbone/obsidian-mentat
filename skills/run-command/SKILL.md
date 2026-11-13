@@ -1,6 +1,6 @@
 ---
 name: run_command
-description: Execute terminal shell commands in the vault root directory (e.g., git status, python, grep). Requires user confirmation and blocks high-risk commands.
+description: Execute explicitly authorized host shell commands, starting in the vault working directory.
 metadata:
   version: "1.0.0"
   author: mentat
@@ -16,7 +16,7 @@ metadata:
 
 ## Description
 
-Execute system command line commands (e.g. `git`, `python`, `grep`, `curl`) directly within the Obsidian vault directory. For security, commands are locked to the vault directory, blacklisted from executing high-risk operations (such as `rm` or `chmod`), and require explicit user authorization prior to running.
+Execute host commands (e.g. `git`, `python`, `grep`, `curl`) through the injected command driver after approval. The initial working directory must resolve inside the vault. The process retains the current user permissions: absolute paths, interpreters, networking and child processes are not isolated. A command blacklist is an additional guardrail, not a sandbox. Cancellation or a nonzero exit does not establish that no external effects occurred; uncertain results require verification.
 
 ## When to use
 - Running version control commands like `git status`, `git commit`, `git push` or `git pull`
@@ -27,7 +27,7 @@ Execute system command line commands (e.g. `git`, `python`, `grep`, `curl`) dire
 ## When NOT to use
 - Reading or writing a single note (use `read_note` or `edit_note` instead for 10x better speed and zero overhead)
 - Running destructive commands (such as `rm` or `format` which are blacklisted)
-- Doing operations outside the vault (directory sandbox constraints apply)
+- Assuming approval or the working directory provides filesystem or network isolation
 
 ## Input Schema
 

@@ -1,4 +1,6 @@
-import { renderRunSummary } from '../observability/run-projection';
+import { renderRunSummary, RunObservationProjection } from '../observability/run-projection';
+import { renderObservationEvents, renderObservationRunSummaries } from '../observability/report';
+import type { ObservationQuery } from '../contracts/observation-query';
 import type { RunRecord } from '../runtime/types';
 
 /** One incident per operation; the run failure is emitted once at its owning boundary. */
@@ -18,31 +20,27 @@ export function projectRunIncidents(records: RunRecord[]) {
     return operations;
   });
 }
-export function renderRunFacts(records: RunRecord[]): string {
+export function renderRunFacts(records: RunRecord[], query?: ObservationQuery): string {
   if (!records.length) return '';
-  let text = renderRunSummary(records) + '## 执行状态与检查点\n\n';
+  let text=(query ? renderObservationRunSummaries(query,records):renderRunSummary(records))+'## 执行状态与检查点\n\n';
   for (const record of records) {
-    text += `### ${record.id}\n\n状态：${record.status}；模型配置：${record.providerId || '未固定'}。\n\n`;
-    const pending = Object.values(record.interactions).filter(i => !i.outcome);
-    text += `待处理人工交互：${pending.length}；未知操作：${Object.values(record.operations).filter(o => o.status === 'unknown').length}。\n\n`;
-    text += '| 模型请求 | 输出上限 | 结束原因 | 耗时秒 | 输入 Tokens | 输出 Tokens | 推理 Tokens |\n| --- | --- | --- | --- | --- | --- | --- |\n';
-    const requested = record.events.filter(e => e.type === 'model:requested');
-    for (const [index, request] of requested.entries()) {
-      const next = requested[index + 1];
-      const finished = record.events.find(e => {
-        if (request.details?.requestId) return e.type === 'model:result' && (e.details?.response as Record<string, unknown> | undefined)?.requestId === request.details.requestId || e.type === 'model:failed' && e.details?.requestId === request.details.requestId;
-        if (e.sequence <= request.sequence || next && e.sequence >= next.sequence) return false;
-        return e.type === 'model:result' || e.type === 'model:failed' || e.type === 'run:failed' || e.type === 'run:interrupted';
-      });
-      const details = finished?.details || {}, usage = details.usage as Record<string, number> | undefined;
-      const response = details.response as Record<string, unknown> | undefined;
-      const seconds = finished ? ((Number(response?.elapsedMs ?? details.elapsedMs ?? (finished.timestamp - request.timestamp))) / 1000).toFixed(2) : '等待中';
-      text += `| ${index + 1} | ${response?.outputLimit ?? request.details?.outputLimit ?? '未知'} | ${details.finishReason || (finished ? '请求失败' : '等待中')} | ${seconds} | ${usage?.promptTokens ?? '未知'} | ${usage?.completionTokens ?? '未知'} | ${response?.reasoningTokens ?? '未知'} |\n`;
+    text+=`### ${record.id}\n\n状态：${record.status}；模型配置：${record.providerId || '未固定'}。\n\n`;
+    text+=`待处理人工交互：${Object.values(record.interactions).filter(i=>!i.outcome).length}；未知操作：${Object.values(record.operations).filter(o=>o.status==='unknown').length}。\n\n`;
+    text+='| 模型请求 | 输出上限 | 结束原因 | 耗时秒 | 输入 Tokens | 输出 Tokens | 推理 Tokens |\n| --- | --- | --- | --- | --- | --- | --- |\n';
+    const projection=new RunObservationProjection();
+    const fallback=query ? []:record.events.map(event=>projection.append(record,event));
+    const requests=query ? query.modelRequests(record.id):projection.modelRequests;
+    for (const [index,{request,finish}] of requests.entries()) {
+      const details=finish?.attributes || {},usage=details.usage as Record<string,number> | undefined;
+      const response=details.response as Record<string,unknown> | undefined;
+      const seconds=finish ? ((finish.durationMs ?? finish.timestamp-request.timestamp)/1000).toFixed(2):'等待中';
+      text+=`| ${index+1} | ${response?.outputLimit ?? request.attributes?.outputLimit ?? '未知'} | ${details.finishReason || (finish ? '请求失败':'等待中')} | ${seconds} | ${usage?.promptTokens ?? '未知'} | ${usage?.completionTokens ?? '未知'} | ${response?.reasoningTokens ?? '未知'} |\n`;
     }
-    text += '\n已校验产物：\n\n';
-    const artifacts = record.events.filter(e => e.type === 'artifact:verified');
-    text += artifacts.length ? artifacts.map(e => `- ${e.details?.path}（回读核验通过；operationId=${e.operationId}）`).join('\n') + '\n\n' : '没有已回读核验的产物。\n\n';
-    text += '执行事件（不含逐 token 内容）：\n\n```json\n' + JSON.stringify(record.events, null, 2) + '\n```\n\n';
+    text+='\n已校验产物：\n\n';
+    const artifacts=record.events.filter(event=>event.type==='artifact:verified');
+    text+=artifacts.length ? artifacts.map(event=>`- ${event.details?.path}（回读核验通过；operationId=${event.operationId}）`).join('\n')+'\n\n':'没有已回读核验的产物。\n\n';
+    text+='最近执行事件（最多 200 条；完整筛选可在运行检查器导出）：\n\n';
+    text+=renderObservationEvents(query ? query.page({runId:record.id},200).events.reverse():fallback.slice(-200));
   }
   return text;
 }

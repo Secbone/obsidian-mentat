@@ -1,46 +1,64 @@
 import type { RunEvent, RunRecord } from '../runtime/types';
 import type { ObservationEvent } from './types';
 
-/** Also projects pre-observer snapshots; event IDs allow safe merging with JSONL. */
+/** Incremental projector shared by the indexed query and standalone compatibility helpers. */
+export class RunObservationProjection {
+  private attempt = 0;
+  private operations = new Map<string, number>();
+  private requests = new Map<string, number>();
+  private modelSpans = new Map<string,import('../contracts/observation-query').ObservationModelRequest>();
+  readonly modelRequests: import('../contracts/observation-query').ObservationModelRequest[] = [];
+  private waits = new Map<string, number>();
+  private modelMs = 0;
+  private toolMs = 0;
+  private waitingMs = 0;
+  readonly failures: ObservationEvent[] = [];
+  append(record: RunRecord, source: RunEvent): ObservationEvent {
+    if (source.type === 'run:started' || source.type === 'run:resumed') this.attempt++;
+    const event = projectRunEvent(record,source,Math.max(1,this.attempt));
+    if (event.name === 'operation:running' && event.operationId) this.operations.set(event.operationId,event.timestamp);
+    if (event.operationId && ['operation:finished','operation:unknown','operation:planned'].includes(event.name)) {
+      const start = this.operations.get(event.operationId);
+      if (start !== undefined) { event.durationMs = Math.max(0,event.timestamp-start); this.operations.delete(event.operationId); this.toolMs += event.durationMs; }
+    }
+    if (event.name === 'interaction:requested') this.waits.set(String(event.attributes?.interactionId),event.timestamp);
+    if (event.name === 'interaction:resolved') {
+      const id = String(event.attributes?.interactionId), start = this.waits.get(id);
+      if (start !== undefined) { this.waitingMs += Math.max(0,event.timestamp-start); this.waits.delete(id); }
+    }
+    const request = `${event.attemptId}:${event.requestId || 'legacy'}`;
+    if (event.name === 'model:requested') {
+      this.requests.set(request,event.timestamp);
+      const span={request:event};this.modelRequests.push(span);this.modelSpans.set(request,span);
+    }
+    if (event.name === 'model:result' || event.name === 'model:failed') {
+      const start = this.requests.get(request);
+      if (event.durationMs === undefined && start !== undefined) event.durationMs = Math.max(0,event.timestamp-start);
+      this.requests.delete(request); this.modelMs += event.durationMs || 0;
+      const span=this.modelSpans.get(request);if (span) {span.finish=event;this.modelSpans.delete(request);}
+    }
+    if (event.name === 'run:failed' || event.name === 'run:interrupted' || event.name === 'run:cancelled') {
+      for (const span of this.modelSpans.values()) span.finish ||= event;
+    }
+    if (event.level === 'error' || event.level === 'warn') this.failures.push(event);
+    return event;
+  }
+  summary(): import('../contracts/observation-query').ObservationSummary {
+    return { attempts:Math.max(1,this.attempt),modelMs:this.modelMs,toolMs:this.toolMs,waitingMs:this.waitingMs,
+      incomplete:this.requests.size+this.waits.size,failures:this.failures.length };
+  }
+}
+
 export function projectRunEvents(records: RunRecord[]): ObservationEvent[] {
   return records.flatMap(record => {
-    let attempt = 0;
-    const operations = new Map<string, number>();
-    return record.events.map(e => {
-      if (e.type === 'run:started' || e.type === 'run:resumed') attempt++;
-      const event = projectRunEvent(record, e, Math.max(1,attempt));
-      if (e.type === 'operation:running' && e.operationId) operations.set(e.operationId, e.timestamp);
-      if (e.operationId && ['operation:finished', 'operation:unknown', 'operation:planned'].includes(e.type)) {
-        const start = operations.get(e.operationId);
-        if (start !== undefined) { event.durationMs = Math.max(0, e.timestamp - start); operations.delete(e.operationId); }
-      }
-      return event;
-    });
+    const projection = new RunObservationProjection();
+    return record.events.map(event => projection.append(record,event));
   });
 }
 export function summarizeRun(record: RunRecord): { failures: ObservationEvent[]; modelMs: number; toolMs: number; waitingMs: number; incomplete: number } {
-  const events = projectRunEvents([record]);
-  let waitingMs = 0;
-  const waits = new Map<string, number>();
-  const requests = new Map<string, number>();
-  for (const e of events) {
-    if (e.name === 'interaction:requested') waits.set(String(e.attributes?.interactionId), e.timestamp);
-    if (e.name === 'interaction:resolved') {
-      const id = String(e.attributes?.interactionId), start = waits.get(id);
-      if (start !== undefined) { waitingMs += Math.max(0, e.timestamp - start); waits.delete(id); }
-    }
-    if (e.name === 'model:requested') requests.set(`${e.attemptId}:${e.requestId || 'legacy'}`, e.timestamp);
-    if (e.name === 'model:result' || e.name === 'model:failed') {
-      const id = `${e.attemptId}:${e.requestId || 'legacy'}`;
-      const start = requests.get(id);
-      if (e.durationMs === undefined && start !== undefined) e.durationMs = Math.max(0, e.timestamp - start);
-      requests.delete(id);
-    }
-  }
-  return { failures: events.filter(e => e.level === 'error' || e.level === 'warn'),
-    modelMs: events.filter(e => e.name === 'model:result' || e.name === 'model:failed').reduce((n,e) => n + (e.durationMs || 0), 0),
-    toolMs: events.filter(e => e.name.startsWith('operation:')).reduce((n,e) => n + (e.durationMs || 0), 0),
-    waitingMs, incomplete: requests.size + waits.size };
+  const projection = new RunObservationProjection();
+  for (const event of record.events) projection.append(record,event);
+  return {...projection.summary(),failures:projection.failures};
 }
 export function renderRunSummary(records: RunRecord[]): string {
   if (!records.length) return '';
@@ -56,16 +74,9 @@ export function renderRunSummary(records: RunRecord[]): string {
 export function projectRunEvent(record: RunRecord, e: RunEvent, attempt: number): ObservationEvent {
   const response = e.details?.response as Record<string, unknown> | undefined;
   return { schemaVersion: 1 as const, eventId: e.id, timestamp: e.timestamp, processInstanceId: 'snapshot', sequence: e.sequence,
-        name: e.type, component: e.type.split(':')[0], level: /failed/.test(e.type) || e.details?.error ? 'error' as const : /interrupted/.test(e.type) ? 'warn' as const : 'info' as const,
+        name: e.type, component: e.type.split(':')[0], level: /failed|error|incident/.test(e.type) || e.details?.error ? 'error' as const : /interrupted|unknown/.test(e.type) ? 'warn' as const : 'info' as const,
         sessionId: record.sessionId, runId: record.id, attemptId: `${record.id}:attempt-${Math.max(1,attempt)}`,
         operationId: e.operationId, requestId: String(e.details?.requestId || response?.requestId || '') || undefined,
         durationMs: typeof response?.elapsedMs === 'number' ? response.elapsedMs : typeof e.details?.elapsedMs === 'number' ? e.details.elapsedMs : undefined,
         attributes: e.details };
-}
-
-export async function renderObservationHealth(observer: import('./observer').Observer | undefined, sessionId?: string): Promise<string> {
-  if (!observer) return '';
-  const events = await observer.query();
-  const failures = events.filter(e => (!sessionId || e.sessionId === sessionId || !e.runId) && (e.level === 'error' || e.level === 'warn'));
-  return `## 日志完整性与补充异常\n\n目录：\`${observer.store.folder}\`；轮转保留最多 8 个文件；运行快照独立保留。\n\n健康状态：${JSON.stringify(observer.store.health)}\n\n以下为最近 30 条异常记录，可能属于同一失败链；使用关联 ID 核对，不能把记录条数当作独立故障数。\n\n` + failures.slice(-30).map(e => `- ${new Date(e.timestamp).toISOString()} · ${e.name} · run=${e.runId || '后台'} · request=${e.requestId || '-'}：${JSON.stringify(e.attributes || {})}`).join('\n') + '\n\n';
 }

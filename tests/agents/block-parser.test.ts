@@ -1,3 +1,4 @@
+import { adaptTestSkillContext } from '../utils/skill-context';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execute as editExecute, schema as editSchema } from '../../skills/edit-note/scripts/index';
 import { execute as writeExecute, schema as writeSchema } from '../../skills/write-note/scripts/index';
@@ -5,7 +6,7 @@ import { SkillContext } from '../../src/skills/skill-types';
 import { TFile } from 'obsidian';
 
 function makeMockContext(mockFiles: Map<string, string>): SkillContext {
-  return {
+  return adaptTestSkillContext({
     vault: {
       getAbstractFileByPath: (path: string) => {
         if (mockFiles.has(path)) {
@@ -43,7 +44,7 @@ function makeMockContext(mockFiles: Map<string, string>): SkillContext {
     workspace: {} as any,
     indexManager: { indexFile: async () => {} } as any,
     plugin: {} as any
-  };
+  });
 }
 
 describe('edit_note', () => {

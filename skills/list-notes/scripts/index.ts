@@ -1,8 +1,10 @@
+import { metadataTags } from '../../../src/skills/file-metadata';
 // List Notes Implementation
 // Core logic for listing notes
 
 import { z } from 'zod';
-import { TFile } from 'obsidian';
+import type { SkillFile } from '../../../src/contracts/tools';
+import { isSkillFile } from '../../../src/skills/skill-types';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 /**
@@ -50,7 +52,7 @@ export async function execute(
 ): Promise<SkillResult<VaultStructure>> {
   try {
     const startTime = Date.now();
-    const allFiles = context.vault.getMarkdownFiles() as TFile[];
+    const allFiles = context.files.getMarkdownFiles() as SkillFile[];
 
     const result: VaultStructure = {
       totalFiles: allFiles.length
@@ -76,7 +78,7 @@ export async function execute(
       allFiles.forEach(file => {
         const cache = context.metadataCache.getFileCache(file);
         const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
-        const frontmatterTags = cache?.frontmatter?.tags || [];
+        const frontmatterTags = metadataTags(cache?.frontmatter?.tags);
         [...fileTags, ...frontmatterTags].forEach(tag => {
           const tagStr = typeof tag === 'string' ? tag : String(tag);
           tagCounts.set(tagStr, (tagCounts.get(tagStr) || 0) + 1);

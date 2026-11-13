@@ -1,6 +1,7 @@
 // Compactor - Context compaction using LLM summarization
 
-import { AIProvider, ChatMessage } from '../types';
+import type { AIProvider } from '../types';
+import type { ChatMessage } from '../contracts/conversation';
 import { abortable, isAbortError } from '../utils/execution';
 
 export interface CompactionOptions {
@@ -75,8 +76,9 @@ export class Compactor {
     for (const m of messages) {
       tokens += estimate(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)) + 4;
       if (m.tool_calls) tokens += estimate(JSON.stringify(m.tool_calls));
-      const state = m.metadata?.providerState as { reasoningContent?: string } | undefined;
-      if (state?.reasoningContent) tokens += estimate(state.reasoningContent);
+      const state = m.metadata?.providerState as { estimatedTokens?: number } | undefined;
+      if (state) tokens += typeof state.estimatedTokens==='number' && Number.isFinite(state.estimatedTokens) && state.estimatedTokens>=0
+        ? state.estimatedTokens : estimate(JSON.stringify(state));
     }
     return Math.ceil(tokens);
   }

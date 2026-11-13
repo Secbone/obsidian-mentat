@@ -45,6 +45,7 @@ export class SmartScroller {
     this.container.scrollTo({top:this.container.scrollHeight,behavior:'auto'});
   }
   isFollowing(): boolean { return !this.isUserScrolledUp; }
+  pauseFollowing(): void { this.pause(); }
   private showNewMessageButton(): void {
     if (this.newMessageButton || !this.container?.parentElement) return;
     this.newMessageButton = this.container.parentElement.createEl('button',{cls:'smart-scroll-new-message',text:'↓ 回到最新'});

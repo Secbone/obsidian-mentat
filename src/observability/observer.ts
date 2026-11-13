@@ -19,7 +19,7 @@ function bounded(value: unknown, depth = 0, seen = new WeakSet<object>(), trunca
 }
 export class Observer {
   private sequence = 0;
-  private listeners = new Set<() => void>();
+  private listeners = new Set<(event: ObservationEvent) => void>();
   private recent: ObservationEvent[] = [];
   readonly processInstanceId = `process-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   constructor(readonly store: LogStore, private secrets: () => string[] = () => []) {}
@@ -35,7 +35,7 @@ export class Observer {
       this.recent.push(event);
       if (this.recent.length > 500) this.recent.shift();
       this.store.enqueue(event);
-      for (const listener of this.listeners) { try { listener(); } catch { /* A broken viewer cannot break execution. */ } }
+      for (const listener of this.listeners) { try { listener(event); } catch { /* A broken viewer cannot break execution. */ } }
     } catch { this.store.health.dropped++; console.error('[Mentat Observer] Unable to normalize event'); }
   }
   error(name: string, error: unknown, input: EventInput = {}): void {
@@ -57,7 +57,7 @@ export class Observer {
     return bounded(redactDiagnostics(bounded(event, 0, new WeakSet(), false), this.secrets())) as ObservationEvent;
   }
   snapshot(): ObservationEvent[] { return [...this.recent]; }
-  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  subscribe(listener: (event: ObservationEvent) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   async query(): Promise<ObservationEvent[]> {
     const persisted = await this.store.read();
     return [...new Map([...persisted, ...this.recent].map(e => [e.eventId, e])).values()].sort((a,b) => a.timestamp - b.timestamp || a.sequence - b.sequence);

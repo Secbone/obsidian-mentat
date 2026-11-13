@@ -81,7 +81,7 @@ describe('Durable instruction reception and consumption', () => {
     expect(s.runtime.get(id)?.instructions?.[0].status).toBe('consumed');
   });
 
-  it('keeps a committed instruction queued when acknowledgement storage fails, then resumes without reinjection', async () => {
+  it('uses the committed transcript as consumption authority when a legacy acknowledgement write fails', async () => {
     const s = setup(); await s.manager.getHistory(); await s.runtime.initialize();
     const id = await s.runtime.start('A', { sessionId: s.manager.getSessionInfo().sessionId, messages: [], maxTurns: 20, enableSkills: true });
     await s.runtime.wait(id);
@@ -96,7 +96,7 @@ describe('Durable instruction reception and consumption', () => {
     });
     await s.runtime.resume(id);
     expect(record.status).toBe('failed');
-    expect(record.instructions[0].status).toBe('queued');
+    expect(record.instructions[0].status).toBe('consumed');
     fail.mockRestore();
     const restored = setup(s.platform); await restored.manager.getHistory(); await restored.runtime.initialize();
     await restored.runtime.resume(id);

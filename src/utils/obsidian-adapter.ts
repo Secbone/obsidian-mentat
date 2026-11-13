@@ -64,6 +64,10 @@ export class ObsidianAdapter implements IPlatformAdapter {
     await this.app.vault.adapter.write(path, data);
   }
 
+  async replaceFile(temporaryPath: string, path: string): Promise<void> {
+    await this.app.vault.adapter.rename(temporaryPath, path);
+  }
+
   async delete(path: string): Promise<void> {
     await this.app.vault.adapter.remove(path);
   }

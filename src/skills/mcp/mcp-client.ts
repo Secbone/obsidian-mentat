@@ -13,8 +13,8 @@ import {
   MCPTransport
 } from './mcp-types';
 import { createTransport } from './mcp-transport';
-import { SkillDefinition } from '../skill-types';
-import { ZodTypeAny } from 'zod';
+import { SkillDefinition, SkillPermission } from '../skill-types';
+import { z } from 'zod';
 
 /**
  * MCP Client - Connects to and communicates with MCP servers
@@ -217,18 +217,22 @@ export class MCPClient {
    * Convert a single MCP tool to Skill definition
    */
   private toolToSkill(tool: MCPToolDefinition): SkillDefinition {
-    // For MCP tools, we can't directly use Zod schemas
-    // We'll create a pass-through validator
-    const schema = {
-      parse: (input: unknown) => input,
-      _def: { typeName: 'ZodAny' }
-    } as ZodTypeAny;
+    if(!tool.inputSchema || tool.inputSchema.type!=='object'
+      || tool.inputSchema.properties!==undefined && (!tool.inputSchema.properties || typeof tool.inputSchema.properties!=='object' || Array.isArray(tool.inputSchema.properties))
+      || tool.inputSchema.required!==undefined && (!Array.isArray(tool.inputSchema.required) || tool.inputSchema.required.some(key=>typeof key!=='string'))) throw new Error(`Unsupported MCP input envelope: ${tool.name}`);
+    // Preserve the server schema verbatim for model projection. The server owns full JSON Schema validation.
+    const schema = z.record(z.unknown()).superRefine((input,context)=>{
+      for(const key of tool.inputSchema.required||[]) if(!Object.prototype.hasOwnProperty.call(input,key)) {
+        context.addIssue({code:z.ZodIssueCode.custom,path:[key],message:'Required MCP argument is missing'});
+      }
+    });
 
     return {
       name: tool.name,
       namespace: 'mcp',
       description: `[MCP:${this.config.id}] ${tool.description}`,
       schema,
+      inputSchema: structuredClone(tool.inputSchema),
       execute: async (input: unknown) => {
         try {
           const content = await this.callTool(tool.name, input as Record<string, unknown>);
@@ -239,12 +243,16 @@ export class MCPClient {
         } catch (error) {
           return {
             success: false,
+            outcome: 'unknown',
             error: error instanceof Error ? error.message : String(error)
           };
         }
       },
       metadata: {
         tags: ['mcp', this.config.id],
+        executionCategory: 'external',
+        permissions: [SkillPermission.EXTERNAL],
+        requiresConfirmation: true,
         version: '1.0.0'
       }
     };

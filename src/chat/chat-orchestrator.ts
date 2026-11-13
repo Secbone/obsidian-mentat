@@ -2,7 +2,6 @@ import { RunSuspended, RunBlocked } from '../runtime/types';
 // ChatOrchestrator - Orchestrates chat conversations with agent and skill support
 
 import { TaskType, ChatMessage, AIProvider } from '../types';
-import { Notice } from 'obsidian';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { parseJson } from '../utils/json-healer';
 import { SkillExecutor } from '../skills/core/skill-executor';
@@ -13,22 +12,29 @@ import { SkillInvocationContext } from '../skills/strategies/skill-invocation-st
 import { SkillLoadCache } from '../skills/core/skill-cache';
 import { PromptLoader } from '../prompts/prompt-loader';
 import { PROMPT_PATHS, FALLBACK_PROMPTS, TEMPLATE_VARS } from '../prompts/prompt-templates';
-import { BaseAgent, AgentDependencies } from '../agents/base-agent';
+import { AgentDependencies } from '../agents/base-agent';
 import { AgentManager } from '../agents/agent-manager';
 import { AgentConfig, AgentContext } from '../agents/agent-types';
 import { EventBus } from '../extensions/event-bus';
-import { VaultDiagnosticsLogger } from '../diagnostics/vault-diagnostics-logger';
+import type { DiagnosticsLogger } from '../agents/agent-types';
+import type { Observer } from '../observability/observer';
+import type { AgentEngine } from '../contracts/agent-engine';
+import { createEngineFactory, type AgentEngineFactory } from '../agents/engine-factory';
 import { ReadTracker } from '../services/read-tracker';
 import { IPlatformAdapter, IPlatformFile } from '../types/platform';
 import { AIRouter } from '../providers/ai-router';
 import { IndexManager } from '../indexing/index-manager';
 import { MentatSettings } from '../settings/settings';
-import { App } from 'obsidian';
 import { z } from 'zod';
 import { errorDetails } from '../utils/execution';
 
 export interface ChatOrchestratorOptions {
   canReconfigure?: () => boolean;
+  skillContext?: SkillContext;
+  diagnostics?: DiagnosticsLogger;
+  observer?: Pick<Observer, 'error' | 'event'>;
+  notice?: (message: string) => void;
+  engineFactory?: AgentEngineFactory;
   copyExtensionSkillsTo?: (registry: SkillRegistry) => void | (() => void);
 }
 
@@ -55,8 +61,8 @@ export interface ChatQueryResult {
  */
 export class ChatOrchestrator {
   private agentManager: AgentManager;
-  private defaultAgent: BaseAgent | null = null;
-  private diagnosticsLogger: VaultDiagnosticsLogger;
+  private defaultAgent: AgentEngine | null = null;
+  private diagnosticsLogger: DiagnosticsLogger;
   private readTracker: ReadTracker;
   private eventBus?: EventBus;
   
@@ -95,18 +101,18 @@ export class ChatOrchestrator {
     this.agentManager = new AgentManager();
     this.readTracker = new ReadTracker();
 
-    const app = this.getApp();
 
     // Initialize Skill system
     this.skillRegistry = new SkillRegistry();
     this.mcpManager = new MCPManager(this.skillRegistry);
-    this.skillLoader = new SkillLoader(app, 'mentat');
+    this.skillLoader = new SkillLoader(platform, 'mentat');
 
     // Initialize skill invocation strategy
     const invocationMode = settings.skillInvocationMode || 'progressive';
     this.skillInvocationContext = new SkillInvocationContext(
       invocationMode,
-      platform
+      platform,
+      this.settings.skillConfigurations
     );
 
     // Initialize skill cache
@@ -119,29 +125,20 @@ export class ChatOrchestrator {
     // Initialize prompt loader
     this.promptLoader = new PromptLoader(platform, FALLBACK_PROMPTS);
 
-    // Create skill context
-    const skillContext: SkillContext = {
-      vault: app?.vault,
-      metadataCache: app?.metadataCache,
-      workspace: app?.workspace,
-      indexManager: indexManager,
-      plugin: this.getPlugin(),
-      readTracker: this.readTracker,
-      settings: this.settings,
-    };
-
-    this.diagnosticsLogger = new VaultDiagnosticsLogger(platform.getVault(), () => [
-      ...this.settings.aiProviders.map(p => p.apiKey || ''), this.settings.browserlessApiKey || '', this.settings.braveSearchApiKey || '',
-    ], this.getPlugin()?.observer);
+    const skillContext = this.createSkillContext();
+    this.diagnosticsLogger = this.options.diagnostics || { logIncident: async incident => {
+      this.options.observer?.event('diagnostic:incident', { component: 'skills', runId: incident.runId, sessionId: incident.sessionId, attributes: incident });
+    } };
     this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext, this.eventBus, this.diagnosticsLogger);
   }
 
-  private getApp(): App {
-    return this.platform.getApp();
-  }
-
-  private getPlugin(): import('../main').default {
-    return this.platform.getPlugin();
+  private createSkillContext(): SkillContext {
+    const fallback: SkillContext = { files: {
+      getMarkdownFiles: () => this.platform.getMarkdownFiles().map(file => ({ ...file, basename: file.name.replace(/\.[^.]+$/, '') })),
+      getAbstractFileByPath: path => { const file = this.platform.getFileByPath(path); return file ? { ...file, basename: file.name.replace(/\.[^.]+$/, '') } : null; },
+      read: file => this.platform.readFile(file),
+    }, metadataCache: { getFileCache: file => this.platform.getFileCache(file) } };
+    return { ...(this.options.skillContext || fallback), settings: this.settings, readTracker: this.readTracker };
   }
 
   dispose(): void {
@@ -154,18 +151,8 @@ export class ChatOrchestrator {
    * Initialize the orchestrator (load skills and create default agent)
    */
   async initialize(): Promise<void> {
-    const app = this.getApp();
     
-    // Create skill context
-    const skillContext: SkillContext = {
-      vault: app?.vault,
-      metadataCache: app?.metadataCache,
-      workspace: app?.workspace,
-      indexManager: this.indexManager,
-      plugin: this.getPlugin(),
-      readTracker: this.readTracker,
-      settings: this.settings,
-    };
+    const skillContext = this.createSkillContext();
 
     // Load all skills from skills directory
     await this.loadAllSkills(skillContext);
@@ -218,7 +205,7 @@ export class ChatOrchestrator {
       eventBus: this.eventBus
     };
 
-    this.defaultAgent = new BaseAgent(agentConfig, provider, dependencies);
+    this.defaultAgent = (this.options.engineFactory || createEngineFactory())(agentConfig, provider, dependencies, this.settings.agentEngine || 'native');
     this.agentManager.registerAgent(this.defaultAgent);
   }
 
@@ -341,7 +328,7 @@ export class ChatOrchestrator {
           context
         );
       } catch (error) {
-        this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] sendMessage failed:' } });
+        this.options.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] sendMessage failed:' } });
         throw error;
       }
     } finally {
@@ -390,7 +377,7 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
   /**
    * Get default agent
    */
-  getDefaultAgent(): BaseAgent | null {
+  getDefaultAgent(): AgentEngine | null {
     return this.defaultAgent;
   }
 
@@ -417,7 +404,7 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
 
       console.log(`[ChatOrchestrator] Loaded ${allSkills.length} skills from skills directory (${executableSkills.length} executable, ${docSkills.length} documentation)`);
     } catch (error) {
-      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Failed to load skills:' } });
+      this.options.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Failed to load skills:' } });
       if (strict) throw error;
     }
   }
@@ -466,7 +453,7 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
         [TEMPLATE_VARS.VAULT_MAP]: "(Refer to the Vault Session Context in the message history)"
       });
     } catch (error) {
-      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error building system prompt, using inline fallback:' } });
+      this.options.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error building system prompt, using inline fallback:' } });
 
       const userPreferences = await this.getUserPreferences();
       // Inline fallback
@@ -517,7 +504,7 @@ OBSIDIAN SYNTAX CHEAT SHEET:
       }
       return '*(None defined. Click "Open Vault Knowledge Map" in Settings to outline your vault structure.)*';
     } catch (error) {
-      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error reading vault-map.md:' } });
+      this.options.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error reading vault-map.md:' } });
       return '*(None defined. Click "Open Vault Knowledge Map" in Settings to outline your vault structure.)*';
     }
   }
@@ -631,7 +618,7 @@ OBSIDIAN SYNTAX CHEAT SHEET:
         console.log('[ChatOrchestrator] Generated rich semantic vault-map.md successfully');
       }
     } catch (error) {
-      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error initializing vault-map.md:' } });
+      this.options.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error initializing vault-map.md:' } });
     }
   }
 
@@ -939,7 +926,7 @@ Write your custom style instructions and preferences here. This file is dynamica
       await this.platform.write(preferencesPath, defaultTemplate);
       return defaultTemplate;
     } catch (e) {
-      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', e, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error loading/initializing user prompt preferences:' } });
+      this.options.observer?.error('chat:boundary:failed', e, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error loading/initializing user prompt preferences:' } });
       // Absolute safety isolation: fall back to setting or 'None' rather than throwing/crashing
       return this.settings.userSystemPromptPreferences || 'None';
     }
@@ -982,7 +969,7 @@ You are an expert technical note writer. Your goal is to draft comprehensive, ac
       temperature: 0.7,
       systemPrompt: writerSystemPrompt
     };
-    const writerAgent = new BaseAgent(writerConfig, provider, dependencies);
+    const writerAgent = (this.options.engineFactory || createEngineFactory())(writerConfig, provider, dependencies, this.settings.agentEngine || 'native');
     this.agentManager.registerAgent(writerAgent);
 
     // 2. Register Default Reviewer Agent
@@ -1013,7 +1000,7 @@ OTHERWISE:
       temperature: 0.2,
       systemPrompt: reviewerSystemPrompt
     };
-    const reviewerAgent = new BaseAgent(reviewerConfig, provider, dependencies);
+    const reviewerAgent = (this.options.engineFactory || createEngineFactory())(reviewerConfig, provider, dependencies, this.settings.agentEngine || 'native');
     this.agentManager.registerAgent(reviewerAgent);
 
     // 3. Scan and Load Custom User Agents from Vault
@@ -1034,19 +1021,19 @@ OTHERWISE:
               }).passthrough().parse(parseJson<AgentConfig>(fileContent));
               if (!customConfig.id || !customConfig.name || this.agentManager.getAgent(customConfig.id) || customConfig.id === 'default-chat-agent') throw new Error(`Invalid or duplicate custom agent ID: ${customConfig.id}`);
               if (customConfig.id && customConfig.name) {
-                const customAgent = new BaseAgent(customConfig, provider, dependencies);
+                const customAgent = (this.options.engineFactory || createEngineFactory())(customConfig, provider, dependencies, this.settings.agentEngine || 'native');
                 this.agentManager.registerAgent(customAgent);
                 console.log(`[ChatOrchestrator] Successfully loaded custom agent: ${customConfig.id}`);
               }
             } catch (err) {
-              this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', err, { component: 'chat', attributes: { boundary: `[ChatOrchestrator] Failed to load custom agent config ${filePath}:` } });
+              this.options.observer?.error('chat:boundary:failed', err, { component: 'chat', attributes: { boundary: `[ChatOrchestrator] Failed to load custom agent config ${filePath}:` } });
               if (strict) throw err;
             }
           }
         }
       }
     } catch (e) {
-      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', e, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error loading custom user agents:' } });
+      this.options.observer?.error('chat:boundary:failed', e, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error loading custom user agents:' } });
       if (strict) throw e;
     }
 
@@ -1070,7 +1057,7 @@ OTHERWISE:
             return { success: false, error: `Agent not found: ${input.agentId}` };
           }
           
-          new Notice(`🤖 正在委派任务给 ${agent.getName()}...`);
+          this.options.notice?.(`🤖 正在委派任务给 ${agent.getName()}...`);
           
           // Execute agent to completion
           const child = options?.runtime && options.operationId ? options.runtime.child(options.operationId) : undefined;
@@ -1122,10 +1109,10 @@ OTHERWISE:
             systemPrompt: input.systemPrompt
           };
           
-          const tempAgent = new BaseAgent(tempConfig, provider, dependencies);
+          const tempAgent = (this.options.engineFactory || createEngineFactory())(tempConfig, provider, dependencies, this.settings.agentEngine || 'native');
           this.agentManager.registerAgent(tempAgent);
           
-          new Notice(`🤖 正在生成子智能体: ${input.name}...`);
+          this.options.notice?.(`🤖 正在生成子智能体: ${input.name}...`);
           
           const child = options?.runtime && options.operationId ? options.runtime.child(options.operationId) : undefined;
           if (child?.messages.length) this.readTracker.restore(child.messages);

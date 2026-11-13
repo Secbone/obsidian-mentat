@@ -1,3 +1,4 @@
+import { adaptTestSkillContext } from '../../utils/skill-context';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execute, schema } from '../../../skills/move-note/scripts/index';
 import { SkillContext } from '../../../src/skills/skill-types';
@@ -77,7 +78,7 @@ describe('move_note', () => {
       new_path: 'Archive/Meeting.md'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(true);
     expect(result.data?.new_path).toBe('Archive/Meeting.md');
@@ -96,7 +97,7 @@ describe('move_note', () => {
       new_path: 'Notes/Final Version.md'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(true);
     expect(result.data?.new_path).toBe('Notes/Final Version.md');
@@ -111,7 +112,7 @@ describe('move_note', () => {
       new_path: 'Trash/Obsolete.md'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(true);
     expect(result.data?.new_path).toBe('Trash/Obsolete.md');
@@ -123,7 +124,7 @@ describe('move_note', () => {
       new_path: 'Archive/NonExistent.md'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not exist');
@@ -137,7 +138,7 @@ describe('move_note', () => {
       new_path: 'Notes/Same.md'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('same');
@@ -152,7 +153,7 @@ describe('move_note', () => {
       new_path: 'Archive/Source.md'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('already exists');

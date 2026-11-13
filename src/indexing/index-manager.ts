@@ -1,3 +1,5 @@
+import type { Embedder } from '../contracts/model';
+import { asEmbedder } from '../providers/model-adapters';
 import type { Observer } from '../observability/observer';
 // Index Manager - Manages the lifecycle of document indexing
 
@@ -42,7 +44,7 @@ export class IndexManager {
 
   constructor(
     private platform: IPlatformAdapter,
-    private getEmbeddingProvider: () => Promise<AIProvider | null>,
+    private getEmbeddingProvider: () => Promise<AIProvider | Embedder | null>,
     private observer?: Observer
   ) {
     this.contentExtractor = new ContentExtractor(platform);
@@ -204,7 +206,7 @@ export class IndexManager {
       console.warn('[IndexManager] No embedding provider configured - search unavailable');
       return [];
     }
-    const { embedding } = await provider.generateEmbedding(query);
+    const { embeddings: [embedding] } = await asEmbedder(provider).embed([query]);
 
     // Search in vector store
     return this.vectorStore.search(embedding, options);

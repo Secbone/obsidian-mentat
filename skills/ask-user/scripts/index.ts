@@ -3,7 +3,6 @@
 
 import { z } from 'zod';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
-import { UserInputModal } from '../../../src/ui/user-input-modal';
 import { RunSuspended, RunBlocked } from '../../../src/runtime/types';
 import { throwIfAborted } from '../../../src/utils/execution';
 
@@ -48,28 +47,10 @@ export async function execute(
       if (outcome.kind !== 'answered') return { success: false, outcome: outcome.kind === 'expired' ? 'expired' : 'cancelled', error: '人工问答已结束' };
       return { success: true, outcome: 'success', data: { answer: outcome.answer, timestamp: Date.now() } };
     }
-    // Create and show modal - this returns a Promise that blocks until user responds
-    const answer = await new Promise<string>((resolve, reject) => {
-      const modal = new UserInputModal(
-        context.plugin.app,
-        input.question,
-        input.context,
-        input.options,
-        input.defaultValue,
-        input.requiresInput,
-        (result) => {
-          context.abortSignal?.removeEventListener('abort', onAbort);
-          if (result.cancelled) {
-            reject(new Error('User cancelled the request'));
-          } else {
-            resolve(result.answer);
-          }
-        }
-      );
-      const onAbort = () => { modal.close(); reject(new DOMException('已停止生成', 'AbortError')); };
-      context.abortSignal?.addEventListener('abort', onAbort, { once: true });
-      modal.open();
-    });
+    if(!context.askUser)return {success:false,outcome:'denied',error:'宿主未提供人工交互能力'};
+    const response=await context.askUser(input);
+    if(response.kind!=='answered')return {success:false,outcome:response.kind==='expired'?'expired':'cancelled',error:'人工问答已结束'};
+    const answer=response.answer||'';
 
     return {
       success: true,

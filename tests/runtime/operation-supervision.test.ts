@@ -28,7 +28,7 @@ function setup(observer?: Observer) {
 const toolCall = {id:'w',name:'obsidian:run_command',arguments:'{"timeout":10}'};
 
 describe('Actual operation lifetime',()=>{
-  it('reports when a failed receipt cannot be withdrawn from storage',async()=>{
+  it('keeps failed receipt candidates out of the committed state',async()=>{
     const observer={error:vi.fn(),event:vi.fn()} as unknown as Observer;
     const s=setup(observer); let finishModel!:(value:any)=>void;
     s.provider.generateStreamWithSkills.mockImplementationOnce(()=>new Promise(resolve=>{finishModel=resolve;}));
@@ -36,9 +36,9 @@ describe('Actual operation lifetime',()=>{
     const id=await s.runtime.start('work',{sessionId:s.manager.getSessionInfo().sessionId,messages:[],maxTurns:20,enableSkills:true});
     await vi.waitFor(()=>expect(finishModel).toBeTypeOf('function'));
     const failure=vi.spyOn(s.runtime.store,'save').mockRejectedValue(new Error('disk unavailable'));
-    await expect(s.runtime.steer(id,'do not accept')).rejects.toThrow('撤回记录也未能保存');
-    expect(observer.error).toHaveBeenCalledWith('storage:instruction_rollback:failed',expect.any(Error),expect.objectContaining({runId:id}));
-    expect(s.runtime.get(id)?.instructions).toEqual([]);
+    await expect(s.runtime.steer(id,'do not accept')).rejects.toThrow('disk unavailable');
+    expect(observer.error).toHaveBeenCalledWith('storage:checkpoint:failed',expect.any(Error),expect.objectContaining({runId:id}));
+    expect(s.runtime.get(id)?.instructions || []).toEqual([]);
     failure.mockRestore(); finishModel({content:'done',finishReason:'stop'}); await s.runtime.wait(id);
     expect(s.runtime.get(id)?.messages.some(m=>m.metadata?.instructionId)).toBe(false);
   });
@@ -58,23 +58,23 @@ describe('Actual operation lifetime',()=>{
     });
     const receipt=s.runtime.steer(id,'uncommitted instruction').then(value=>({value,error:undefined}),error=>({value:undefined,error}));
     await vi.waitFor(()=>expect(held).toBe(true));
-    finishModel({content:'',toolCalls:[{id:'r',name:'obsidian:read',arguments:'{}'}],finishReason:'tool_calls'});
-    await s.runtime.wait(id);
-    expect(s.runtime.get(id)?.status).toBe('interrupted');
-    expect(s.runtime.get(id)?.messages.some(m=>m.metadata?.instructionId)).toBe(false);
-    expect(s.provider.generateStreamWithSkills.mock.calls.every(([messages]:any[])=>messages.every((m:any)=>!m.content.includes('uncommitted instruction')))).toBe(true);
-    expect((await s.runtime.store.load(id)).instructions?.[0].status).toBe('queued');
+    expect(s.runtime.get(id)?.instructions || []).toEqual([]);
+    expect((await s.runtime.store.load(id)).instructions || []).toEqual([]);
+    finishModel({content:'A done',finishReason:'stop'});
+    expect(s.provider.generateStreamWithSkills).toHaveBeenCalledOnce();
     if(success) releaseReceipt(); else rejectReceipt(new Error('receipt storage failed'));
     const received=await receipt;
+    await s.runtime.wait(id);
     if(success) {
       expect(received.value).toBe(true);
+      expect(s.runtime.get(id)?.status).toBe('interrupted');
+      expect((await s.runtime.store.load(id)).instructions?.[0].status).toBe('queued');
       await s.runtime.resume(id);
       expect(s.runtime.get(id)?.messages.filter(m=>m.metadata?.instructionId)).toHaveLength(1);
     } else {
       expect(received.error?.message).toBe('receipt storage failed');
-      expect(s.runtime.get(id)?.instructions).toEqual([]);
-      expect((await s.runtime.store.load(id)).instructions).toEqual([]);
-      await s.runtime.resume(id);
+      expect(s.runtime.get(id)?.instructions || []).toEqual([]);
+      expect((await s.runtime.store.load(id)).instructions || []).toEqual([]);
       expect(s.runtime.get(id)?.messages.some(m=>m.metadata?.instructionId)).toBe(false);
     }
   });

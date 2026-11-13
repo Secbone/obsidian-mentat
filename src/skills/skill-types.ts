@@ -3,8 +3,10 @@ import type { MentatSettings } from '../settings/settings';
 // Core types for Skill system
 
 import { ZodTypeAny } from 'zod';
-import { Vault, MetadataCache, Workspace } from 'obsidian';
-import { ReadTracker } from '../services/read-tracker';
+import type { ReadTracker } from '../services/read-tracker';
+import type { SkillFiles, SkillFile, SkillMetadataReader, MutationPlan, ToolCommandExecutor } from '../contracts/tools';
+import type { MutationService } from './mutations/mutation-service';
+export type { ToolOutcome, ToolCatalog, ToolHandler, MutationPlan, SkillFile, SkillFiles } from '../contracts/tools';
 
 /**
  * Skill execution status
@@ -57,9 +59,12 @@ export interface SkillDefinition<TInput = unknown, TOutput = unknown> {
 
   // Schema - Zod schema for input validation
   schema: ZodTypeAny;
+  /** Native JSON Schema from external adapters; local schema validates the input envelope. */
+  inputSchema?: Record<string, unknown>;
 
   // Execution function
-  execute: (input: TInput, options?: { abortSignal?: AbortSignal; runtime?: RunRuntime; operationId?: string }) => Promise<SkillResult<TOutput>>;
+  prepare?: (input: TInput, options?: SkillExecutionOptions) => Promise<MutationPlan>;
+  execute: (input: TInput, options?: SkillExecutionOptions) => Promise<SkillResult<TOutput>>;
 
   // Metadata
   metadata?: {
@@ -119,19 +124,28 @@ export interface ToolCall {
 /**
  * Skill execution context - provides access to plugin resources
  */
+export interface SkillExecutionOptions {
+  abortSignal?: AbortSignal; runtime?: RunRuntime; operationId?: string; mutationPlan?: MutationPlan;
+}
 export interface SkillContext {
-  /** Committed settings bound to this execution graph, isolated from editable UI settings. */
+  /** This context carries host capabilities, never the plugin or an Obsidian App. */
   settings?: Readonly<MentatSettings>;
-  runtime?: RunRuntime;
+  runtime?: Pick<RunRuntime,'runId'|'scope'|'record'|'interact'>;
   operationId?: string;
   abortSignal?: AbortSignal;
-  vault: Vault;
-  metadataCache: MetadataCache;
-  workspace: Workspace;
-  indexManager?: import('../indexing/index-manager').IndexManager;
-  plugin: import('../main').default;
-  readTracker?: ReadTracker;
+  files: SkillFiles;
+  metadataCache: SkillMetadataReader;
+  mutations?: MutationService;
+  mutationPlan?: MutationPlan;
+  commands?: ToolCommandExecutor;
+  askUser?: (input:{question:string;context?:string;options?:string[];requiresInput?:boolean}) => Promise<NonNullable<import('../runtime/types').InteractionRequest['outcome']>>;
+  indexManager?: {
+    canSearch?:()=>Promise<boolean>; search:(query:string,options?:{topK?:number;minScore?:number;filterFiles?:string[]})=>Promise<Array<{chunk:{filePath:string};score:number}>>;
+    indexFile:(file:SkillFile)=>Promise<unknown>;removeFromIndex:(path:string)=>Promise<void>;
+  };
+  readTracker?: Pick<ReadTracker,'hasBeenRead'|'markRead'|'clear'>;
 }
+export function isSkillFile(file:SkillFile|{path:string}|null|undefined):file is SkillFile { return !!file && 'extension' in file; }
 
 /**
  * Skill permission level

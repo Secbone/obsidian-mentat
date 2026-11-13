@@ -1,3 +1,4 @@
+import type { ToolCatalog, ToolDescriptor } from '../../contracts/tools';
 // Skill Registry - Centralized management of all skills
 
 import zodToJsonSchema from 'zod-to-json-schema';
@@ -17,8 +18,14 @@ import { SkillDetailGenerator } from '../generators/skill-detail-generator';
 /**
  * SkillRegistry manages all registered skills and provides format conversion
  */
-export class SkillRegistry {
+export class SkillRegistry implements ToolCatalog {
   private skills: Map<string, AnySkillDefinition> = new Map();
+
+  listTools():ToolDescriptor[]{return this.getAll().filter(isExecutableSkill).map(skill=>this.resolveTool(this.getFullName(skill.namespace,skill.name))!);}
+  resolveTool(id:string):ToolDescriptor|undefined{
+    const skill=this.get(id);if(!skill||!isExecutableSkill(skill))return undefined;
+    return {id,description:skill.description,effect:skill.metadata?.executionCategory||'external',inputSchema:skill.inputSchema||zodToJsonSchema(skill.schema as unknown as Parameters<typeof zodToJsonSchema>[0],{$refStrategy:'none'}) as Record<string,unknown>};
+  }
 
   /**
    * Register a skill
@@ -140,9 +147,10 @@ export class SkillRegistry {
    * Only converts executable skills, not documentation skills
    */
   toOpenAIFunctions(): OpenAIFunction[] {
-    return this.getAll()
-      .filter(isExecutableSkill)
-      .map(skill => this.skillToOpenAIFunction(skill));
+    return this.listTools().map(tool => ({
+      name: tool.id.replace(/:/g,'__'), description: tool.description,
+      parameters: {...tool.inputSchema,type:'object',properties:(tool.inputSchema.properties||{}) as Record<string,unknown>,required:(tool.inputSchema.required||[]) as string[]},
+    }));
   }
 
   /**
@@ -150,16 +158,17 @@ export class SkillRegistry {
    * Only converts executable skills, not documentation skills
    */
   toAnthropicTools(): AnthropicTool[] {
-    return this.getAll()
-      .filter(isExecutableSkill)
-      .map(skill => this.skillToAnthropicTool(skill));
+    return this.listTools().map(tool => ({
+      name: tool.id.replace(/:/g,'__'), description: tool.description,
+      input_schema: {...tool.inputSchema,type:'object',properties:(tool.inputSchema.properties||{}) as Record<string,unknown>,required:(tool.inputSchema.required||[]) as string[]},
+    }));
   }
 
   /**
    * Convert a single skill to OpenAI Function format
    */
   skillToOpenAIFunction(skill: SkillDefinition): OpenAIFunction {
-    const jsonSchema = zodToJsonSchema(skill.schema as unknown as Parameters<typeof zodToJsonSchema>[0], {
+    const jsonSchema = skill.inputSchema || zodToJsonSchema(skill.schema as unknown as Parameters<typeof zodToJsonSchema>[0], {
       $refStrategy: 'none'
     }) as { properties?: Record<string, unknown>; required?: string[] };
 
@@ -167,9 +176,10 @@ export class SkillRegistry {
       name: this.getFullName(skill.namespace, skill.name).replace(/:/g, '__'),
       description: skill.description,
       parameters: {
+        ...jsonSchema,
         type: 'object',
-        properties: jsonSchema.properties ?? {},
-        required: jsonSchema.required ?? []
+        properties: (jsonSchema.properties ?? {}) as Record<string,unknown>,
+        required: (jsonSchema.required ?? []) as string[]
       }
     };
   }
@@ -178,7 +188,7 @@ export class SkillRegistry {
    * Convert a single skill to Anthropic Tool format
    */
   skillToAnthropicTool(skill: SkillDefinition): AnthropicTool {
-    const jsonSchema = zodToJsonSchema(skill.schema as unknown as Parameters<typeof zodToJsonSchema>[0], {
+    const jsonSchema = skill.inputSchema || zodToJsonSchema(skill.schema as unknown as Parameters<typeof zodToJsonSchema>[0], {
       $refStrategy: 'none'
     }) as { properties?: Record<string, unknown>; required?: string[] };
 
@@ -186,9 +196,10 @@ export class SkillRegistry {
       name: this.getFullName(skill.namespace, skill.name).replace(/:/g, '__'),
       description: skill.description,
       input_schema: {
+        ...jsonSchema,
         type: 'object',
-        properties: jsonSchema.properties || {},
-        required: jsonSchema.required || []
+        properties: (jsonSchema.properties || {}) as Record<string,unknown>,
+        required: (jsonSchema.required || []) as string[]
       }
     };
   }

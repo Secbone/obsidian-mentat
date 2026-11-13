@@ -1,8 +1,10 @@
+import { metadataTags } from '../../../src/skills/file-metadata';
 // Query Documents Implementation
 // Core logic for searching and filtering Obsidian documents
 
 import { z } from 'zod';
-import { TFile } from 'obsidian';
+import type { SkillFile } from '../../../src/contracts/tools';
+import { isSkillFile } from '../../../src/skills/skill-types';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
 
 /**
@@ -60,7 +62,7 @@ export async function execute(
 ): Promise<SkillResult> {
   try {
     const startTime = Date.now();
-    let files = context.vault.getMarkdownFiles() as TFile[];
+    let files = context.files.getMarkdownFiles() as SkillFile[];
 
     // Filter by glob pattern
     if (input.pattern) {
@@ -91,7 +93,7 @@ export async function execute(
       files = files.filter(file => {
         const cache = context.metadataCache.getFileCache(file);
         const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
-        const frontmatterTags = cache?.frontmatter?.tags || [];
+        const frontmatterTags = metadataTags(cache?.frontmatter?.tags);
         const allTags = [...fileTags, ...frontmatterTags].map(t =>
           typeof t === 'string' ? t : String(t)
         );
@@ -112,7 +114,7 @@ export async function execute(
     }
 
     // Semantic search (if query provided and index manager available)
-    let resultsWithScores: Array<{ file: TFile; score: number }> = [];
+    let resultsWithScores: Array<{ file: SkillFile; score: number }> = [];
 
     if (input.query && context.indexManager && (!context.indexManager.canSearch || await context.indexManager.canSearch())) {
       try {
@@ -166,7 +168,7 @@ export async function execute(
     const results: QueryResultItem[] = limitedResults.map(({ file, score }) => {
       const cache = context.metadataCache.getFileCache(file);
       const fileTags = cache?.tags?.map((t: any) => t.tag.replace('#', '')) || [];
-      const frontmatterTags = cache?.frontmatter?.tags || [];
+      const frontmatterTags = metadataTags(cache?.frontmatter?.tags);
       const allTags = [...fileTags, ...frontmatterTags].map(t =>
         typeof t === 'string' ? t : String(t)
       );

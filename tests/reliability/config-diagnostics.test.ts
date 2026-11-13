@@ -17,6 +17,8 @@ import { DiagnosticsExporter } from '../../src/diagnostics/diagnostics-exporter'
 import { redactDiagnostics, VaultDiagnosticsLogger } from '../../src/diagnostics/vault-diagnostics-logger';
 import { TaskType } from '../../src/types';
 import { SkillLoader } from '../../src/skills/core/skill-loader';
+import { IndexedObservationQuery } from '../../src/observability/observation-query';
+import { LegacyObservationReader } from '../../src/observability/legacy-reader';
 
 afterEach(() => { changes.length = 0; vi.restoreAllMocks(); });
 const provider = { id: 'chat', name: 'chat', type: 'openai', enabled: true, apiKey: 'test-provider-secret', model: 'deepseek-test', supportsEmbedding: false, supportsStreaming: true } as any;
@@ -56,7 +58,7 @@ describe('Configuration and diagnostics regressions', () => {
   });
 
   it('preserves builtin execution metadata and passes cancellation through the skill loader', async () => {
-    const loader = new SkillLoader({ vault: { configDir: '.obsidian' } } as any) as any;
+    const loader = new SkillLoader({getConfigDir:()=>'.obsidian'} as any) as any;
     const context = { vault: {}, plugin: { settings: {} } } as any;
     const edit = await loader.loadExecutableSkill({ name: 'edit_note', description: '', content: '' }, 'edit-note', context);
     expect(edit.metadata.executionCategory).toBe('write');
@@ -100,6 +102,11 @@ describe('Configuration and diagnostics regressions', () => {
       app: { vault: { adapter: { exists: async () => true, read: async () => { if (broken) throw new Error('unreadable'); return lines; } },
         create: vi.fn(async (path: string, content: string) => { report = content; return { path }; }) },
         workspace: { getLeaf: () => ({ openFile: vi.fn() }) } } } as any;
+    plugin.runAccess={list:()=>[],get:()=>undefined,getWarnings:()=>[]};
+    plugin.observationQuery=new IndexedObservationQuery(plugin.runAccess,{
+      store:{folder:'logs',health:{writeError:'',readError:'',dropped:0,malformed:0}},
+      snapshot:()=>[],query:async()=>[],subscribe:()=>()=>{},sanitize:(event:any)=>redactDiagnostics(event,[provider.apiKey]),
+    } as any,new LegacyObservationReader(plugin.app.vault.adapter));
     return { plugin, content: () => report };
   }
 

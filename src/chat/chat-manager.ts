@@ -1,10 +1,11 @@
 // Chat Manager - Handles chat history persistence and management
 
-import { ChatMessage } from '../types';
+import type { ChatMessage } from '../contracts/conversation';
 import { Context, Message, ContextOptions } from '../context';
 import { FileStorage } from '../utils/file-storage';
 import { parseJson } from '../utils/json-healer';
 import { IPlatformAdapter } from '../types/platform';
+import type { RunRecord } from '../runtime/types';
 
 interface ChatHistory {
   sessionId: string;
@@ -22,6 +23,10 @@ export class ChatManager {
   private initialized: Promise<void>;
   private readonly STORAGE_KEY = 'mentat-chat-history';
   private pendingWrite: Promise<void> = Promise.resolve();
+  private runHistory?: (sessionId: string) => Promise<RunRecord | undefined>;
+  private projectionRunId?: string;
+  private projectionMode = false;
+  readonly recoveryWarnings:string[]=[];
 
   constructor(plugin: ChatManager['plugin']) {
      this.plugin = plugin;
@@ -37,7 +42,13 @@ export class ChatManager {
       }) as IPlatformAdapter;
      this.storage = new FileStorage(platform);
      this.sessionId = this.generateSessionId();
-     this.initialized = this.loadHistory();
+     this.initialized = (async()=>{
+       let legacyError:unknown;
+       try {await this.loadHistory();} catch(error) {legacyError=error;}
+       let projected=false;
+       try {projected=await this.loadProjection();}catch(error){this.recoveryWarnings.push(`会话显示索引损坏，保留原文件，可从运行记录重建：${String(error)}`);}
+       if(legacyError && !projected) this.recoveryWarnings.push(`旧聊天记录无法读取，原文件已保留，请从运行记录恢复：${String(legacyError)}`);
+     })();
    }
 
   /**
@@ -75,7 +86,27 @@ export class ChatManager {
    */
   async getHistory(): Promise<ChatMessage[]> {
     await this.initialized;
+    if(this.runHistory) {
+      const record=await this.runHistory(this.sessionId);
+      if(record) {this.history=structuredClone(record.messages);this.projectionRunId=record.id;}
+    }
     return [...this.history];
+  }
+
+  /** Runtime journals own managed transcripts; this file only keeps a rebuildable cursor. */
+  async bindRunHistory(reader: (sessionId:string)=>Promise<RunRecord|undefined>):Promise<void> {
+    await this.initialized;this.runHistory=reader;this.projectionMode=true;await this.getHistory();
+  }
+  async projectRun(record:RunRecord):Promise<void> {
+    await this.initialized;
+    if(record.sessionId!==this.sessionId) return;
+    const changed=this.projectionRunId!==record.id;
+    this.history=structuredClone(record.messages);this.projectionRunId=record.id;this.projectionMode=true;
+    if(changed) await this.saveHistory();
+  }
+  async openRun(record:RunRecord):Promise<void> {
+    await this.initialized;this.sessionId=record.sessionId;this.history=structuredClone(record.messages);
+    this.projectionRunId=record.id;this.projectionMode=true;this.selectedFiles.clear();await this.saveHistory();
   }
 
   /**
@@ -84,6 +115,7 @@ export class ChatManager {
   async clearHistory(): Promise<void> {
     await this.initialized;
     this.history = [];
+    this.projectionRunId=undefined;
     this.sessionId = this.generateSessionId();
     await this.saveHistory();
   }
@@ -91,6 +123,7 @@ export class ChatManager {
   async restoreSession(sessionId: string, messages: ChatMessage[]): Promise<void> {
     await this.initialized;
     this.sessionId = sessionId;
+    this.projectionRunId=undefined;
     this.history = [...messages];
     this.selectedFiles.clear();
     await this.saveHistory();
@@ -166,17 +199,47 @@ export class ChatManager {
       lastUpdated: Date.now()
     };
 
-    const snapshot = JSON.stringify(data, null, 2);
+    const projection=this.projectionMode;
+    if(!projection && this.recoveryWarnings.length) throw new Error('旧聊天存储需要恢复，禁止覆盖原始记录');
+    const snapshot = JSON.stringify(projection ? {version:1,sessionId:data.sessionId,runId:this.projectionRunId,selectedFiles:data.selectedFiles,
+      lastUpdated:data.lastUpdated,...(!this.projectionRunId?{legacyMessages:data.messages}:{})}:data, null, 2);
+    const filename=projection?'session_projection.json':'chat_history.json';
     const write = this.pendingWrite.catch(() => undefined).then(async () => {
-      if (await this.storage.exists('chat_history.json')) {
-        const previous = await this.storage.read('chat_history.json');
-        JSON.parse(previous);
-        await this.storage.write('chat_history.json.bak', previous);
+      if (await this.storage.exists(filename)) {
+        const previous = await this.storage.read(filename);
+        try {JSON.parse(previous);await this.storage.write(`${filename}.bak`, previous);}
+        catch(error) {
+          if(!projection) throw error;
+          await this.storage.write(`${filename}.corrupt-${Date.now()}`,previous);
+        }
       }
-      await this.storage.write('chat_history.json', snapshot);
+      await this.storage.write(filename, snapshot);
     });
     this.pendingWrite = write;
     await write;
+  }
+
+  private async loadProjection():Promise<boolean> {
+    const path='session_projection.json';
+    if(!await this.storage.exists(path)) return false;
+    const parse=(text:string)=>{
+      const value=JSON.parse(text);
+      if(value.version!==1 || typeof value.sessionId!=='string' || !Array.isArray(value.selectedFiles)
+        || value.runId!==undefined && typeof value.runId!=='string' || value.legacyMessages!==undefined && !Array.isArray(value.legacyMessages)) throw new Error('Invalid session projection');
+      return value;
+    };
+    let data;
+    try {data=parse(await this.storage.read(path));}
+    catch(error) {
+      if(!await this.storage.exists(`${path}.bak`)) throw error;
+      data=parse(await this.storage.read(`${path}.bak`));
+      await this.storage.write(`session_projection.corrupt-${Date.now()}.json`,await this.storage.read(path));
+      await this.storage.write(path,JSON.stringify(data));
+    }
+    const sameSession=this.sessionId===data.sessionId;
+    this.sessionId=data.sessionId;this.selectedFiles=new Set(data.selectedFiles);this.projectionRunId=data.runId;this.projectionMode=true;
+    this.history=data.legacyMessages || (!data.runId && sameSession?this.history:[]);
+    return true;
   }
 
   /**

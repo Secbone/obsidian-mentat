@@ -1,137 +1,71 @@
 import { throwIfAborted } from '../../../src/utils/execution';
 import { z } from 'zod';
-import { TFile } from 'obsidian';
+import { fromToolOutcome } from '../../../src/skills/results';
+import type { MutationPlan } from '../../../src/contracts/tools';
+import { buildMovePlan } from '../../../src/skills/mutations/move-plan';
+import { RunBlocked, RunSuspended } from '../../../src/runtime/types';
 import { SkillContext, SkillResult } from '../../../src/skills/skill-types';
-
 export const metadata = {
-  name: 'move_note',
-  description: 'Move or rename notes, updating all links automatically',
-  version: '1.0.0',
-  tags: ['move', 'rename', 'delete', 'trash', 'organize'],
-  requiresConfirmation: true,
-  executionCategory: 'mutate',
-  permissions: ['read', 'write'],
-  performance: 'fast',
-  category: 'file-operations'
+    name: 'move_note',
+    description: 'Move or rename notes, updating all links automatically',
+    version: '1.0.0',
+    tags: ['move', 'rename', 'delete', 'trash', 'organize'],
+    requiresConfirmation: true,
+    executionCategory: 'mutate',
+    permissions: ['read', 'write'],
+    performance: 'fast',
+    category: 'file-operations'
 };
-
 export const schema = z.object({
-  path: z.string().describe('Source file path (must exist)'),
-  new_path: z.string().describe('Destination file path (use Trash/filename to delete)'),
-  triggerReindex: z.boolean().default(true).describe('Trigger reindex after operation')
+    path: z.string().describe('Source file path (must exist)'),
+    new_path: z.string().describe('Destination file path (use Trash/filename to delete)'),
+    triggerReindex: z.boolean().default(true).describe('Trigger reindex after operation')
 });
-
 export type Input = z.infer<typeof schema>;
-
 interface MoveResult {
-  path: string;
-  new_path: string;
-  name: string;
-  moved: boolean;
-  linksUpdated: boolean;
-  reindexed: boolean;
+    path: string;
+    new_path: string;
+    name: string;
+    moved: boolean;
+    linksUpdated: boolean;
+    reindexed: boolean;
 }
-
-export async function execute(
-  input: Input,
-  context: SkillContext
-): Promise<SkillResult<MoveResult>> {
-  const startTime = Date.now();
-  const sourceFile = context.vault.getAbstractFileByPath(input.path);
-
-  if (!sourceFile || !(sourceFile instanceof TFile)) {
-    return {
-      success: false,
-      error: `File does not exist: ${input.path}`
-    };
-  }
-
-  if (input.path === input.new_path) {
-    return {
-      success: false,
-      error: 'Source and destination paths are the same.'
-    };
-  }
-
-  const destFile = context.vault.getAbstractFileByPath(input.new_path);
-  if (destFile) {
-    return {
-      success: false,
-      error: `Destination already exists: ${input.new_path}. Choose a different path.`
-    };
-  }
-
-  // Ensure destination folder exists
-  const folderPath = input.new_path.substring(0, input.new_path.lastIndexOf('/'));
-  if (folderPath) {
-    await ensureFolder(context.vault, folderPath);
-  }
-
-  try {
-    // Use FileManager.renameFile to automatically update all links
-    throwIfAborted(context.abortSignal);
-    await context.plugin.app.fileManager.renameFile(sourceFile, input.new_path);
-
-    // Update read tracker
-    context.readTracker?.clear();
-    context.readTracker?.markRead(input.new_path, Date.now());
-
-    // Reindex at new path
-    let reindexed = false;
-    if (input.triggerReindex && context.indexManager) {
-      try {
-        await context.indexManager.removeFromIndex(input.path);
-        const newFile = context.vault.getAbstractFileByPath(input.new_path);
-        if (newFile instanceof TFile) {
-          await context.indexManager.indexFile(newFile);
+export async function prepare(input: Input, context: SkillContext): Promise<MutationPlan> {
+    if (!context.mutations)
+        throw new Error('宿主未提供文件变更服务');
+    return context.mutations.prepare('obsidian:move_note', input, () => buildMovePlan(context.mutations!, input.path, input.new_path), context);
+}
+export async function execute(input: Input, context: SkillContext): Promise<SkillResult<MoveResult>> {
+    const started = Date.now();
+    try {
+        const plan = context.mutationPlan || await prepare(input, context), result = await context.mutations!.apply(plan, context);
+        const moved = result.items?.some(item => item.kind === 'move' && item.outcome === 'success') || false;
+        let reindexed = false;
+        if (moved) {
+            context.readTracker?.clear();
+            context.readTracker?.markRead(input.new_path, Date.now());
         }
-        reindexed = true;
-      } catch (error) {
-        console.warn('[MoveNote] Failed to reindex:', error);
-      }
+        if (moved && input.triggerReindex && context.indexManager) {
+            try {
+                await context.indexManager.removeFromIndex(input.path);
+                for (const path of result.data?.filesModified || []) {
+                    const file = context.files.getAbstractFileByPath(path);
+                    if (file && 'extension' in file && file.extension === 'md')
+                        await context.indexManager.indexFile(file);
+                }
+                reindexed = true;
+            }
+            catch (error) {
+                console.warn('[MoveNote] Reindex failed', error);
+            }
+        }
+        return fromToolOutcome({ ...result, data: { path: input.path, new_path: input.new_path, name: input.new_path.split('/').pop()!, moved, linksUpdated: result.outcome === 'success', reindexed },
+            metadata: { executionTime: Date.now() - started, filesModified: result.data?.filesModified || [], verified: result.outcome === 'success' } });
     }
-
-    return {
-      success: true,
-      data: {
-        path: input.path,
-        new_path: input.new_path,
-        name: input.new_path.split('/').pop() || input.new_path,
-        moved: true,
-        linksUpdated: true,
-        reindexed
-      },
-      metadata: {
-        executionTime: Date.now() - startTime,
-        filesModified: [input.path]
-      }
-    };
-  } catch (error) {
-    console.error('[MoveNote] Error:', error);
-    return {
-      success: false,
-      error: (error as Error).message || 'Failed to move note'
-    };
-  }
-}
-
-async function ensureFolder(vault: import('obsidian').Vault, folderPath: string): Promise<void> {
-  const parts = folderPath.split('/');
-  let currentPath = '';
-
-  for (const part of parts) {
-    currentPath += (currentPath ? '/' : '') + part;
-    const folder = vault.getAbstractFileByPath(currentPath);
-
-    if (!folder) {
-      await vault.createFolder(currentPath);
+    catch (error) {
+        if (error instanceof RunBlocked || error instanceof RunSuspended)
+            throw error;
+        return { success: false, outcome: 'input_error', error: error instanceof Error ? error.message : String(error) };
     }
-  }
 }
-
-export function createSkill(context: SkillContext) {
-  return {
-    schema,
-    execute: (input: Input) => execute(input, context)
-  };
-}
+export function createSkill(context: SkillContext) { return { schema, execute: (input: Input) => execute(input, context) }; }

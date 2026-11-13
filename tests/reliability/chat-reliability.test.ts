@@ -14,6 +14,7 @@ import { ChatOrchestrator } from '../../src/chat/chat-orchestrator';
 import { ChatView } from '../../src/ui/chat-view';
 import { MemoryPlatformAdapter } from '../utils/memory-platform-adapter';
 import { AgentEvent } from '../../src/agents/agent-types';
+import { SummaryContextBuilder } from '../../src/context/summary-context-builder';
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -104,6 +105,7 @@ describe('Chat reliability regressions', () => {
 
   it('merges vault context into the provided UI context and propagates execution failure', async () => {
     const obj = Object.create(ChatOrchestrator.prototype) as any;
+    obj.options = {}; obj.activeQueries = 0;
     obj.defaultAgent = { getId: () => 'a' };
     obj.buildVaultSessionContextPayload = async () => 'vault context';
     const error = new Error('execution failed');
@@ -152,7 +154,7 @@ describe('Chat reliability regressions', () => {
     const { agent, provider, registry } = setup(); let active = 0, peak = 0;
     registry.register({ name: 'edit', namespace: 'obsidian', description: '', schema: z.object({}), metadata: { executionCategory: 'write' },
       execute: async () => { peak = Math.max(peak, ++active); await Promise.resolve(); active--; return { success: true, data: 'written' }; } });
-    provider.generateStreamWithSkills.mockResolvedValueOnce({ content: '', toolCalls: [1, 2].map(n => ({ id: String(n), name: 'invoke', arguments: JSON.stringify({ skill_name: 'obsidian:edit', params: {} }) })) });
+    provider.generateStreamWithSkills.mockResolvedValueOnce({ content: '', finishReason: 'tool_calls', toolCalls: [1, 2].map(n => ({ id: String(n), name: 'invoke', arguments: JSON.stringify({ skill_name: 'obsidian:edit', params: {} }) })) });
     const checkpoints: any[][] = [];
     const result = await agent.execute('q', { messages: [], sessionId: 's', onCheckpoint: async m => { checkpoints.push([...m]); } });
     expect(peak).toBe(1);
@@ -232,7 +234,7 @@ describe('Chat reliability regressions', () => {
 
   it('keeps the raw archive when the model receives a compacted context', async () => {
     const { agent, provider } = setup({ getContextWindow: () => 4096 });
-    (agent as any).compactor = { compact: vi.fn(async () => 'compacted decisions') };
+    (agent as any).contextBuilder = new SummaryContextBuilder({ compact: vi.fn(async () => 'compacted decisions') });
     const history = Array.from({ length: 10 }, (_, n) => ({ role: n % 2 ? 'assistant' : 'user', content: `original-${n} ${'x'.repeat(2000)}`, timestamp: n + 1 })) as any[];
     const result = await agent.execute('next', { messages: history, sessionId: 's' });
     expect(provider.generateStreamWithSkills.mock.calls[0][0][0].content).toContain('compacted decisions');
@@ -247,7 +249,7 @@ describe('Chat reliability regressions', () => {
     registry.register({ name: 'read', namespace: 'obsidian', description: '', schema: z.object({}), metadata: { executionCategory: 'read' }, execute: async () => {
       peak = Math.max(peak, ++active); await gate.promise; active--; return { success: true, data: 'read' };
     } });
-    provider.generateStreamWithSkills.mockResolvedValueOnce({ content: '', toolCalls: [1, 2, 3].map(n => ({ id: String(n), name: 'obsidian:read', arguments: '{}' })) });
+    provider.generateStreamWithSkills.mockResolvedValueOnce({ content: '', finishReason: 'tool_calls', toolCalls: [1, 2, 3].map(n => ({ id: String(n), name: 'obsidian:read', arguments: '{}' })) });
     const running = agent.execute('q', { messages: [], sessionId: 's' });
     await vi.waitFor(() => expect(active).toBe(2));
     expect(events.filter(e => e.type === 'tool:start')).toHaveLength(2);

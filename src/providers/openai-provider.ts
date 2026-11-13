@@ -44,13 +44,28 @@ export class OpenAIProvider implements AIProvider {
     try { return new URL(this.config.baseURL || 'https://api.openai.com').hostname === 'api.deepseek.com'; } catch { return false; }
   }
 
+  private stateIdentity(): string {
+    return JSON.stringify([this.id, this.config.baseURL, this.config.model, this.config.reasoningEffort || 'default']);
+  }
+
+  private readReasoningState(value: unknown): string | undefined {
+    if (!value || typeof value !== 'object') return undefined;
+    const state = value as Record<string, unknown>;
+    // Read legacy snapshots without making their vendor-specific shape a core contract.
+    if (state.providerId === this.id && typeof state.reasoningContent === 'string') return state.reasoningContent;
+    if (state.adapterId !== `deepseek:${this.id}`) return undefined;
+    if (state.codecVersion !== 1 || state.configFingerprint !== this.stateIdentity()) throw new Error('模型协议状态与当前模型配置不兼容，请使用原配置恢复或从已完成记录开始新运行。');
+    const payload = state.payload as { reasoningContent?: unknown } | undefined;
+    if (typeof payload?.reasoningContent !== 'string') throw new Error('模型协议状态损坏，禁止自动恢复');
+    return payload.reasoningContent;
+  }
+
   private reasoningPolicy(messages: ChatMessage[], withTools: boolean): { params: Record<string, unknown>; mode: string; legacy: boolean } {
     if (!this.isDeepSeek()) return { params: {}, mode: 'provider_default', legacy: false };
     const effort = this.config.reasoningEffort || 'default';
     if (effort === 'none') return { params: { thinking: { type: 'disabled' } }, mode: 'disabled', legacy: false };
     const legacy = withTools && messages.some(message => {
-      const state = message.metadata?.providerState as GenerateResponse['providerState'];
-      return message.role === 'assistant' && !message.metadata?.interrupted && (state?.providerId !== this.id || !state.reasoningContent);
+      return message.role === 'assistant' && !message.metadata?.interrupted && !this.readReasoningState(message.metadata?.providerState);
     });
     return { params: effort === 'default' ? {} : { thinking: { type: 'enabled' }, reasoning_effort: effort }, mode: effort === 'default' ? 'provider_default' : effort, legacy };
   }
@@ -60,8 +75,7 @@ export class OpenAIProvider implements AIProvider {
     const result: ChatMessage[] = [];
     for (let index = 0; index < messages.length; index++) {
       const message = messages[index];
-      const state = message.metadata?.providerState as GenerateResponse['providerState'];
-      if (message.role !== 'assistant' || state?.providerId === this.id && !!state.reasoningContent) { result.push(message); continue; }
+      if (message.role !== 'assistant' || !!this.readReasoningState(message.metadata?.providerState)) { result.push(message); continue; }
       const archive = [{ role: message.role, content: message.content, tool_calls: message.tool_calls } as Record<string, unknown>];
       const calls = new Set(message.tool_calls?.map(call => call.id));
       while (index + 1 < messages.length && messages[index + 1].role === 'tool' && calls.has(messages[index + 1].tool_call_id!)) {
@@ -74,7 +88,8 @@ export class OpenAIProvider implements AIProvider {
   }
 
   private reasoningState(content: unknown): GenerateResponse['providerState'] {
-    return this.isDeepSeek() && typeof content === 'string' ? { providerId: this.id, reasoningContent: content } : undefined;
+    return this.isDeepSeek() && typeof content === 'string' ? { adapterId: `deepseek:${this.id}`, codecVersion: 1,
+      configFingerprint: this.stateIdentity(), payload: { reasoningContent: content }, estimatedTokens: Math.ceil([...content].reduce((sum, char) => sum + (char.charCodeAt(0) > 127 ? 1 : 0.25), 0)) } : undefined;
   }
 
   async generate(prompt: string, options?: GenerateOptions): Promise<string> {
@@ -511,8 +526,8 @@ export class OpenAIProvider implements AIProvider {
     const result: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
     for (const msg of filtered) {
-      const state = msg.metadata?.providerState as GenerateResponse['providerState'];
-      const providerFields = this.isDeepSeek() && state?.providerId === this.id ? { reasoning_content: state.reasoningContent } : {};
+      const reasoning = this.isDeepSeek() ? this.readReasoningState(msg.metadata?.providerState) : undefined;
+      const providerFields = reasoning !== undefined ? { reasoning_content: reasoning } : {};
       if (msg.role === 'assistant' && msg.tool_calls) {
         // Register all declared tool_call IDs
         for (const tc of msg.tool_calls) {

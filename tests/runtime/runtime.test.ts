@@ -19,6 +19,10 @@ import { execute as read, schema as readSchema } from '../../skills/read-note/sc
 import { execute as write, schema as writeSchema } from '../../skills/write-note/scripts';
 import { validateArtifact, writeVerifiedArtifact } from '../../src/skills/verified-artifact';
 import { MemoryPlatformAdapter } from '../utils/memory-platform-adapter';
+import { adaptTestSkillContext } from '../utils/skill-context';
+import { IndexedObservationQuery } from '../../src/observability/observation-query';
+import { LegacyObservationReader } from '../../src/observability/legacy-reader';
+import { createRunAccess } from '../../src/runtime/run-access';
 
 function environment(platform = new MemoryPlatformAdapter()) {
   const file = (path: string) => {
@@ -29,7 +33,7 @@ function environment(platform = new MemoryPlatformAdapter()) {
     create: async (path: string, text: string) => { await platform.write(path, text); return file(path)!; },
     modify: async (f: any, text: string) => { await platform.write(f.path,text); }, createFolder: async (path: string) => platform.mkdir(path) };
   const plugin = { platform, settings: {}, loadData: async () => ({}), saveData: async () => {}, app: { vault } } as any;
-  return { platform, vault, plugin, context: { vault, plugin } as any };
+  return { platform, vault, plugin, context: adaptTestSkillContext({ vault, plugin }) };
 }
 function setup(env = environment(), providerOverride: Record<string, unknown> = {}) {
   const bus = new EventBus(), registry = new SkillRegistry(), manager = new ChatManager(env.plugin);
@@ -140,12 +144,17 @@ describe('Durable run execution', () => {
   it('includes new run failures in the global diagnostic command without a legacy log file',async()=>{
     const s=setup();s.provider.generateStreamWithSkills.mockRejectedValueOnce(new Error('new runtime failure'));const id=await start(s);
     s.plugin.runController=s.runtime;s.plugin.settings.aiProviders=[];
+    s.plugin.runAccess=createRunAccess(s.runtime);
+    s.plugin.observationQuery=new IndexedObservationQuery(s.plugin.runAccess,{
+      store:{folder:'logs',health:{writeError:'',readError:'',dropped:0,malformed:0}},snapshot:()=>[],query:async()=>[],subscribe:()=>()=>{},sanitize:(event:any)=>event,
+    } as any,new LegacyObservationReader(s.platform));
     s.plugin.app.workspace={getLeaf:()=>({openFile:async()=>{}})};
     (s.vault as any).adapter={exists:(path:string)=>s.platform.exists(path),read:(path:string)=>s.platform.read(path),write:(path:string,text:string)=>s.platform.write(path,text)} as any;
     await DiagnosticsExporter.generateAndOpenDiagnosticsLog(s.plugin);
     const report=await s.platform.read('Mentat Debug Log.md');
     expect(report).toContain(id);expect(report).toContain('new runtime failure');
-    expect(report).toContain('1 次报错');
+    expect(report).toContain('不作为独立故障次数');
+    s.plugin.observationQuery.dispose();
   });
 
   it('fails closed before model execution when persisting the first run fails', async()=>{
@@ -261,12 +270,15 @@ describe('Model context and verified artifacts',()=>{
     const e=environment();const events:any[]=[];
     const context={...e.context,operationId:'one',runtime:{runId:'run-test',record:async(...args:any[])=>{events.push(args);}}};
     const content=JSON.stringify({nodes:[{id:'a',type:'text',text:'verified',x:0,y:0,width:100,height:50}],edges:[]});
-    const result=await write(writeSchema.parse({path:'one.canvas',content}),context);
+    const parameters=writeSchema.parse({path:'one.canvas',content});
+    const result=await write(parameters,context);
     expect(result.success).toBe(true);expect(await e.platform.read('one.canvas')).toBe(content);
-    expect(events.map(e=>e[0])).toEqual(['artifact:prepared','artifact:verified']);
+    expect(events.map(e=>e[0])).toEqual(['mutation:prepared','artifact:verified']);
+    expect(events[0][1].planId).toBe(events[1][1].planId);
     const next=await write(writeSchema.parse({path:'two.canvas',content:'broken'}),{...context,operationId:'two'});
     expect(next.success).toBe(false);expect(await e.platform.read('one.canvas')).toBe(content);
-    expect([...e.platform.files.keys()].some(path=>path.includes('/artifacts/') && path.endsWith('.json'))).toBe(true);
+    const retained=await context.mutations!.prepare('obsidian:write_note',parameters,async()=>{throw new Error('The committed plan must be reused');},context);
+    expect(retained.id).toBe(events[0][1].planId);
   });
   it('does not report success if reading back a written file fails verification',async()=>{
     const e=environment();e.vault.read=async()=> 'changed concurrently';

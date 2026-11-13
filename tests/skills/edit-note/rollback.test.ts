@@ -1,3 +1,4 @@
+import { adaptTestSkillContext } from '../../utils/skill-context';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execute, schema } from '../../../skills/write-note/scripts/index';
 import { SkillContext } from '../../../src/skills/skill-types';
@@ -62,7 +63,7 @@ describe('Write-Note Rollback & Linter Guard Integration', () => {
       content: '# Valid Markdown\n\nInline math $x$ and code block:\n```python\nprint("Valid")\n```'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(true);
     expect(mockFiles.get('Research/valid-note.md')).toContain('Inline math $x$');
@@ -74,7 +75,7 @@ describe('Write-Note Rollback & Linter Guard Integration', () => {
       content: '# Invalid Markdown\n\nUnclosed math:\n$$\nx^2 + y^2\n# Missing closing double dollar'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Note Linter Validation Failed!');
@@ -96,7 +97,7 @@ describe('Write-Note Rollback & Linter Guard Integration', () => {
       append: true
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Note Linter Validation Failed!');

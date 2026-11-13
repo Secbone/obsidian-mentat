@@ -1,25 +1,12 @@
-import { renderObservationHealth } from '../observability/run-projection';
-import { projectRunIncidents, renderRunFacts } from './run-diagnostics';
+import { renderObservationEvents, renderObservationHealth } from '../observability/report';
+import { renderRunFacts } from './run-diagnostics';
 import { Notice, TFile } from 'obsidian';
 import MentatPlugin from '../main';
 import { ChatManager } from '../chat/chat-manager';
 import { ChatMessage } from '../types';
 import { parseJson } from '../utils/json-healer';
-import { redactDiagnostics } from './vault-diagnostics-logger';
+import { redactDiagnostics } from '../observability/redaction';
 import { TaskType } from '../types';
-
-interface DiagnosticLogEntry {
-  timestamp: number;
-  toolName: string;
-  errorMessage: string;
-  strategy: string;
-  originalArgs: string;
-  repairedArgs?: string;
-  success?: boolean;
-  sessionId?: string;
-  runId?: string;
-  details?: Record<string, unknown>;
-}
 
 export class DiagnosticsExporter {
   /**
@@ -58,12 +45,12 @@ export class DiagnosticsExporter {
       const definitions = plugin.chatOrchestrator?.getSkillInvocationContext()?.getToolDefinitions(plugin.chatOrchestrator.getSkillRegistry(), providerType === 'anthropic' ? 'anthropic' : 'openai');
       const directCallCount = definitions ? definitions.filter(tool => tool.name !== 'spec' && tool.name !== 'invoke').length : directCallSkills.length;
 
-      // 1. Resolve and parse diagnostic logs (.mentat/diagnostics.jsonl)
-      const logWarnings: string[] = [...(plugin.runController?.store.warnings || [])];
-      const legacyLogs = await DiagnosticsExporter.retrieveIncidentLogs(plugin, startTime, endTime, sessionId, logWarnings) as DiagnosticLogEntry[];
-      const runs = plugin.runController?.list(sessionId) || [];
-      const runIds = new Set(runs.map(r => r.id));
-      const logs = [...legacyLogs.filter(log => !log.runId || !runIds.has(log.runId)), ...projectRunIncidents(runs)];
+      const query=plugin.observationQuery;
+      await query.refresh();
+      const logWarnings=query.warnings;
+      const runs=plugin.runAccess.list(sessionId);
+      const logs=query.all({sessionId,includeUnscoped:true,errorsOnly:true,
+        since:startTime > 0 ? startTime:endTime-3600000,until:endTime});
 
       // 2. Generate Mermaid Sequence Diagram
       const mermaidDiagram = DiagnosticsExporter.generateMermaidDiagram(history);
@@ -108,8 +95,8 @@ export class DiagnosticsExporter {
 
       markdownContent += `---\n\n`;
 
-      markdownContent += await renderObservationHealth(plugin.observer, sessionId);
-      markdownContent += renderRunFacts(runs);
+      markdownContent += renderObservationHealth(query, sessionId);
+      markdownContent += renderRunFacts(runs,query);
       // ⚠️ Diagnostics logs section
       markdownContent += `## ⚠️ 执行异常与交互结果 (故障排查)\n\n`;
       if (!history.length) markdownContent += '> [!WARNING]\n> 缺少已保存的会话历史；此报告不能还原完整 API 请求。\n\n';
@@ -120,25 +107,8 @@ export class DiagnosticsExporter {
         markdownContent += `> [!IMPORTANT]\n`;
         markdownContent += `> 以下是本会话期间捕获的运行时报错及参数解析失败数据。这些信息有助于大模型精准定位并修正 JSON 参数错误。\n\n`;
 
-        logs.forEach((rawLog, idx) => {
-          const log = rawLog as Record<string, unknown>;
-          markdownContent += `### 🚨 事件 ${idx + 1}: ${log.toolName} 调用异常\n`;
-          markdownContent += `* **触发时间**: \`${new Date(log.timestamp as number).toLocaleString()}\`\n`;
-          markdownContent += `* **应用策略**: \`${log.strategy || 'Strict'}\`\n`;
-          markdownContent += `* **异常信息**: \`${log.errorMessage}\`\n`;
-          if (log.sessionId) markdownContent += `* **会话 / 执行**: \`${log.sessionId}\` / \`${log.runId || '未记录'}\`\n`;
-          if (log.details) markdownContent += `\n\`\`\`json\n${JSON.stringify(log.details, null, 2)}\n\`\`\`\n\n`;
-          markdownContent += `* **工具参数（如已记录）**:\n`;
-          markdownContent += `\`\`\`json\n`;
-          markdownContent += `${log.originalArgs}\n`;
-          markdownContent += `\`\`\`\n\n`;
-          if (log.repairedArgs) {
-            markdownContent += `* **历史尝试修复参数 (Repaired Backup)**:\n`;
-            markdownContent += `\`\`\`json\n`;
-            markdownContent += `${log.repairedArgs}\n`;
-            markdownContent += `\`\`\`\n\n`;
-          }
-        });
+        markdownContent+=renderObservationEvents(logs);
+
       }
 
       markdownContent += `---\n\n`;
@@ -369,46 +339,6 @@ export class DiagnosticsExporter {
   }
 
   /**
-   * Reads the diagnostics.jsonl file inside the vault, parses entries, 
-   * and extracts logs whose timestamps fall within the session.
-   */
-  private static async retrieveIncidentLogs(
-    plugin: MentatPlugin,
-    startTime: number,
-    endTime: number,
-    sessionId?: string,
-    warnings: string[] = []
-  ): Promise<unknown[]> {
-    const logs: unknown[] = [];
-    try {
-      const adapter = plugin.app.vault.adapter;
-      const logPath = '.mentat/diagnostics.jsonl';
-      
-      if (await adapter.exists(logPath)) {
-        const rawContent = await adapter.read(logPath);
-        const lines = rawContent.split('\n').filter(Boolean);
-        for (const line of lines) {
-          try {
-            const entry = parseJson<DiagnosticLogEntry>(line);
-            const startLimit = startTime > 0 ? startTime : Date.now() - 3600000;
-            const ts = entry.timestamp as number;
-            const entrySession = (entry as unknown as { sessionId?: string }).sessionId;
-            if ((!entrySession || !sessionId || entrySession === sessionId) && ts >= startLimit && ts <= endTime) {
-              logs.push(entry);
-            }
-          } catch {
-            warnings.push('存在损坏的日志行，已跳过');
-          }
-        }
-      }
-    } catch (e) {
-      warnings.push(e instanceof Error ? e.message : String(e));
-      console.warn('[DiagnosticsExporter] Failed to retrieve incident logs:', e);
-    }
-    return logs;
-  }
-
-  /**
    * Generates a Mermaid sequence diagram string from conversation history.
    */
   private static generateMermaidDiagram(messages: ChatMessage[]): string {
@@ -524,133 +454,31 @@ export class DiagnosticsExporter {
    * Extracted from main.ts callback to satisfy SRP.
    */
   static async generateAndOpenDiagnosticsLog(plugin: MentatPlugin): Promise<void> {
-    const adapter = plugin.app.vault.adapter;
-    const logPath = '.mentat/diagnostics.jsonl';
-    
     try {
-      const runs = plugin.runController?.list() || [];
-      const runIds = new Set(runs.map(run => run.id));
-      const legacy = await adapter.exists(logPath) ? await adapter.read(logPath) : '';
-      const legacyLines = legacy.split('\n').filter(line => {
-        if (!line.trim()) return false;
-        try { const entry = parseJson<DiagnosticLogEntry>(line); return !entry.runId || !runIds.has(entry.runId); } catch { return true; }
-      });
-      const current = projectRunIncidents(runs).sort((a,b) => a.timestamp-b.timestamp);
-      const content = [...legacyLines, ...current.map(entry => JSON.stringify(entry))].join('\n');
-      const debugNotePath = 'Mentat Debug Log.md';
-      
-      // Calculate 7-Day Performance & Failure Analytics
-      const allLines = content.trim().split('\n');
-      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      
-      let totalIncidents = 0;
-      let malformedLines = 0;
-      const toolFailures: Record<string, number> = {};
-      const dailyIncidents: Record<string, number> = {};
-      
-      // Prepopulate daily dates for the last 7 days
-      for (let i = 6; i >= 0; i--) {
-        const dateKey = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toLocaleDateString();
-        dailyIncidents[dateKey] = 0;
-      }
-      
-      allLines.forEach(line => {
-        if (!line.trim()) return;
-        try {
-          const entry = parseJson<DiagnosticLogEntry>(line);
-          if (entry.timestamp >= sevenDaysAgo && entry.success !== true) {
-            totalIncidents++;
-            toolFailures[entry.toolName] = (toolFailures[entry.toolName] || 0) + 1;
-            const dateKey = new Date(entry.timestamp).toLocaleDateString();
-            if (dailyIncidents[dateKey] !== undefined) {
-              dailyIncidents[dateKey]++;
-            }
-          }
-        } catch (_e) {
-          malformedLines++;
-        }
-      });
-      
-      const sortedFailures = Object.entries(toolFailures)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5);
-
-      const lines = content.trim().split('\n').reverse().slice(0, 50); // Get latest 50 incidents
-      let markdownContent = `# Mentat Diagnostics & Debug Log\n\n`;
-      markdownContent += await renderObservationHealth(plugin.observer);
-      markdownContent += renderRunFacts(runs.slice(0, 20));
-      if (plugin.runController?.store.warnings.length) markdownContent += `> [!WARNING]\n> ${plugin.runController.store.warnings.join('；')}\n\n`;
-      if (legacyLines.length) markdownContent += '> 旧版日志缺少完整操作标识，可能包含多层重复记录；新版运行按操作归并。\n\n';
-      if (malformedLines) markdownContent += `> [!WARNING]\n> ${malformedLines} 条日志无法解析，统计不完整。\n\n`;
-      
-      // Render 7-Day Cross-Run Performance Analytics Card
-      markdownContent += `## 📊 7天系统异常走势与工具故障分析 (7-Day Cross-Run Analytics)\n\n`;
-      markdownContent += `> [!IMPORTANT]\n`;
-      markdownContent += `> 以下是过去 7 天内智能体自动捕获的运行时解析异常与工具报错分析。这可帮助您找出故障率最高的技能，进而优化配置。\n\n`;
-      
-      markdownContent += `| 诊断指标 | 7天累计统计值 |\n`;
-      markdownContent += `| :--- | :--- |\n`;
-      markdownContent += `| **7天内累计解析异常 (Total Incidents)** | \`${totalIncidents} 次报错\` |\n`;
-      markdownContent += `| **首要故障技能 (Top Failure Tool)** | \`${sortedFailures[0] ? `${sortedFailures[0][0]} (${sortedFailures[0][1]}次)` : '无'}\` |\n\n`;
-      
-      if (sortedFailures.length > 0) {
-        markdownContent += `### 🚨 工具故障频次排名前五 (Top 5 Failed Tools)\n`;
-        sortedFailures.forEach(([tool, count]) => {
-          markdownContent += `* **\`${tool}\`**: \`${count} 次报错\`\n`;
-        });
-        markdownContent += `\n`;
-      }
-      
-      markdownContent += `### 📈 每日解析异常发生趋势 (Daily Incidents Trend)\n`;
-      markdownContent += `| 日期 | 解析异常频次 |\n`;
-      markdownContent += `| :--- | :--- |\n`;
-      Object.entries(dailyIncidents).forEach(([date, count]) => {
-        markdownContent += `| ${date} | \`${count} 次\` |\n`;
-      });
-      markdownContent += `\n---\n\n`;
-      
-      markdownContent += `## 💬 最新事件日志明细 (Latest Incidents)\n\n`;
-      markdownContent += `Showing the latest ${lines.length} incidents (newest first). The complete log is saved at \`${logPath}\`.\n\n`;
-      
-      if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
-        markdownContent += `未找到事件记录；这不代表所有执行正常。\n`;
-      } else {
-        lines.forEach((line, index) => {
-          try {
-            const entry = parseJson<DiagnosticLogEntry>(line);
-            const timeStr = new Date(entry.timestamp).toLocaleString();
-            markdownContent += `## Incident #${lines.length - index} [${timeStr}]\n`;
-            markdownContent += `- **Tool / Skill**: \`${entry.toolName}\`\n`;
-            markdownContent += `- **Error Message**: *${entry.errorMessage}*\n`;
-            markdownContent += `- **Recovery Strategy**: *${entry.strategy}*\n`;
-            if (entry.details) markdownContent += `\n\`\`\`json\n${JSON.stringify(entry.details, null, 2)}\n\`\`\`\n`;
-            markdownContent += `\n### Original Arguments (Unparsed)\n\`\`\`json\n${entry.originalArgs}\n\`\`\`\n`;
-            if (entry.repairedArgs) {
-              markdownContent += `\n### Repaired & Recovered Arguments\n\`\`\`json\n${entry.repairedArgs}\n\`\`\`\n`;
-            }
-            markdownContent += `\n---\n\n`;
-          } catch {
-            // Ignore malformed lines
-          }
-        });
-      }
-
-      // Write to a temporary markdown file
-      await adapter.write(debugNotePath, redactDiagnostics(markdownContent, [
-        ...plugin.settings.aiProviders.map(p => p.apiKey || ''), plugin.settings.browserlessApiKey || '', plugin.settings.braveSearchApiKey || '',
+      const query=plugin.observationQuery;
+      await query.refresh();
+      const runs=plugin.runAccess.list(),events=query.all({errorsOnly:true,since:Date.now()-7*24*60*60*1000});
+      const components=new Map<string,number>();
+      for (const event of events) components.set(event.component,(components.get(event.component) || 0)+1);
+      let markdownContent='# Mentat Diagnostics & Debug Log\n\n';
+      markdownContent+=renderObservationHealth(query);
+      markdownContent+=renderRunFacts(runs.slice(0,20),query);
+      markdownContent+='## 近 7 天异常记录\n\n';
+      markdownContent+=`匹配记录 ${events.length} 条。这些是异常日志条数，同一故障可能被多个边界记录，不作为独立故障次数。旧日志没有完整关联 ID，单独标记为 legacy。\n\n`;
+      markdownContent+='| 模块 | 异常记录数 |\n| --- | --- |\n';
+      for (const [component,count] of [...components].sort((a,b)=>b[1]-a[1]).slice(0,10)) markdownContent+=`| ${component} | ${count} |\n`;
+      markdownContent+='\n## 最近异常详情（最多 50 条）\n\n';
+      markdownContent+=renderObservationEvents(query.page({errorsOnly:true},50).events);
+      const path='Mentat Debug Log.md';
+      await plugin.app.vault.adapter.write(path,redactDiagnostics(markdownContent,[
+        ...plugin.settings.aiProviders.map(provider=>provider.apiKey || ''),plugin.settings.browserlessApiKey || '',plugin.settings.braveSearchApiKey || '',
       ]) as string);
-      
-      // Open the note in workspace
-      const tFile = plugin.app.vault.getAbstractFileByPath(debugNotePath);
-      if (tFile && tFile instanceof TFile) {
-        await plugin.app.workspace.getLeaf().openFile(tFile);
-        new Notice('Diagnostics Log opened successfully');
-      } else {
-        new Notice('Log compiled. Please open "Mentat Debug Log.md" in your vault root.');
-      }
-    } catch (err: unknown) {
-      plugin.observer?.error('diagnostics:global_export:failed', err, { component: 'diagnostics' });
-      new Notice(`Failed to load diagnostics: ${err instanceof Error ? err.message : String(err)}`);
+      const file=plugin.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile) await plugin.app.workspace.getLeaf().openFile(file);
+      else new Notice('日志已保存，请在库根目录打开 Mentat Debug Log.md。');
+    } catch (error) {
+      plugin.observer?.error('diagnostics:global_export:failed',error,{component:'diagnostics'});
+      new Notice(`Failed to load diagnostics: ${error instanceof Error ? error.message:String(error)}`);
     }
   }
 }

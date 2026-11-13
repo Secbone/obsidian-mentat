@@ -1,8 +1,9 @@
-import type { ChatMessage, GenerateResponse } from '../types';
+import type { ChatMessage } from '../contracts/conversation';
+import type { GenerateResponse } from '../contracts/model';
 import type { SkillResult } from '../skills/skill-types';
 
 export type RunStatus = 'running' | 'waiting_for_user' | 'waiting_for_approval' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
-export type OutcomeKind = 'success' | 'input_error' | 'denied' | 'expired' | 'cancelled' | 'timeout' | 'unknown' | 'failure';
+export type OutcomeKind = 'success' | 'partial' | 'input_error' | 'denied' | 'expired' | 'cancelled' | 'timeout' | 'unknown' | 'failure';
 export interface InteractionRequest {
   id: string;
   operationId: string;
@@ -31,6 +32,7 @@ export interface RunEvent {
 }
 export interface RunRecord {
   version: 1;
+  revision?: number;
   id: string;
   sessionId: string;
   prompt: string;
@@ -51,6 +53,26 @@ export interface RunRecord {
   error?: string;
   partial?: string;
   instructions?: Array<{ id: string; text: string; status: 'queued' | 'consumed' }>;
+  contextSnapshot?: ContextSnapshot;
+  childContextSnapshots?: Record<string, ContextSnapshot>;
+  messageBase?: {runId:string;count:number;digest:string};
+  messageEncoding?: 'delta-v1';
+  engineBinding?: EngineBinding;
+  engineCheckpoint?: EngineCheckpoint;
+  childEngineBindings?: Record<string,EngineBinding>;
+  childEngineCheckpoints?: Record<string,EngineCheckpoint>;
+}
+export interface EngineBinding {id:string;version:string;codecVersion:number;}
+export interface EngineCheckpoint {binding:EngineBinding;state:unknown;transcriptLength:number;}
+export interface ContextSnapshot {
+  version: 1;
+  strategyId: string;
+  providerId: string;
+  providerBinding?: string;
+  sourceMessageCount: number;
+  sourceDigest: string;
+  messages: ChatMessage[];
+  estimatedTokens: number;
 }
 export interface RunRuntime {
   readonly runId: string;
@@ -67,6 +89,11 @@ export interface RunRuntime {
   takeInstructions(): Promise<Array<{ id: string; text: string }>>;
   ackInstructions(ids: string[]): Promise<void>;
   trackOperation?(id: string, completion: Promise<unknown>): void;
+  getContextSnapshot?(): ContextSnapshot | undefined;
+  saveContextSnapshot?(snapshot: ContextSnapshot): Promise<void>;
+  bindEngine?(binding:EngineBinding):Promise<void>;
+  getEngineCheckpoint?():EngineCheckpoint|undefined;
+  saveEngineCheckpoint?(checkpoint:EngineCheckpoint):Promise<void>;
 }
 export class RunSuspended extends Error {
   constructor(public interaction: InteractionRequest) { super('等待用户操作'); this.name = 'RunSuspended'; }

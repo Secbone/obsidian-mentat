@@ -1,3 +1,4 @@
+import { adaptTestSkillContext } from '../../utils/skill-context';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execute, schema } from '../../../skills/run-command/scripts/index';
 import { SkillContext } from '../../../src/skills/skill-types';
@@ -24,7 +25,7 @@ describe('Run-Command Skill', () => {
       command: 'rm -rf /some/file'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('blocked high-risk keyword \'rm\'');
@@ -35,21 +36,21 @@ describe('Run-Command Skill', () => {
       command: 'sudo apt-get install git'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('blocked high-risk keyword \'sudo\'');
   });
 
-  it('should reject vault sandbox escape attempts', async () => {
+  it('should reject a working directory outside the vault', async () => {
     const input = schema.parse({
       command: 'ls -la',
       cwd: '../../outside-vault'
     });
 
-    const result = await execute(input, mockContext);
+    const result = await execute(input, adaptTestSkillContext(mockContext));
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Sandbox Violation');
+    expect(result.error).toContain('outside the vault root');
   });
 });
