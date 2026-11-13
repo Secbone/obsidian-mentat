@@ -179,7 +179,7 @@ describe('Chat reliability regressions', () => {
     vi.useFakeTimers();
     const view = Object.create(ChatView.prototype) as any;
     view.chatManager = {getSessionInfo:() => ({sessionId:'s'})};
-    view.plugin = {runController:{list:() => [{id:'parent'}]}};
+    view.runs = {list:() => [{id:'parent'}]};
     view.render = vi.fn();
     view.handleRuntimeEvent({type:'agent:end',messages:[],agentId:'child',sessionId:'s',runId:'child'});
     view.handleRuntimeEvent({type:'agent:end',messages:[],agentId:'default-chat-agent',sessionId:'s',runId:'old'});
@@ -204,7 +204,7 @@ describe('Chat reliability regressions', () => {
     });
     const runtime = new RunController(new RunStore(platform), bus, manager, async (_q, context) => { await agent.execute(_q, context); });
     await runtime.initialize();
-    view.plugin.runController = runtime;
+    view.runs = runtime;
     view.runtimeUnsubscribe = bus.on('*', (event: AgentEvent) => view.handleRuntimeEvent(event));
     await view.handleSend();
     await runtime.wait(runtime.list()[0].id);

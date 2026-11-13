@@ -137,7 +137,7 @@ export class SkillExecutor {
       // Check permissions (skills declare required permissions, user settings can restrict)
       const declaredPermissions = skill.metadata?.permissions;
       if (declaredPermissions && declaredPermissions.length > 0) {
-        const skillConfig = this.context.plugin?.settings?.skillConfigurations?.[fullName];
+        const skillConfig = (this.context.settings ?? this.context.plugin?.settings)?.skillConfigurations?.[fullName];
         const allowedPermissions = skillConfig?.allowedPermissions as string[] | undefined;
         if (allowedPermissions) {
           // User has explicitly allowed only certain permissions
@@ -157,7 +157,7 @@ export class SkillExecutor {
       }
 
       // Check if confirmation is required (settings override takes precedence)
-      const skillConfig = this.context.plugin?.settings?.skillConfigurations?.[fullName];
+      const skillConfig = (this.context.settings ?? this.context.plugin?.settings)?.skillConfigurations?.[fullName];
       const requiresConfirmation = skillConfig?.requireConfirmation !== undefined
         ? skillConfig.requireConfirmation
         : !!skill.metadata?.requiresConfirmation;

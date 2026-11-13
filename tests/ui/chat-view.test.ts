@@ -52,6 +52,6 @@ describe('ChatView UI Smoke Test', () => {
     const mockLeaf = { app: mockPlugin.app } as any;
 
     // Constructor should not throw
-    expect(() => new ChatView(mockLeaf, mockPlugin)).not.toThrow();
+    expect(() => new ChatView(mockLeaf, mockPlugin,{} as any,{} as any)).not.toThrow();
   });
 });

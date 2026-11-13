@@ -4,86 +4,42 @@ import type { Observer } from '../observability/observer';
 import { AIProvider } from '../types';
 import { TaskType } from '../types';
 import { MentatSettings } from '../settings/settings';
-import { OpenAIProvider } from './openai-provider';
-import { AnthropicProvider } from './anthropic-provider';
-import { OllamaProvider } from './ollama-provider';
+import { BUILTIN_PROVIDER_FACTORIES, type ProviderFactories } from './provider-factories';
 
 export class AIRouter {
   private providers: Map<string, AIProvider> = new Map();
   private settings: MentatSettings;
+  private embeddingProviders = new Set<string>();
+  private factories: ProviderFactories;
+  private initializationErrors: unknown[] = [];
 
-  constructor(settings: MentatSettings, private observer?: Observer) {
-    this.settings = settings;
+  constructor(settings: MentatSettings, private observer?: Observer, factories: ProviderFactories = BUILTIN_PROVIDER_FACTORIES) {
+    this.settings = structuredClone(settings);
+    this.factories = Object.freeze(Object.fromEntries(Object.entries(factories).map(([type, factory]) => [type, Object.freeze({ ...factory })])));
     this.initializeProviders();
   }
 
   private initializeProviders(): void {
     this.providers.clear();
+    this.embeddingProviders.clear();
 
     for (const config of this.settings.aiProviders) {
       if (!config.enabled) continue;
 
       try {
-        let provider: AIProvider;
-
-        switch (config.type) {
-          case 'openai':
-          case 'anthropic':
-            if (!config.apiKey) {
-              this.observer?.event('provider:skipped', { component: 'provider', level: 'warn', attributes: { providerId: config.id, reason: 'missing_api_key' } });
-              continue;
-            }
-            break;
+        const factory = this.factories[config.type];
+        if (!factory || factory.requiresApiKey && !config.apiKey) {
+          this.observer?.event('provider:skipped', { component: 'provider', level: 'warn', attributes: { providerId: config.id,
+            reason: factory ? 'missing_api_key' : 'missing_factory' } });
+          continue;
         }
-
-        switch (config.type) {
-          case 'openai':
-            provider = new OpenAIProvider({
-              id: config.id,
-              apiKey: config.apiKey!,
-              baseURL: config.baseURL || 'https://api.openai.com/v1',
-              model: config.model,
-              embeddingModel: config.embeddingModel,
-              temperature: config.temperature,
-              maxTokens: config.maxTokens,
-              reasoningEffort: config.reasoningEffort,
-              contextWindow: config.contextWindow,
-              compactionThreshold: config.compactionThreshold,
-            });
-            break;
-
-          case 'anthropic':
-            provider = new AnthropicProvider({
-              id: config.id,
-              apiKey: config.apiKey!,
-              model: config.model,
-              temperature: config.temperature,
-              maxTokens: config.maxTokens,
-              contextWindow: config.contextWindow,
-              compactionThreshold: config.compactionThreshold,
-            });
-            break;
-
-          case 'ollama':
-            provider = new OllamaProvider({
-              id: config.id,
-              baseURL: config.baseURL || 'http://localhost:11434',
-              model: config.model,
-              embeddingModel: config.embeddingModel,
-              temperature: config.temperature,
-              maxTokens: config.maxTokens,
-              contextWindow: config.contextWindow,
-              compactionThreshold: config.compactionThreshold,
-            });
-            break;
-
-          default:
-            console.warn(`Unknown provider type: ${config.type}`);
-            continue;
-        }
-
+        const provider = factory.create({ ...config });
+        if (provider.id !== config.id) throw new Error('Provider factory returned a different instance ID');
+        const canEmbed = factory.canEmbed(config);
         this.providers.set(config.id, provider);
+        if (canEmbed) this.embeddingProviders.add(config.id);
       } catch (error) {
+        this.initializationErrors.push(error);
         this.observer?.error('provider:initialize:failed', error, { component: 'provider', attributes: { providerId: config.id } });
       }
     }
@@ -94,8 +50,7 @@ export class AIRouter {
    */
   async getProvider(taskType: TaskType): Promise<AIProvider | null> {
     const capable = (provider: AIProvider | undefined): provider is AIProvider => !!provider && (
-      taskType !== TaskType.EMBEDDING || this.settings.aiProviders.some(config => config.id === provider.id &&
-        (config.type === 'openai' || config.type === 'ollama') && !!config.embeddingModel?.trim())
+      taskType !== TaskType.EMBEDDING || this.embeddingProviders.has(provider.id)
     );
     // 1. Try task-specific routing
     const taskProviderId = this.settings.taskRouting[taskType];
@@ -148,8 +103,17 @@ export class AIRouter {
    * Refresh providers after settings change
    */
   refresh(settings: MentatSettings): void {
-    this.settings = settings;
-    this.initializeProviders();
+    const candidate = this.prepare(settings);
+    this.settings = candidate.settings;
+    this.providers = candidate.providers;
+    this.embeddingProviders = candidate.embeddingProviders;
+  }
+
+  /** Build a complete candidate without changing the router used by existing runs. */
+  prepare(settings: MentatSettings): AIRouter {
+    const candidate = new AIRouter(settings, this.observer, this.factories);
+    if (candidate.initializationErrors.length) throw new Error('模型实现初始化失败，当前路由保持不变。', { cause: candidate.initializationErrors[0] });
+    return candidate;
   }
 
   /**

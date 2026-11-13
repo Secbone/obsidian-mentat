@@ -10,6 +10,7 @@ import { Plugin, Notice } from 'obsidian';
 import { MentatSettings, DEFAULT_SETTINGS } from './settings/settings';
 import { SettingsTab } from './settings/settings-tab';
 import { AIRouter } from './providers/ai-router';
+import { BUILTIN_PROVIDER_FACTORIES } from './providers/provider-factories';
 import { OpenCodeIntegration } from './providers/opencode-integration';
 import { IndexManager } from './indexing/index-manager';
 import { ChatView, CHAT_VIEW_TYPE } from './ui/chat-view';
@@ -20,6 +21,15 @@ import { TaskType } from './types';
 import { ObsidianAdapter } from './utils/obsidian-adapter';
 import { DiagnosticsExporter } from './diagnostics/diagnostics-exporter';
 import { initializeDraftStore, type DraftStore } from './storage/draft-store';
+import type { RunAccess } from './contracts/run-access';
+import { createRunAccess } from './runtime/run-access';
+
+const presentationSettings = new Set(['chatTheme','terminalPreset','sendWithCmdEnter','diagnosticsFolder','drafts']);
+const executionSettings = (settings: MentatSettings) => JSON.stringify(Object.fromEntries(Object.entries(settings).filter(([key]) => !presentationSettings.has(key))));
+function replaceSettings(target: MentatSettings, source: MentatSettings): void {
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target,structuredClone(source));
+}
 
 export default class MentatPlugin extends Plugin {
   observer!: Observer;
@@ -31,6 +41,7 @@ export default class MentatPlugin extends Plugin {
   chatOrchestrator!: ChatOrchestrator;
   chatManager!: ChatManager;
   runController!: RunController;
+  runAccess!: RunAccess;
   agentManager!: AgentManager;
   platform!: ObsidianAdapter;
   extensionManager!: ExtensionManager;
@@ -39,6 +50,8 @@ export default class MentatPlugin extends Plugin {
   // Track previous values for selective save-settings updates
   private prevTheme: string = '';
   private prevPreset: string = '';
+  private savedSettings?: MentatSettings;
+  private settingsWrite: Promise<void> = Promise.resolve();
 
   async onload() {
     this.platform = new ObsidianAdapter(this);
@@ -67,12 +80,13 @@ export default class MentatPlugin extends Plugin {
       });
     this.draftStore = drafts.store;
     if (drafts.migrated) delete (this.settings as unknown as Record<string, unknown>).drafts;
+    this.savedSettings = structuredClone(this.settings);
 
     // Initialize platform adapter
     const platform = this.platform;
 
     // Initialize AI Router
-    this.aiRouter = new AIRouter(this.settings, this.observer);
+    this.aiRouter = new AIRouter(this.settings, this.observer, BUILTIN_PROVIDER_FACTORIES);
 
     // Initialize Index Manager
     this.indexManager = new IndexManager(platform, () => this.aiRouter.getProvider(TaskType.EMBEDDING), this.observer);
@@ -82,7 +96,8 @@ export default class MentatPlugin extends Plugin {
     this.eventBus = new EventBus((error, type) => this.observer.error('event:handler:failed', error, { component: 'events', attributes: { eventType: type } }));
 
     // Initialize Chat Orchestrator (may fail gracefully if no provider configured)
-    this.chatOrchestrator = new ChatOrchestrator(platform, this.settings, this.aiRouter, this.indexManager, this.eventBus);
+    this.chatOrchestrator = new ChatOrchestrator(platform, this.settings, this.aiRouter, this.indexManager, this.eventBus,
+      { canReconfigure: () => !this.runController?.hasUnsettledWork(), copyExtensionSkillsTo: registry => this.extensionManager?.copySkillsTo(registry) });
     try {
       await this.chatOrchestrator.initialize();
     } catch (error: unknown) {
@@ -97,6 +112,7 @@ export default class MentatPlugin extends Plugin {
     this.runController = new RunController(new RunStore(platform), this.eventBus, this.chatManager,
       (prompt, context) => this.chatOrchestrator.sendMessage(prompt, { context, enableSkills: context.metadata?.enableSkills as boolean | undefined }), this.observer);
     await this.runController.initialize();
+    this.runAccess = createRunAccess(this.runController);
     if (this.runController.store.warnings.length) {
       this.observer.event('storage:recovery:warning', { component: 'storage', level: 'warn', attributes: { warnings: this.runController.store.warnings } });
       new Notice('部分运行记录损坏，自动执行已暂停；请打开运行检查器查看。');
@@ -112,6 +128,7 @@ export default class MentatPlugin extends Plugin {
       this.chatOrchestrator.getSkillExecutor(),
       this.settings,
       this.eventBus,
+      () => ({ skillRegistry:this.chatOrchestrator.getSkillRegistry(), skillExecutor:this.chatOrchestrator.getSkillExecutor() }),
     );
     this.extensionManager.loadAll();
 
@@ -121,7 +138,7 @@ export default class MentatPlugin extends Plugin {
     // Register chat view
     this.registerView(
       CHAT_VIEW_TYPE,
-      (leaf) => new ChatView(leaf, this, this.draftStore)
+      (leaf) => new ChatView(leaf, this, this.draftStore, this.runAccess)
     );
 
     // Add settings tab
@@ -143,6 +160,8 @@ export default class MentatPlugin extends Plugin {
     void (async () => {
       try { await this.runController?.dispose(); }
       catch (error) { this.observer?.error('plugin:shutdown:failed', error, { component: 'plugin' }); }
+      try { this.extensionManager?.unloadAll(); }
+      catch (error) { this.observer?.error('extensions:shutdown:failed', error, { component: 'plugin' }); }
       await this.draftStore?.flush();
       await this.observer?.store.drain();
     })();
@@ -338,45 +357,55 @@ Avg chunks/file: ${(stats.totalChunks / Math.max(stats.totalFiles, 1)).toFixed(1
     }
     this.prevTheme = this.settings.chatTheme || 'bubble';
     this.prevPreset = this.settings.terminalPreset || 'green';
+    this.savedSettings = structuredClone(this.settings);
   }
 
   async saveSettings() {
-    await this.saveData(this.settings);
-
-    // Refresh AI Router when settings change
-    if (this.aiRouter) {
-      this.aiRouter.refresh(this.settings);
-    }
-
-    // Re-create default agent if provider was just configured (no restart needed)
-    if (this.chatOrchestrator) {
-      await this.chatOrchestrator.refreshProvider();
-
-      // Refresh Skill Invocation Context
-      const skillContext = this.chatOrchestrator.getSkillInvocationContext();
-      if (skillContext) {
-        skillContext.setMode(this.settings.skillInvocationMode || 'auto');
-      }
-    }
-
-    // Notify ChatView of theme/preset change (only if actually changed)
-    const newTheme = this.settings.chatTheme || 'bubble';
-    const newPreset = this.settings.terminalPreset || 'green';
-
-    if (newTheme !== this.prevTheme || newPreset !== this.prevPreset) {
-      const chatLeaf = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0];
-      if (chatLeaf) {
-        const chatView = chatLeaf.view as ChatView;
-        if (chatView) {
-          void chatView.switchTheme(newTheme);
-          if (newTheme === 'terminal') {
-            chatView.updateTerminalPreset(newPreset);
+    const requested = structuredClone(this.settings);
+    const write = (this.settingsWrite || Promise.resolve()).catch(() => undefined).then(async () => {
+      const previous = this.savedSettings || requested;
+      const changesExecution = executionSettings(previous) !== executionSettings(requested);
+      const changesMCP = JSON.stringify([previous.mcpServers,previous.mcpTimeout,previous.mcpRetryAttempts])
+        !== JSON.stringify([requested.mcpServers,requested.mcpTimeout,requested.mcpRetryAttempts]);
+      let prepared: { commit(): void; rollback(): void } | undefined;
+      let attemptedWrite = false;
+      try {
+        if (changesExecution && this.runController?.hasUnsettledWork()) throw new Error('当前还有未结束或未确认的运行，请先处理后再修改执行配置。');
+        const router = changesExecution ? this.aiRouter?.prepare(requested) : undefined;
+        if (router && this.chatOrchestrator) prepared = await this.chatOrchestrator.prepareProviderRefresh(router,requested);
+        if (changesExecution && this.runController?.hasUnsettledWork()) throw new Error('运行状态已变化，配置未应用；请处理当前任务后重试。');
+        attemptedWrite = true;
+        await this.saveData(requested);
+        // Commit synchronously after persistence; running tasks never observe a half-replaced graph.
+        prepared?.commit();
+        if (router) this.aiRouter = router;
+        replaceSettings(this.settings,requested);
+        this.savedSettings = structuredClone(requested);
+      } catch (error) {
+        prepared?.rollback();
+        replaceSettings(this.settings,previous);
+        if (attemptedWrite) {
+          try { await this.saveData(previous); }
+          catch (restoreError) {
+            this.observer?.error('settings:rollback:failed',restoreError,{component:'settings'});
+            new Notice('配置写入及恢复失败，内存已保留原配置；请检查磁盘配置后再重启。');
           }
         }
+        new Notice(`配置未应用：${error instanceof Error ? error.message : String(error)}`);
+        throw error;
       }
-      this.prevTheme = newTheme;
-      this.prevPreset = newPreset;
-    }
+
+      if (changesMCP) new Notice('MCP连接配置已保存，重载插件后生效；当前连接暂保持原配置。');
+      const newTheme = requested.chatTheme || 'bubble', newPreset = requested.terminalPreset || 'green';
+      if (newTheme !== this.prevTheme || newPreset !== this.prevPreset) {
+        const chatView = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0]?.view as ChatView | undefined;
+        await chatView?.switchTheme(newTheme);
+        if (newTheme === 'terminal') chatView?.updateTerminalPreset(newPreset);
+        this.prevTheme = newTheme; this.prevPreset = newPreset;
+      }
+    });
+    this.settingsWrite = write;
+    await write;
   }
 
   async activateChatView(): Promise<void> {

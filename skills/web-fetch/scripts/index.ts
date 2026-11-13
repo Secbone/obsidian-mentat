@@ -316,7 +316,7 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
     const errors: string[] = [];
 
     // Get browserless API key from settings
-    const browserlessApiKey = context.plugin.settings.browserlessApiKey || '';
+    const browserlessApiKey = (context.settings ?? context.plugin.settings).browserlessApiKey || '';
 
     if (strategy === 'jina') {
       result = await fetchWithJina(input.url, signal);

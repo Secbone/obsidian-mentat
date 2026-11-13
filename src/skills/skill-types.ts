@@ -1,4 +1,5 @@
 import type { RunRuntime, OutcomeKind } from '../runtime/types';
+import type { MentatSettings } from '../settings/settings';
 // Core types for Skill system
 
 import { ZodTypeAny } from 'zod';
@@ -119,6 +120,8 @@ export interface ToolCall {
  * Skill execution context - provides access to plugin resources
  */
 export interface SkillContext {
+  /** Committed settings bound to this execution graph, isolated from editable UI settings. */
+  settings?: Readonly<MentatSettings>;
   runtime?: RunRuntime;
   operationId?: string;
   abortSignal?: AbortSignal;

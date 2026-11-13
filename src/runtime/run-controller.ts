@@ -65,6 +65,13 @@ export class RunController {
   }
   get(id: string): RunRecord | undefined { return this.records.get(id); }
   getContext(id: string): AgentContext | undefined { return this.active.get(id)?.context; }
+  hasUnsettledWork(): boolean {
+    return !!(this.active.size || this.inFlight.size || this.pendingIngress.size) || [...this.records.values()].some(record =>
+      ['running','waiting_for_user','waiting_for_approval','interrupted'].includes(record.status)
+      || Object.values(record.operations).some(operation => operation.status === 'unknown' || operation.status === 'running')
+      || Object.values(record.interactions).some(interaction => !interaction.outcome)
+      || record.status !== 'cancelled' && record.instructions?.some(instruction => instruction.status === 'queued'));
+  }
   private notify(record: RunRecord): void {
     this.bus.emit({ type: 'run:changed', sessionId: record.sessionId, runId: record.id, agentId: record.agentId, status: record.status, error: record.error });
   }

@@ -86,12 +86,12 @@ export class SkillLoader {
   /**
    * Load all skills from the skills directory
    */
-  async loadAllSkills(context: SkillContext): Promise<AnySkillDefinition[]> {
+  async loadAllSkills(context: SkillContext, options: { strict?: boolean } = {}): Promise<AnySkillDefinition[]> {
     const skills: AnySkillDefinition[] = [];
 
     try {
       // Get skill directories
-      const skillDirs = await this.scanSkillDirectories();
+      const skillDirs = await this.scanSkillDirectories(!!options.strict);
 
       console.log(`[SkillLoader] Found ${skillDirs.length} skill directories:`, skillDirs);
 
@@ -99,12 +99,14 @@ export class SkillLoader {
       for (const skillDir of skillDirs) {
         try {
           const skill = await this.loadSkill(skillDir, context);
+          if (!skill && options.strict) throw new Error(`Cannot load skill: ${skillDir}`);
           if (skill) {
             skills.push(skill);
             console.log(`[SkillLoader] Loaded skill: ${skill.name}`);
           }
         } catch (error) {
           console.error(`[SkillLoader] Failed to load skill from ${skillDir}:`, error);
+          if (options.strict) throw error;
         }
       }
 
@@ -112,6 +114,7 @@ export class SkillLoader {
       return skills;
     } catch (error) {
       console.error('[SkillLoader] Error loading skills:', error);
+      if (options.strict) throw error;
       return [];
     }
   }
@@ -119,12 +122,13 @@ export class SkillLoader {
   /**
    * Scan skills directory for skill subdirectories
    */
-  private async scanSkillDirectories(): Promise<string[]> {
+  private async scanSkillDirectories(strict = false): Promise<string[]> {
     const adapter = this.app.vault.adapter;
 
     try {
       const skillsPath = this.skillsBasePath;
       if (!(await adapter.exists(skillsPath))) {
+        if (strict) throw new Error(`Skills directory not found: ${skillsPath}`);
         console.warn(`[SkillLoader] Skills directory not found: ${skillsPath}`);
         return [];
       }
@@ -140,6 +144,7 @@ export class SkillLoader {
       return skillDirs;
     } catch (error) {
       console.error('[SkillLoader] Error scanning skills directory:', error);
+      if (strict) throw error;
       return [];
     }
   }

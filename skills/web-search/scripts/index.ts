@@ -282,7 +282,7 @@ async function execute(input: Input, context: SkillContext): Promise<SkillResult
     }
 
     // Get Brave API key from settings
-    const braveApiKey = context.plugin.settings.braveSearchApiKey || '';
+    const braveApiKey = (context.settings ?? context.plugin.settings).braveSearchApiKey || '';
 
     // Perform search: Brave if API key available, otherwise DuckDuckGo
     let result;

@@ -21,6 +21,7 @@ import { ChatPresenter, projectRunControls } from '../chat-cards/presenter';
 import type { CardAction, ChatCard, ChatViewState } from '../chat-cards/types';
 import { RunInspectorModal } from '../run-inspector-modal';
 import type { DraftStore } from '../../storage/draft-store';
+import type { RunAccess } from '../../contracts/run-access';
 
 export const CHAT_VIEW_TYPE = 'mentat-chat';
 
@@ -43,7 +44,7 @@ export class ChatView extends ItemView {
   private notice?: ChatCard;
   private presenter = new ChatPresenter();
 
-  constructor(leaf: WorkspaceLeaf, plugin: MentatPlugin, private drafts: DraftStore = plugin.draftStore) {
+  constructor(leaf: WorkspaceLeaf, plugin: MentatPlugin, private drafts: DraftStore, private runs: RunAccess) {
     super(leaf); this.plugin = plugin;
     this.chatManager = plugin.chatManager || new ChatManager(plugin);
     this.messageRenderer = new MessageRenderer(); this.chatOrchestrator = plugin.chatOrchestrator;
@@ -102,11 +103,11 @@ export class ChatView extends ItemView {
 
   private currentState(): ChatViewState {
     const sessionId = this.chatManager.getSessionInfo().sessionId;
-    const records = this.plugin.runController?.list(sessionId) || [], latest = records[0];
+    const records = this.runs.list(sessionId), latest = records[0];
     this.presenter ||= new ChatPresenter();
     const state = this.presenter.project({sessionId,history:this.history || [],records,
-      displayMessages:latest ? this.plugin.runController.getDisplayMessages(latest.id):undefined,
-      live:latest ? this.plugin.runController.getLiveState(latest.id):undefined,
+      displayMessages:latest ? this.runs.getDisplayMessages(latest.id):undefined,
+      live:latest ? this.runs.getLiveState(latest.id):undefined,
       secrets:[...(this.plugin.settings.aiProviders || []).map(p => p.apiKey || ''),this.plugin.settings.braveSearchApiKey || '',this.plugin.settings.browserlessApiKey || '']});
     if (this.notice) state.cards.push(this.notice);
     if (this.sending) { state.inputMode = 'blocked'; state.label = '正在提交任务…'; }
@@ -117,7 +118,7 @@ export class ChatView extends ItemView {
     this.theme.render(this.currentState()); this.updateInputInfoBar();
   }
   private handleRuntimeEvent(event: AgentEvent): void {
-    const latest = this.plugin.runController?.list(this.chatManager.getSessionInfo().sessionId)[0];
+    const latest = this.runs.list(this.chatManager.getSessionInfo().sessionId)[0];
     if (event.sessionId !== this.chatManager.getSessionInfo().sessionId || event.runId !== latest?.id || event.agentId !== 'default-chat-agent') return;
     if (this.closed || this.renderTimer) return;
     this.renderTimer = setTimeout(() => { this.renderTimer = undefined; this.render(); },event.type === 'message:update' ? 100:0);
@@ -230,7 +231,7 @@ export class ChatView extends ItemView {
     const handler = this.inputHandler;
     this.sending = true; this.updateInputInfoBar();
     try {
-      if (!await this.plugin.runController.steer(state.runId,text)) throw new Error('当前任务已结束，指令未发送；草稿已保留。');
+      if (!await this.runs.steer(state.runId,text)) throw new Error('当前任务已结束，指令未发送；草稿已保留。');
       if (this.inputHandler === handler && handler.getRawTextContent().trim() === text) handler.clearInput();
       this.notice = {id:'ui-notice',kind:'system',title:'补充指令已排队',text:'将在下一个执行边界处理；已开始的操作不会被改写。',timestamp:Date.now()};
     } catch (error) { this.showError(error); }
@@ -250,7 +251,7 @@ export class ChatView extends ItemView {
       this.renderDocumentList();
       const messages = await this.chatManager.getHistory();
       const provider = await this.plugin.aiRouter?.getProvider(TaskType.CHAT);
-      await this.plugin.runController.start(text,{sessionId:this.chatManager.getSessionInfo().sessionId,messages,
+      await this.runs.start(text,{sessionId:this.chatManager.getSessionInfo().sessionId,messages,
         maxTurns:this.plugin.settings.maxTurns || 20,enableSkills:this.plugin.settings.skillsEnabled,providerId:provider?.id});
       if (this.inputHandler.getRawTextContent() === text) this.inputHandler.clearInput();
       this.history = await this.chatManager.getHistory();
@@ -276,7 +277,7 @@ export class ChatView extends ItemView {
   }
   private handleCancel(): void {
     const id = this.currentState().runId;
-    if (id) void this.plugin.runController.cancel(id).catch(error => this.showError(error));
+    if (id) void this.runs.cancel(id).catch(error => this.showError(error));
   }
   private async handleClear(): Promise<void> {
     if (this.currentState().busy) return;
@@ -285,7 +286,7 @@ export class ChatView extends ItemView {
     await this.chatManager.clearHistory(); this.inputHandler?.clearInput(); await this.refreshRuntime();
   }
   private async handleCardAction(card: ChatCard, action: CardAction, answer?: string): Promise<void> {
-    const controller = this.plugin.runController;
+    const controller = this.runs;
     try {
       if (action === 'open' && card.path) { await this.app.workspace.openLinkText(card.path,'',true); return; }
       if (!card.runId) return;
@@ -301,16 +302,16 @@ export class ChatView extends ItemView {
   private reconcile(record: RunRecord, operationId: string): void {
     new UserInputModal(this.app,'核对实际执行结果','请检查实际文件或外部操作，避免重复产生副作用。',['确认未执行，重新申请执行','确认已执行，填写结果'],undefined,true,result => {
       if (result.cancelled) return;
-      if (result.answer.startsWith('确认未执行')) void this.plugin.runController.reconcile(record.id,operationId,null).catch(error => this.showError(error));
+      if (result.answer.startsWith('确认未执行')) void this.runs.reconcile(record.id,operationId,null).catch(error => this.showError(error));
       else new UserInputModal(this.app,'填写已核验的实际结果','此结果将作为原操作结果，不会再次执行。',undefined,undefined,true,verified => {
-        if (!verified.cancelled) void this.plugin.runController.reconcile(record.id,operationId,{success:true,outcome:'success',data:{verifiedByUser:true,result:verified.answer}}).catch(error => this.showError(error));
+        if (!verified.cancelled) void this.runs.reconcile(record.id,operationId,{success:true,outcome:'success',data:{verifiedByUser:true,result:verified.answer}}).catch(error => this.showError(error));
       }).open();
     }).open();
   }
   private inputMode(): ChatViewState['inputMode'] {
     if (this.sending) return 'blocked';
-    const latest = this.plugin.runController?.list(this.chatManager.getSessionInfo().sessionId)[0];
-    return projectRunControls(latest,latest ? this.plugin.runController.getLiveState(latest.id):undefined).inputMode;
+    const latest = this.runs.list(this.chatManager.getSessionInfo().sessionId)[0];
+    return projectRunControls(latest,latest ? this.runs.getLiveState(latest.id):undefined).inputMode;
   }
   private updateInputInfoBar(): void {
     this.theme.updateInputState({mode:this.inputMode(),charCount:this.inputHandler?.getRawTextContent().length || 0,

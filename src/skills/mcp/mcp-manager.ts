@@ -28,14 +28,14 @@ export class MCPManager {
   async removeServer(serverId: string): Promise<void> {
     const client = this.clients.get(serverId);
     if (client) {
+      const skills = client.toSkillDefinitions();
       await client.disconnect();
       this.clients.delete(serverId);
 
       // Unregister skills from this server
       if (this.skillRegistry) {
-        const skills = client.toSkillDefinitions();
         skills.forEach(skill => {
-          this.skillRegistry!.unregister('mcp', skill.name);
+          this.skillRegistry!.unregister('mcp', `${serverId}:${skill.name}`);
         });
       }
     }
@@ -90,11 +90,11 @@ export class MCPManager {
   async disconnect(serverId: string): Promise<void> {
     const client = this.clients.get(serverId);
     if (client) {
+      const skills = client.toSkillDefinitions();
       await client.disconnect();
 
       // Unregister skills
       if (this.skillRegistry) {
-        const skills = client.toSkillDefinitions();
         skills.forEach((skill: SkillDefinition) => {
           this.skillRegistry!.unregister('mcp', `${serverId}:${skill.name}`);
         });
@@ -262,6 +262,14 @@ export class MCPManager {
 
     Object.assign(config, updates);
     console.log(`[MCPManager] Updated config for ${serverId}`);
+  }
+
+  /** Reuse connected clients while preparing a replacement registry; do not restart external servers. */
+  copySkillsTo(registry: SkillRegistry): void {
+    for (const [serverId, client] of this.clients) {
+      if (!client.isConnected()) continue;
+      registry.registerBulk(client.toSkillDefinitions().map(skill => ({ ...skill, name: `${serverId}:${skill.name}` })));
+    }
   }
 
   /**

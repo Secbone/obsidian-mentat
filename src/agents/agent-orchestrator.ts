@@ -114,7 +114,7 @@ export class AgentOrchestrator {
           return {
             id: task.id,
             context: taskContextWithSignal,
-            execute: agent.execute(task.prompt, taskContextWithSignal)
+            execute: this.agentManager.execute(task.agentId, task.prompt, taskContextWithSignal)
           };
         });
 
@@ -202,7 +202,7 @@ export class AgentOrchestrator {
         throw new Error(`Agent not found: ${agentId}`);
       }
 
-      const response = await agent.execute(currentPrompt, currentContext);
+      const response = await this.agentManager.execute(agentId, currentPrompt, currentContext);
       yield { type: 'agent:end', messages: response.messages, activeAgentId: agentId, sessionId: currentContext.sessionId, runId: currentContext.runId, agentId };
 
       currentContext = {

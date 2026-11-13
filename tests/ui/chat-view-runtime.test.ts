@@ -14,6 +14,7 @@ import { EventBus } from '../../src/extensions/event-bus';
 import { MemoryPlatformAdapter } from '../utils/memory-platform-adapter';
 import type { AgentContext } from '../../src/agents/agent-types';
 import { FileDraftStore } from '../../src/storage/draft-store';
+import { createRunAccess } from '../../src/runtime/run-access';
 
 beforeAll(()=>{HTMLElement.prototype.scrollTo=vi.fn();});
 const cleanups:Array<()=>Promise<void>>=[];
@@ -27,7 +28,7 @@ async function fixture(execute:(prompt:string,context:AgentContext)=>Promise<voi
   const manager=new ChatManager(plugin);plugin.chatManager=manager; await manager.getHistory();
   const runtime=new RunController(new RunStore(platform),bus,manager,execute);plugin.runController=runtime;await runtime.initialize();
   cleanups.push(()=>runtime.dispose());
-  const open=async()=>{const view=new ChatView({app} as any,plugin);document.body.appendChild(view.containerEl);await view.onOpen();cleanups.unshift(()=>view.onClose());return view;};
+  const open=async()=>{const view=new ChatView({app} as any,plugin,plugin.draftStore,createRunAccess(runtime));document.body.appendChild(view.containerEl);await view.onOpen();cleanups.unshift(()=>view.onClose());return view;};
   const start=()=>runtime.start('question',{sessionId:manager.getSessionInfo().sessionId,messages:[],maxTurns:20,enableSkills:true});
   return {plugin,runtime,manager,bus,open,start};
 }

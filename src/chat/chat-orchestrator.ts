@@ -1,7 +1,7 @@
 import { RunSuspended, RunBlocked } from '../runtime/types';
 // ChatOrchestrator - Orchestrates chat conversations with agent and skill support
 
-import { TaskType, ChatMessage } from '../types';
+import { TaskType, ChatMessage, AIProvider } from '../types';
 import { Notice } from 'obsidian';
 import { SkillRegistry } from '../skills/core/skill-registry';
 import { parseJson } from '../utils/json-healer';
@@ -26,6 +26,16 @@ import { MentatSettings } from '../settings/settings';
 import { App } from 'obsidian';
 import { z } from 'zod';
 import { errorDetails } from '../utils/execution';
+
+export interface ChatOrchestratorOptions {
+  canReconfigure?: () => boolean;
+  copyExtensionSkillsTo?: (registry: SkillRegistry) => void | (() => void);
+}
+
+export interface PreparedChatConfiguration {
+  commit(): void;
+  rollback(): void;
+}
 
 export interface ChatQueryOptions {
   enableSkills?: boolean;
@@ -64,6 +74,10 @@ export class ChatOrchestrator {
   private mcpManager: MCPManager;
   private skillCache: SkillLoadCache;
   private promptLoader: PromptLoader;
+  private reconfiguring = false;
+  private activeQueries = 0;
+  private disposed = false;
+  private preparingConfiguration = false;
 
   constructor(
     platform: IPlatformAdapter,
@@ -71,9 +85,10 @@ export class ChatOrchestrator {
     aiRouter: AIRouter,
     indexManager: IndexManager,
     eventBus?: EventBus,
+    private options: ChatOrchestratorOptions = {},
   ) {
     this.platform = platform;
-    this.settings = settings;
+    this.settings = structuredClone(settings);
     this.aiRouter = aiRouter;
     this.indexManager = indexManager;
     this.eventBus = eventBus;
@@ -111,7 +126,8 @@ export class ChatOrchestrator {
       workspace: app?.workspace,
       indexManager: indexManager,
       plugin: this.getPlugin(),
-      readTracker: this.readTracker
+      readTracker: this.readTracker,
+      settings: this.settings,
     };
 
     this.diagnosticsLogger = new VaultDiagnosticsLogger(platform.getVault(), () => [
@@ -129,6 +145,7 @@ export class ChatOrchestrator {
   }
 
   dispose(): void {
+    this.disposed = true;
     void this.mcpManager?.disconnectAll();
     this.readTracker.clear();
   }
@@ -146,7 +163,8 @@ export class ChatOrchestrator {
       workspace: app?.workspace,
       indexManager: this.indexManager,
       plugin: this.getPlugin(),
-      readTracker: this.readTracker
+      readTracker: this.readTracker,
+      settings: this.settings,
     };
 
     // Load all skills from skills directory
@@ -172,8 +190,8 @@ export class ChatOrchestrator {
   /**
    * Create default chat agent
    */
-  private async createDefaultAgent(): Promise<void> {
-    const provider = await this.aiRouter.getProvider(TaskType.CHAT);
+  private async createDefaultAgent(provider: AIProvider | null = null): Promise<void> {
+    provider ||= await this.aiRouter.getProvider(TaskType.CHAT);
     if (!provider) {
       console.warn('[ChatOrchestrator] No AI provider configured - chat features will be unavailable until you configure one in settings.');
       return;
@@ -205,21 +223,73 @@ export class ChatOrchestrator {
   }
 
   /**
-   * Refresh provider after settings change — re-create default agent if a provider is now configured.
-   * Called from saveSettings() so no restart is required.
+   * Refresh the entire agent graph against the current router at an idle boundary.
+   * Settings persistence uses prepareProviderRefresh to commit both changes together.
    */
   async refreshProvider(): Promise<void> {
-    try {
-      const provider = await this.aiRouter.getProvider(TaskType.CHAT);
-      if (!provider) return;
+    await this.reconfigure();
+  }
 
-      if (this.defaultAgent) {
-        this.agentManager.unregisterAgent('default-chat-agent');
+  private assertReconfigurable(): void {
+    if (this.disposed) throw new Error('聊天服务已停止');
+    if (this.activeQueries || this.agentManager.hasActiveExecutions() || this.options.canReconfigure?.() === false) {
+      throw new Error('存在未结束的运行，请完成、核对或停止后再重新配置');
+    }
+  }
+
+  private async reconfigure(): Promise<void> {
+    const prepared = await this.prepareProviderRefresh(this.aiRouter);
+    try { prepared.commit(); }
+    catch (error) { prepared.rollback(); throw error; }
+  }
+
+  /** The caller may persist settings between prepare and the synchronous commit. */
+  async prepareProviderRefresh(router: AIRouter, settings: MentatSettings = this.settings): Promise<PreparedChatConfiguration> {
+    if (this.reconfiguring) throw new Error('正在重新配置聊天服务，请稍后再试');
+    this.assertReconfigurable();
+    this.reconfiguring = true;
+    try {
+      // Build off to the side; no live registry or agent is mutated before validation succeeds.
+      const candidate = new ChatOrchestrator(this.platform, settings, router, this.indexManager, this.eventBus, this.options);
+      candidate.preparingConfiguration = true;
+      await candidate.loadAllSkills(candidate.skillExecutor.getContext(), true);
+      this.mcpManager.copySkillsTo(candidate.skillRegistry);
+      const validateExtensions = this.options.copyExtensionSkillsTo?.(candidate.skillRegistry);
+      const provider = await router.getProvider(TaskType.CHAT);
+      if (provider) {
+        await candidate.initializeSubagents(provider, true);
+        await candidate.createDefaultAgent(provider);
       }
-      await this.createDefaultAgent();
-    } catch (error: unknown) {
-      console.warn('[ChatOrchestrator] refreshProvider failed:', 
-        error instanceof Error ? error.message : String(error));
+      this.assertReconfigurable();
+      let settled = false;
+      return {
+        commit: () => {
+          if (settled) throw new Error('候选聊天配置已提交或回滚');
+          this.assertReconfigurable();
+          validateExtensions?.();
+          // Keep externally held AgentManager references valid, including delegation closures.
+          this.agentManager.replaceAgents(candidate.agentManager.listAgents());
+          candidate.agentManager = this.agentManager;
+          this.aiRouter = router;
+          this.settings = candidate.settings;
+          this.defaultAgent = candidate.defaultAgent;
+          this.skillRegistry = candidate.skillRegistry;
+          this.skillExecutor = candidate.skillExecutor;
+          this.skillInvocationContext = candidate.skillInvocationContext;
+          this.skillCache = candidate.skillCache;
+          this.promptLoader = candidate.promptLoader;
+          this.readTracker = candidate.readTracker;
+          this.mcpManager.setSkillRegistry(this.skillRegistry);
+          settled = true; this.reconfiguring = false;
+        },
+        rollback: () => {
+          if (settled) return;
+          settled = true; this.reconfiguring = false;
+        },
+      };
+    } catch (error) {
+      this.reconfiguring = false;
+      throw error;
     }
   }
 
@@ -234,42 +304,48 @@ export class ChatOrchestrator {
     userQuery: string,
     options: ChatQueryOptions = {}
   ): Promise<void> {
-    const pinnedProvider = options.context?.metadata?.providerId;
-    if (pinnedProvider && (await this.aiRouter.getProvider(TaskType.CHAT))?.id !== pinnedProvider) throw new Error('模型路由已变化，请恢复原模型配置后继续该运行。');
-    if (!this.defaultAgent) {
-      throw new Error('请先在设置中配置 AI 服务商 (API Key)。No AI provider configured. Please add one in Mentat settings.');
-    }
-
-    const messages = options.context?.messages || options.contextMessages || [];
-    
-    if (options.context?.metadata?.resume) this.readTracker.restore(messages);
-    // Find if we already have a session context in the history
-    const firstUserMsg = messages.find(m => m.role === 'user');
-    let sessionContextPayload = firstUserMsg?.metadata?.sessionContextPayload;
-
-    if (!sessionContextPayload) {
-      sessionContextPayload = await this.buildVaultSessionContextPayload();
-    }
-
-    const context: AgentContext = options.context || {
-      messages: messages,
-      sessionId: Date.now().toString(),
-      metadata: {
-        maxTurns: options.maxTurns,
-        sessionContextPayload
-      },
-    };
-    context.metadata = { ...context.metadata, sessionContextPayload, enableSkills: options.enableSkills };
-
+    if (this.disposed || this.reconfiguring) throw new Error('聊天服务正在维护，请稍后重试');
+    this.activeQueries++;
     try {
-      await this.agentManager.execute(
-        this.defaultAgent.getId(),
-        userQuery,
-        context
-      );
-    } catch (error) {
-      this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] sendMessage failed:' } });
-      throw error;
+      const pinnedProvider = options.context?.metadata?.providerId;
+      if (pinnedProvider && (await this.aiRouter.getProvider(TaskType.CHAT))?.id !== pinnedProvider) throw new Error('模型路由已变化，请恢复原模型配置后继续该运行。');
+      if (!this.defaultAgent) {
+        throw new Error('请先在设置中配置 AI 服务商 (API Key)。No AI provider configured. Please add one in Mentat settings.');
+      }
+
+      const messages = options.context?.messages || options.contextMessages || [];
+    
+      if (options.context?.metadata?.resume) this.readTracker.restore(messages);
+      // Find if we already have a session context in the history
+      const firstUserMsg = messages.find(m => m.role === 'user');
+      let sessionContextPayload = firstUserMsg?.metadata?.sessionContextPayload;
+
+      if (!sessionContextPayload) {
+        sessionContextPayload = await this.buildVaultSessionContextPayload();
+      }
+
+      const context: AgentContext = options.context || {
+        messages: messages,
+        sessionId: Date.now().toString(),
+        metadata: {
+          maxTurns: options.maxTurns,
+          sessionContextPayload
+        },
+      };
+      context.metadata = { ...context.metadata, sessionContextPayload, enableSkills: options.enableSkills };
+
+      try {
+        await this.agentManager.execute(
+          this.defaultAgent.getId(),
+          userQuery,
+          context
+        );
+      } catch (error) {
+        this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] sendMessage failed:' } });
+        throw error;
+      }
+    } finally {
+      this.activeQueries--;
     }
   }
 
@@ -321,11 +397,15 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
   /**
    * Load all skills from skills directory
    */
-  private async loadAllSkills(context: SkillContext): Promise<void> {
+  private async loadAllSkills(context: SkillContext, strict = false): Promise<void> {
     try {
-      const allSkills = await this.skillLoader.loadAllSkills(context);
+      const allSkills = await this.skillLoader.loadAllSkills(context, { strict });
 
       // Separate executable and documentation skills
+      if (strict) {
+        const ids = allSkills.map(skill => `${skill.namespace}:${skill.name}`);
+        if (new Set(ids).size !== ids.length) throw new Error('Duplicate skill ID in candidate catalog');
+      }
       const executableSkills = allSkills.filter(isExecutableSkill);
       const docSkills = allSkills.filter(isDocumentationSkill);
 
@@ -338,6 +418,7 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
       console.log(`[ChatOrchestrator] Loaded ${allSkills.length} skills from skills directory (${executableSkills.length} executable, ${docSkills.length} documentation)`);
     } catch (error) {
       this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', error, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Failed to load skills:' } });
+      if (strict) throw error;
     }
   }
 
@@ -345,26 +426,7 @@ ${dynamicVaultMap}${hasCustomMap ? `\n\nUser-Defined Custom Guidelines (vault-ma
    * Reload all skills (useful for development/debugging)
    */
   async reloadSkills(): Promise<void> {
-    const app = this.getApp();
-    
-    const skillContext: SkillContext = {
-      vault: app?.vault,
-      metadataCache: app?.metadataCache,
-      workspace: app?.workspace,
-      indexManager: this.indexManager,
-      plugin: this.getPlugin(),
-      readTracker: this.readTracker
-    };
-
-    // Clear existing skills
-    this.skillRegistry = new SkillRegistry();
-    this.skillExecutor = new SkillExecutor(this.skillRegistry, skillContext, this.eventBus, this.diagnosticsLogger);
-
-    // Reload all skills
-    await this.loadAllSkills(skillContext);
-
-    // Recreate default agent with new skill registry
-    await this.createDefaultAgent();
+    await this.reconfigure();
   }
 
   /**
@@ -852,6 +914,8 @@ Return the finalized markdown content:`;
         return await this.platform.read(preferencesPath);
       }
 
+      if (this.preparingConfiguration) return this.settings.userSystemPromptPreferences || 'None';
+
       // 2. If config folder doesn't exist, create it recursively
       if (!(await this.platform.exists(configFolder))) {
         await this.platform.mkdir(configFolder);
@@ -884,8 +948,8 @@ Write your custom style instructions and preferences here. This file is dynamica
   /**
    * Scan and register system + custom user-defined subagents
    */
-  private async initializeSubagents(): Promise<void> {
-    const provider = await this.aiRouter.getProvider(TaskType.CHAT);
+  private async initializeSubagents(provider: AIProvider | null = null, strict = false): Promise<void> {
+    provider ||= await this.aiRouter.getProvider(TaskType.CHAT);
     if (!provider) {
       return;
     }
@@ -962,7 +1026,13 @@ OTHERWISE:
           if (filePath.endsWith('.json')) {
             try {
               const fileContent = await this.platform.read(filePath);
-              const customConfig = parseJson<AgentConfig>(fileContent);
+              const customConfig = z.object({
+                id: z.string().min(1), name: z.string().min(1), description: z.string().default(''),
+                systemPrompt: z.string().optional(), maxTurns: z.number().int().positive().optional(),
+                temperature: z.number().finite().optional(), enableSkills: z.boolean().optional(),
+                toolExecutionMode: z.enum(['sequential','parallel']).optional(), maxParallelTools: z.number().int().positive().optional(),
+              }).passthrough().parse(parseJson<AgentConfig>(fileContent));
+              if (!customConfig.id || !customConfig.name || this.agentManager.getAgent(customConfig.id) || customConfig.id === 'default-chat-agent') throw new Error(`Invalid or duplicate custom agent ID: ${customConfig.id}`);
               if (customConfig.id && customConfig.name) {
                 const customAgent = new BaseAgent(customConfig, provider, dependencies);
                 this.agentManager.registerAgent(customAgent);
@@ -970,15 +1040,20 @@ OTHERWISE:
               }
             } catch (err) {
               this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', err, { component: 'chat', attributes: { boundary: `[ChatOrchestrator] Failed to load custom agent config ${filePath}:` } });
+              if (strict) throw err;
             }
           }
         }
       }
     } catch (e) {
       this.platform?.getPlugin()?.observer?.error('chat:boundary:failed', e, { component: 'chat', attributes: { boundary: '[ChatOrchestrator] Error loading custom user agents:' } });
+      if (strict) throw e;
     }
 
     // 4. Register delegate_task skill
+    if (strict && ['obsidian:delegate_task','obsidian:spawn_subagent'].some(id => this.skillRegistry.get(id))) {
+      throw new Error('Candidate catalog conflicts with built-in delegation tools');
+    }
     const delegateTaskSkill: SkillDefinition<{ agentId: string; prompt: string }> = {
       name: 'delegate_task',
       namespace: 'obsidian',
@@ -1000,7 +1075,7 @@ OTHERWISE:
           // Execute agent to completion
           const child = options?.runtime && options.operationId ? options.runtime.child(options.operationId) : undefined;
           if (child?.messages.length) this.readTracker.restore(child.messages);
-          const response = await agent.execute(input.prompt, {
+          const response = await this.agentManager.execute(input.agentId, input.prompt, {
             messages: child?.messages || [], runtime: child?.runtime, onCheckpoint: child?.checkpoint,
             runId: options?.runtime?.runId,
             metadata: { resume: !!child?.messages.length },
@@ -1054,7 +1129,7 @@ OTHERWISE:
           
           const child = options?.runtime && options.operationId ? options.runtime.child(options.operationId) : undefined;
           if (child?.messages.length) this.readTracker.restore(child.messages);
-          const response = await tempAgent.execute(input.prompt, {
+          const response = await this.agentManager.execute(tempAgentId, input.prompt, {
             messages: child?.messages || [], runtime: child?.runtime, onCheckpoint: child?.checkpoint,
             runId: options?.runtime?.runId, metadata: { resume: !!child?.messages.length },
             sessionId: options?.runtime?.sessionId || `subagent-${Date.now()}`, abortSignal: options?.abortSignal,

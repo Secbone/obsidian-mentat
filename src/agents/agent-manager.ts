@@ -9,6 +9,18 @@ import { AgentContext, AgentResponse } from './agent-types';
 export class AgentManager {
   private agents: Map<string, BaseAgent> = new Map();
   private currentAgent: BaseAgent | null = null;
+  private activeExecutions = 0;
+
+  hasActiveExecutions(): boolean { return this.activeExecutions > 0; }
+
+  replaceAgents(agents: BaseAgent[]): void {
+    if (this.hasActiveExecutions()) throw new Error('Agents are still executing');
+    const replacement = new Map(agents.map(agent => [agent.getId(), agent]));
+    if (replacement.size !== agents.length) throw new Error('Duplicate agent ID');
+    const currentId = this.currentAgent?.getId();
+    this.agents = replacement;
+    this.currentAgent = currentId ? replacement.get(currentId) || null : null;
+  }
 
   /**
    * Register an agent
@@ -72,7 +84,7 @@ export class AgentManager {
     if (!this.currentAgent) {
       throw new Error('No current agent set');
     }
-    return this.currentAgent.execute(prompt, context);
+    return this.execute(this.currentAgent.getId(), prompt, context);
   }
 
   /**
@@ -87,6 +99,8 @@ export class AgentManager {
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`);
     }
-    return agent.execute(prompt, context);
+    this.activeExecutions++;
+    try { return await agent.execute(prompt, context); }
+    finally { this.activeExecutions--; }
   }
 }
