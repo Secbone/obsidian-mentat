@@ -24,7 +24,7 @@ export function resolveToolDisplayName(name: string, arguments_: unknown): strin
       const args = typeof arguments_ === 'string' ? parseJson<Record<string, unknown>>(arguments_) : arguments_;
       const skillName = (args as Record<string, unknown>)?.skill_name;
       if (skillName) return `${name}:${skillName}`;
-    } catch (_e) { /* keep original */ }
+    } catch { /* keep original */ }
   }
   return name;
 }

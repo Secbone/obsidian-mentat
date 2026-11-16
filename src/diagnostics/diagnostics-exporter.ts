@@ -444,7 +444,7 @@ export class DiagnosticsExporter {
         return entry;
       });
       return JSON.stringify(cleanArray, null, 2);
-    } catch (_e) {
+    } catch {
       return '[]';
     }
   }

@@ -35,7 +35,7 @@ function rewrite(content: string, source: string, from: string, to: string, io: 
         return (markdown ? encodeURI(updated).replace(/#/g, '%23') : updated) + fragment;
     };
     let fence: string | undefined;
-    return content.split(/(?<=\n)/).map(line => {
+    return (content.match(/[^\n]*\n|[^\n]+$/g) ?? []).map(line => {
         const marker = line.match(/^ {0,3}(`{3,}|~{3,})/);
         if (marker) {
             if (!fence)

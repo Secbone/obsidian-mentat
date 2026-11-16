@@ -313,7 +313,7 @@ export class Context {
           summary += `]`;
           return summary;
         }
-      } catch (_e) {
+      } catch {
         // Fall back to general text/html if JSON parsing fails
       }
     }
